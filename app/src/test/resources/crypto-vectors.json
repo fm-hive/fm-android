@@ -23,5 +23,13 @@
     "jwe_sha256": "31_K_5GA838458kBr4qDGcVFlM7u6qwLBewNcpKw4SI",
     "data_json": "{\"request\":\"policy\",\"data\":{\"pubkey\":\"AAECAw==\"}}",
     "data_sha256": "8zht8Jt8xOwzvA9i0IlyTedEqVGOp2IXJg0zOiAPyW8"
+  },
+  "keystore": {
+    "password": "test-password",
+    "seed": "5555555555555555555555555555555555555555555555555555555555555555",
+    "salt": "22222222222222222222222222222222",
+    "iv": "444444444444444444444444",
+    "iterations": 100000,
+    "encrypted_b64": "tUnGX7azWZMAns8r4ZEqq0Sh0o64iS024gUMH4eBpj59Okm+JkSMy7LYS2ECmw1S"
   }
 }

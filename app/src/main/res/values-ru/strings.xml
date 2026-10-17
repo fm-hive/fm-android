@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">FM Client</string>
+    <string name="networks_title">Сети</string>
+    <string name="networks_empty">Пока нет сетей. Добавьте сеть по ссылке-приглашению.</string>
+    <string name="add_network">Добавить сеть</string>
+    <string name="invite_url">Ссылка-приглашение</string>
+    <string name="fetch_policy">Продолжить</string>
+    <string name="policy_title">Политика сети</string>
+    <string name="display_name">Отображаемое имя</string>
+    <string name="password">Пароль</string>
+    <string name="password_confirm">Повторите пароль</string>
+    <string name="register">Принять и зарегистрироваться</string>
+    <string name="unlock_title">Разблокировать</string>
+    <string name="unlock">Разблокировать</string>
+    <string name="delete">Удалить</string>
+    <string name="active">Активна</string>
+    <string name="back">Назад</string>
+    <string name="error_password">Неверный пароль</string>
+    <string name="error_passwords_differ">Пароли не совпадают</string>
+    <string name="error_password_short">Пароль должен быть не короче 4 символов</string>
+</resources>

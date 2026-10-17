@@ -69,6 +69,29 @@ async function main() {
   clamped[31] &= 127
   clamped[31] |= 64
 
+  // ---- Keystore (fm-app keystore.js: PBKDF2-SHA256 100k + AES-GCM) ----
+  const ksPassword = 'test-password'
+  const ksSeed = seeded(0x55)
+  const ksSalt = seeded(0x22).slice(0, 16)
+  const ksIv = seeded(0x44).slice(0, 12)
+  const ksKeyMaterial = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(ksPassword),
+    'PBKDF2',
+    false,
+    ['deriveKey'],
+  )
+  const ksKey = await crypto.subtle.deriveKey(
+    { name: 'PBKDF2', salt: ksSalt, iterations: 100000, hash: 'SHA-256' },
+    ksKeyMaterial,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt'],
+  )
+  const ksEncrypted = new Uint8Array(
+    await crypto.subtle.encrypt({ name: 'AES-GCM', iv: ksIv }, ksKey, ksSeed),
+  )
+
   const vectors = {
     seed: hex(seed),
     public_key: hex(publicKey),
@@ -91,6 +114,14 @@ async function main() {
       jwe_sha256: jweSha256,
       data_json: dataJson,
       data_sha256: dataSha256,
+    },
+    keystore: {
+      password: ksPassword,
+      seed: hex(ksSeed),
+      salt: hex(ksSalt),
+      iv: hex(ksIv),
+      iterations: 100000,
+      encrypted_b64: Buffer.from(ksEncrypted).toString('base64'),
     },
   }
 

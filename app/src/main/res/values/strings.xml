@@ -1,4 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">FM Client</string>
+    <string name="networks_title">Networks</string>
+    <string name="networks_empty">No networks yet. Add one with an invite link.</string>
+    <string name="add_network">Add network</string>
+    <string name="invite_url">Invite URL</string>
+    <string name="fetch_policy">Continue</string>
+    <string name="policy_title">Network policy</string>
+    <string name="display_name">Display name</string>
+    <string name="password">Password</string>
+    <string name="password_confirm">Repeat password</string>
+    <string name="register">Accept and register</string>
+    <string name="unlock_title">Unlock</string>
+    <string name="unlock">Unlock</string>
+    <string name="delete">Delete</string>
+    <string name="active">Active</string>
+    <string name="back">Back</string>
+    <string name="error_password">Wrong password</string>
+    <string name="error_passwords_differ">Passwords do not match</string>
+    <string name="error_password_short">Password must be at least 4 characters</string>
 </resources>
