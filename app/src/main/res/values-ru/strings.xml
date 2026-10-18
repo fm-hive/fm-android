@@ -83,4 +83,12 @@
     <string name="refill_hint">Запросить у сети более старые сообщения этой конференции</string>
     <string name="refill_before">До даты (ГГГГ-ММ-ДД)</string>
     <string name="refill_send">Запросить</string>
+    <string name="create_echo">Создать локальную конференцию</string>
+    <string name="create_echo_name">Название</string>
+    <string name="create_echo_description">Описание</string>
+    <string name="create_echo_create">Создать</string>
+    <string name="excomm_title">Исключение узла</string>
+    <string name="excomm_target">Адрес узла</string>
+    <string name="excomm_reason">Причина</string>
+    <string name="excomm_submit">Предложить</string>
 </resources>

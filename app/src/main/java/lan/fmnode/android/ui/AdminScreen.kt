@@ -44,11 +44,19 @@ fun AdminScreen(
     mergeUrl: String,
     mergeStatus: String?,
     mergeError: UiError?,
+    excommTarget: String,
+    excommReason: String,
+    excommSending: Boolean,
+    excommStatus: String?,
+    excommError: UiError?,
     onBack: () -> Unit,
     onRefresh: () -> Unit,
     onMergeUrl: (String) -> Unit,
     onScanPeer: () -> Unit,
     onStartMerge: () -> Unit,
+    onExcommTarget: (String) -> Unit,
+    onExcommReason: (String) -> Unit,
+    onSubmitExcomm: () -> Unit,
 ) {
     Scaffold(
         topBar = {
@@ -100,6 +108,27 @@ fun AdminScreen(
             mergeError?.let {
                 Text(errorText(it), color = MaterialTheme.colorScheme.error)
             }
+
+            Spacer(Modifier.height(8.dp))
+            Text(stringResource(R.string.excomm_title), style = MaterialTheme.typography.titleMedium)
+            OutlinedTextField(
+                value = excommTarget,
+                onValueChange = onExcommTarget,
+                label = { Text(stringResource(R.string.excomm_target)) },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(
+                value = excommReason,
+                onValueChange = onExcommReason,
+                label = { Text(stringResource(R.string.excomm_reason)) },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Button(onClick = onSubmitExcomm, enabled = !excommSending && excommTarget.isNotBlank()) {
+                Text(stringResource(R.string.excomm_submit))
+            }
+            excommStatus?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
+            excommError?.let { Text(errorText(it), color = MaterialTheme.colorScheme.error) }
 
             Spacer(Modifier.height(8.dp))
             Text(stringResource(R.string.nodes_title), style = MaterialTheme.typography.titleMedium)

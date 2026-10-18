@@ -331,6 +331,7 @@ fun EchoBrowserScreen(
     echoes: List<EchoUi>,
     onBack: () -> Unit,
     onToggle: (String, Boolean) -> Unit,
+    onCreateLocal: () -> Unit,
 ) {
     Scaffold(
         topBar = {
@@ -340,6 +341,9 @@ fun EchoBrowserScreen(
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
                     }
+                },
+                actions = {
+                    TextButton(onClick = onCreateLocal) { Text(stringResource(R.string.create_echo)) }
                 },
             )
         },
@@ -531,6 +535,48 @@ fun RefillDialog(
             TextButton(onClick = onDismiss) {
                 Text(stringResource(R.string.cancel))
             }
+        },
+    )
+}
+
+@Composable
+fun CreateEchoDialog(
+    name: String,
+    description: String,
+    error: UiError?,
+    onName: (String) -> Unit,
+    onDescription: (String) -> Unit,
+    onCreate: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.create_echo)) },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = onName,
+                    label = { Text(stringResource(R.string.create_echo_name)) },
+                    singleLine = true,
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = description,
+                    onValueChange = onDescription,
+                    label = { Text(stringResource(R.string.create_echo_description)) },
+                )
+                error?.let {
+                    Spacer(Modifier.height(8.dp))
+                    Text(errorText(it), color = MaterialTheme.colorScheme.error)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onCreate) { Text(stringResource(R.string.create_echo_create)) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
         },
     )
 }

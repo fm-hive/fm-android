@@ -194,6 +194,15 @@ data class UiState(
     val adminMergeUrl: String = "",
     val adminMergeStatus: String? = null,
     val adminMergeError: UiError? = null,
+    val excommTarget: String = "",
+    val excommReason: String = "",
+    val excommSending: Boolean = false,
+    val excommStatus: String? = null,
+    val excommError: UiError? = null,
+    val createEchoDialog: Boolean = false,
+    val createEchoName: String = "",
+    val createEchoDescription: String = "",
+    val createEchoError: UiError? = null,
     val add: AddNetworkState = AddNetworkState(),
     val unlockError: UiError? = null,
     val syncError: UiError? = null,
@@ -968,6 +977,84 @@ class AppViewModel(
                 _state.update {
                     it.copy(adminLoading = false, adminMergeError = UiError.Failed(e.message ?: "Failed"))
                 }
+            }
+        }
+    }
+
+    fun setExcommTarget(value: String) =
+        _state.update { it.copy(excommTarget = value, excommError = null) }
+
+    fun setExcommReason(value: String) =
+        _state.update { it.copy(excommReason = value, excommError = null) }
+
+    fun submitExcommunicate() {
+        val opened = networkSession ?: return
+        val target = _state.value.excommTarget.trim()
+        val reason = _state.value.excommReason.trim()
+        if (target.isEmpty()) {
+            _state.update { it.copy(excommError = UiError.Failed("Target address is required")) }
+            return
+        }
+        viewModelScope.launch {
+            _state.update { it.copy(excommSending = true, excommError = null, excommStatus = null) }
+            try {
+                val data = buildJsonObject {
+                    put("echo", "Admin council")
+                    put("proto", "excommunicate")
+                    put("type", "poster")
+                    put("from", opened.profile.address)
+                    put("to", "all")
+                    put("protoAddress", target)
+                    put("message", reason)
+                    put("variants", kotlinx.serialization.json.buildJsonArray {
+                        add(JsonPrimitive("excommunicate"))
+                        add(JsonPrimitive("read-only"))
+                    })
+                    put("date", java.time.Instant.now().toString())
+                }.toString()
+                opened.postProtocol("Admin council", "excommunicate", data)
+                _state.update { it.copy(excommSending = false, excommStatus = "Proposal submitted") }
+                syncOnce(opened)
+            } catch (e: Exception) {
+                _state.update {
+                    it.copy(excommSending = false, excommError = UiError.Failed(e.message ?: "Failed"))
+                }
+            }
+        }
+    }
+
+    // ------------------------------------------------------- create local echo
+
+    fun openCreateEchoDialog() {
+        _state.update {
+            it.copy(createEchoDialog = true, createEchoName = "", createEchoDescription = "", createEchoError = null)
+        }
+    }
+
+    fun closeCreateEchoDialog() {
+        _state.update { it.copy(createEchoDialog = false) }
+    }
+
+    fun setCreateEchoName(value: String) =
+        _state.update { it.copy(createEchoName = value, createEchoError = null) }
+
+    fun setCreateEchoDescription(value: String) =
+        _state.update { it.copy(createEchoDescription = value, createEchoError = null) }
+
+    fun createLocalEcho() {
+        val opened = networkSession ?: return
+        val name = _state.value.createEchoName.trim()
+        if (name.isEmpty()) {
+            _state.update { it.copy(createEchoError = UiError.Failed("Name is required")) }
+            return
+        }
+        viewModelScope.launch {
+            try {
+                opened.createLocalEcho(name, _state.value.createEchoDescription.trim())
+                runCatching { opened.refreshEchoes() }
+                _state.update { it.copy(createEchoDialog = false) }
+            } catch (e: Exception) {
+                _state.update { it.copy(createEchoError = UiError.Failed(e.message ?: "Failed")) }
             }
         }
     }

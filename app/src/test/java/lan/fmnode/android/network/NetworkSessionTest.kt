@@ -458,6 +458,15 @@ class NetworkSessionTest {
     }
 
     @Test
+    fun `createLocalEcho posts the conference request`() = runBlocking {
+        session.createLocalEcho("Blog", "My notes")
+        val data = lastControl!!["data"]!!.jsonObject
+        assertEquals("Blog", data["name"]!!.jsonPrimitive.content)
+        assertEquals("My notes", data["description"]!!.jsonPrimitive.content)
+        assertEquals(":0:1", data["user_address"]!!.jsonPrimitive.content)
+    }
+
+    @Test
     fun `node list is parsed`() {
         runBlocking {
             val nodes = session.nodeList()

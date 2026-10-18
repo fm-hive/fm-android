@@ -144,7 +144,26 @@ fun FmRoot(
     onCloseRefillDialog: () -> Unit = {},
     onRefillDate: (String) -> Unit = {},
     onSendRefill: () -> Unit = {},
+    onCreateEchoDialog: () -> Unit = {},
+    onCloseCreateEchoDialog: () -> Unit = {},
+    onCreateEchoName: (String) -> Unit = {},
+    onCreateEchoDescription: (String) -> Unit = {},
+    onCreateLocalEcho: () -> Unit = {},
+    onExcommTarget: (String) -> Unit = {},
+    onExcommReason: (String) -> Unit = {},
+    onSubmitExcomm: () -> Unit = {},
 ) {
+    if (state.createEchoDialog) {
+        CreateEchoDialog(
+            name = state.createEchoName,
+            description = state.createEchoDescription,
+            error = state.createEchoError,
+            onName = onCreateEchoName,
+            onDescription = onCreateEchoDescription,
+            onCreate = onCreateLocalEcho,
+            onDismiss = onCloseCreateEchoDialog,
+        )
+    }
     if (state.refillDialog) {
         RefillDialog(
             date = state.refillDate,
@@ -270,6 +289,7 @@ fun FmRoot(
             echoes = state.allEchoes,
             onBack = onCloseEchoBrowser,
             onToggle = onToggleSubscription,
+            onCreateLocal = onCreateEchoDialog,
         )
         AppScreen.Admin -> AdminScreen(
             nodes = state.adminNodes,
@@ -282,6 +302,14 @@ fun FmRoot(
             onMergeUrl = onAdminMergeUrl,
             onScanPeer = onScanPeer,
             onStartMerge = onStartMerge,
+            excommTarget = state.excommTarget,
+            excommReason = state.excommReason,
+            excommSending = state.excommSending,
+            excommStatus = state.excommStatus,
+            excommError = state.excommError,
+            onExcommTarget = onExcommTarget,
+            onExcommReason = onExcommReason,
+            onSubmitExcomm = onSubmitExcomm,
         )
         AppScreen.Settings -> SettingsScreen(
             profile = state.activeProfile,

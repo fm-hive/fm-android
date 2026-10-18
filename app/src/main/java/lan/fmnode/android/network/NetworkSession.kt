@@ -333,6 +333,16 @@ class NetworkSession(
         }
     }
 
+    /** Creates a local conference (blog-like channel stored by the node). */
+    suspend fun createLocalEcho(name: String, description: String) {
+        val data = buildJsonObject {
+            put("name", name)
+            put("description", description)
+            put("user_address", profile.address)
+        }
+        api.post("create_local_echo", data.toString(), auth)
+    }
+
     /** Nodelist as reported by the node. */
     suspend fun nodeList(): List<JsonObject> {
         val response = api.post("nodes", null, auth = null)
