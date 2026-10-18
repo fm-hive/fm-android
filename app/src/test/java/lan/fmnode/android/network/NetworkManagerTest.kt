@@ -141,6 +141,26 @@ class NetworkManagerTest {
     }
 
     @Test
+    fun `registration can reuse an imported key`() = runBlocking {
+        val importedSeed = ByteArray(32) { (it + 99).toByte() }
+        val invite = Invite(server.url("/api").toString(), server.url("/api").toString(), node.publicKey, null, null)
+        val policy = manager.fetchPolicy(invite)
+        val profile = manager.register(
+            invite = invite,
+            policy = policy,
+            password = "secret-pass",
+            displayName = "Ivan",
+            seed = importedSeed,
+        )
+        assertEquals(
+            Encoding.base64Encode(CryptoService.publicKeyFromSeed(importedSeed)),
+            profile.publicKeyB64,
+        )
+        val stored = db.profileDao().getById(profile.id)!!
+        assertArrayEquals(importedSeed, KeyVault.decrypt(stored.encryptedSeed(), "secret-pass"))
+    }
+
+    @Test
     fun `password validation and multiple networks`() {
         val first = addNetwork("secret-pass")
         val second = addNetwork("secret-pass", name = "Petr")

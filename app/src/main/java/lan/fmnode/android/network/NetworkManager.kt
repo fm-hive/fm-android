@@ -44,22 +44,24 @@ class NetworkManager(
         password: String,
         displayName: String,
         title: String? = null,
+        seed: ByteArray? = null,
     ): ProfileEntity {
-        val seed = CryptoService.generateSeed()
-        val publicKey = CryptoService.publicKeyFromSeed(seed)
+        val seedBytes = seed ?: CryptoService.generateSeed()
+        require(seedBytes.size == 32) { "Ed25519 seed must be 32 bytes" }
+        val publicKey = CryptoService.publicKeyFromSeed(seedBytes)
 
         val api = apiFactory(invite.apiUrl)
         api.setNodeEd25519PublicKey(Encoding.base64Decode(policy.nodeSigPkey))
-        api.responseDecryptionKey = CryptoService.x25519PrivateKeyFromSeed(seed)
+        api.responseDecryptionKey = CryptoService.x25519PrivateKeyFromSeed(seedBytes)
         val registration = PolicyClient(api).acceptPolicy(
             policy = policy,
-            seed = seed,
+            seed = seedBytes,
             publicKey = publicKey,
             name = displayName,
             voucher = invite.voucher,
         )
 
-        val encryptedSeed = KeyVault.encrypt(seed, password)
+        val encryptedSeed = KeyVault.encrypt(seedBytes, password)
         val profile = ProfileEntity(
             id = UUID.randomUUID().toString(),
             title = title?.takeIf { it.isNotBlank() } ?: defaultTitle(invite, registration.address),

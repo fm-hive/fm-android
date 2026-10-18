@@ -26,8 +26,11 @@ import lan.fmnode.android.network.NetworkManager
 import lan.fmnode.android.network.NetworkSession
 import lan.fmnode.android.network.PolicyInfo
 import lan.fmnode.android.session.Session
+import lan.fmnode.android.storage.KeyVault
+import lan.fmnode.android.storage.KeystoreExportCodec
 import lan.fmnode.android.storage.MessageRow
 import lan.fmnode.android.storage.ProfileEntity
+import lan.fmnode.android.crypto.CryptoService
 
 enum class AppScreen {
     Unlock, Networks, AddNetwork,
@@ -93,6 +96,9 @@ data class AddNetworkState(
     val createPassword: Boolean = false,
     val isLoading: Boolean = false,
     val error: UiError? = null,
+    val awaitingImportPassword: Boolean = false,
+    val imported: Boolean = false,
+    val importError: UiError? = null,
 )
 
 data class UiState(
@@ -128,6 +134,8 @@ class AppViewModel(
     private val _state = MutableStateFlow(UiState())
     val state: StateFlow<UiState> = _state
 
+    private var importedSeed: ByteArray? = null
+    private var importJsonText: String? = null
     private var networkSession: NetworkSession? = null
     private var flowsJob: Job? = null
     private var syncJob: Job? = null
@@ -487,7 +495,9 @@ class AppViewModel(
                     policy = policy,
                     password = password,
                     displayName = add.displayName,
+                    seed = importedSeed,
                 )
+                importedSeed = null
                 session.setPassword(password)
                 _state.update {
                     it.copy(add = AddNetworkState(), unlocked = true)
@@ -590,6 +600,53 @@ class AppViewModel(
     fun deleteActiveNetwork() {
         val id = _state.value.activeId ?: return
         deleteProfile(id)
+    }
+
+    // ------------------------------------------------------------ keys import
+
+    /** Called with the text of a selected keys export file. */
+    fun onImportFile(text: String?) {
+        if (text.isNullOrBlank()) return
+        importJsonText = text
+        _state.update {
+            it.copy(add = it.add.copy(awaitingImportPassword = true, importError = null))
+        }
+    }
+
+    fun cancelImport() {
+        importJsonText = null
+        _state.update { it.copy(add = it.add.copy(awaitingImportPassword = false, importError = null)) }
+    }
+
+    /** Decrypts the imported keys with the export password. */
+    fun confirmImportPassword(password: String) {
+        val text = importJsonText ?: return
+        try {
+            val imported = KeystoreExportCodec.decode(text)
+            val seed = imported.encryptedSeed?.let { KeyVault.decrypt(it, password) }
+                ?: imported.plainSeed
+                ?: error("no private key in the file")
+            require(seed.size == 32) { "invalid key length" }
+            importedSeed = seed
+            importJsonText = null
+            _state.update {
+                it.copy(add = it.add.copy(awaitingImportPassword = false, imported = true, importError = null))
+            }
+        } catch (_: Exception) {
+            _state.update { it.copy(add = it.add.copy(importError = UiError.WrongPassword)) }
+        }
+    }
+
+    /** Builds the keys export JSON of the active profile with a new password. */
+    fun exportKeysJson(password: String): String? {
+        val profile = _state.value.activeProfile ?: return null
+        val sessionPassword = session.passwordOrNull() ?: return null
+        return runCatching {
+            val seed = manager.seedOf(profile, sessionPassword)
+            val publicKey = CryptoService.publicKeyFromSeed(seed)
+            val encrypted = KeyVault.encrypt(seed, password)
+            KeystoreExportCodec.encode(publicKey, encrypted)
+        }.getOrNull()
     }
 
     // ------------------------------------------------------------------ helpers

@@ -43,4 +43,12 @@
     <string name="delete_network">Delete network</string>
     <string name="role_admin">admin</string>
     <string name="role_moderator">moderator</string>
+    <string name="import_keys">Import keys</string>
+    <string name="import_password_title">Keys password</string>
+    <string name="keys_imported">Keys imported</string>
+    <string name="export_keys">Export keys</string>
+    <string name="export_password_title">Export password</string>
+    <string name="export_password_hint">Password that protects the exported file</string>
+    <string name="ok">OK</string>
+    <string name="cancel">Cancel</string>
 </resources>

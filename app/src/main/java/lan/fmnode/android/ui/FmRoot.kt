@@ -36,6 +36,8 @@ import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -98,6 +100,10 @@ fun FmRoot(
     onSendNetmail: () -> Unit = {},
     onSelectEchoTab: () -> Unit = {},
     onDeleteActiveNetwork: () -> Unit = {},
+    onImportKeys: () -> Unit = {},
+    onImportPassword: (String) -> Unit = {},
+    onCancelImport: () -> Unit = {},
+    onExportKeys: (String) -> Unit = {},
 ) {
     when (state.screen) {
         AppScreen.Unlock -> UnlockScreen(state.unlockError, onUnlock)
@@ -119,6 +125,9 @@ fun FmRoot(
             onPasswordConfirmChange = onPasswordConfirmChange,
             onFetchPolicy = onFetchPolicy,
             onRegister = onRegister,
+            onImportKeys = onImportKeys,
+            onImportPassword = onImportPassword,
+            onCancelImport = onCancelImport,
         )
         AppScreen.Echoes -> EchoesListScreen(
             title = state.activeProfile?.title ?: stringResource(R.string.app_name),
@@ -175,6 +184,7 @@ fun FmRoot(
             onDeleteNetwork = onDeleteActiveNetwork,
             onEchoes = onSelectEchoTab,
             onNetmail = onOpenNetmail,
+            onExportKeys = onExportKeys,
         )
     }
 }
@@ -344,7 +354,17 @@ fun AddNetworkScreen(
     onPasswordConfirmChange: (String) -> Unit,
     onFetchPolicy: () -> Unit,
     onRegister: () -> Unit,
+    onImportKeys: () -> Unit,
+    onImportPassword: (String) -> Unit,
+    onCancelImport: () -> Unit,
 ) {
+    if (state.awaitingImportPassword) {
+        ImportPasswordDialog(
+            error = state.importError,
+            onConfirm = onImportPassword,
+            onDismiss = onCancelImport,
+        )
+    }
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
@@ -374,6 +394,10 @@ fun AddNetworkScreen(
                         modifier = Modifier.fillMaxWidth(),
                     )
                     Spacer(Modifier.height(16.dp))
+                    OutlinedButton(onClick = onImportKeys, modifier = Modifier.fillMaxWidth()) {
+                        Text(stringResource(R.string.import_keys))
+                    }
+                    Spacer(Modifier.height(8.dp))
                     Button(
                         onClick = onFetchPolicy,
                         enabled = !state.isLoading && state.url.isNotBlank(),
@@ -425,6 +449,10 @@ fun AddNetworkScreen(
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                             modifier = Modifier.fillMaxWidth(),
                         )
+                    }
+                    if (state.imported) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(stringResource(R.string.keys_imported), color = MaterialTheme.colorScheme.primary)
                     }
                     Spacer(Modifier.height(16.dp))
                     Button(
@@ -704,6 +732,41 @@ fun EchoComposeScreen(
             }
         }
     }
+}
+
+@Composable
+private fun ImportPasswordDialog(
+    error: UiError?,
+    onConfirm: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var password by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.import_password_title)) },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    label = { Text(stringResource(R.string.password)) },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                )
+                if (error != null) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(errorText(error), color = MaterialTheme.colorScheme.error)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(password) }) { Text(stringResource(R.string.ok)) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
+        },
+    )
 }
 
 // -------------------------------------------------------------------- helpers

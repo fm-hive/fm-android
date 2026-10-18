@@ -1,10 +1,16 @@
 package lan.fmnode.android
 
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import lan.fmnode.android.ui.AppViewModel
@@ -22,6 +28,30 @@ class MainActivity : ComponentActivity() {
                     factory = AppViewModel.factory(container.networkManager, container.session),
                 )
                 val state by viewModel.state.collectAsStateWithLifecycle()
+
+                val importLauncher = rememberLauncherForActivityResult(
+                    ActivityResultContracts.OpenDocument(),
+                ) { uri: Uri? ->
+                    if (uri != null) {
+                        val text = runCatching {
+                            contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                        }.getOrNull()
+                        viewModel.onImportFile(text)
+                    }
+                }
+                var pendingExport by remember { mutableStateOf<String?>(null) }
+                val exportLauncher = rememberLauncherForActivityResult(
+                    ActivityResultContracts.CreateDocument("application/json"),
+                ) { uri: Uri? ->
+                    val data = pendingExport
+                    if (uri != null && data != null) {
+                        runCatching {
+                            contentResolver.openOutputStream(uri)?.bufferedWriter()?.use { it.write(data) }
+                        }
+                    }
+                    pendingExport = null
+                }
+
                 FmRoot(
                     state = state,
                     onUnlock = viewModel::unlock,
@@ -59,6 +89,15 @@ class MainActivity : ComponentActivity() {
                     onSendNetmail = viewModel::sendNetmailCompose,
                     onSelectEchoTab = viewModel::backFromEcho,
                     onDeleteActiveNetwork = viewModel::deleteActiveNetwork,
+                    onImportKeys = { importLauncher.launch(arrayOf("application/json", "text/plain")) },
+                    onImportPassword = viewModel::confirmImportPassword,
+                    onCancelImport = viewModel::cancelImport,
+                    onExportKeys = { password ->
+                        viewModel.exportKeysJson(password)?.let { json ->
+                            pendingExport = json
+                            exportLauncher.launch("fm-keys.json")
+                        }
+                    },
                 )
             }
         }

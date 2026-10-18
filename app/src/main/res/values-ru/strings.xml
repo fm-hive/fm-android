@@ -43,4 +43,12 @@
     <string name="delete_network">Удалить сеть</string>
     <string name="role_admin">админ</string>
     <string name="role_moderator">модератор</string>
+    <string name="import_keys">Импортировать ключи</string>
+    <string name="import_password_title">Пароль от ключей</string>
+    <string name="keys_imported">Ключи импортированы</string>
+    <string name="export_keys">Экспорт ключей</string>
+    <string name="export_password_title">Пароль экспорта</string>
+    <string name="export_password_hint">Пароль, которым будет защищён экспортированный файл</string>
+    <string name="ok">ОК</string>
+    <string name="cancel">Отмена</string>
 </resources>
