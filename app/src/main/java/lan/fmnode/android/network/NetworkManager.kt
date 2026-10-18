@@ -7,6 +7,7 @@ import lan.fmnode.android.crypto.Encoding
 import lan.fmnode.android.storage.AppStateEntity
 import lan.fmnode.android.storage.AppDatabase
 import lan.fmnode.android.storage.KeyVault
+import lan.fmnode.android.storage.ProfileDatabase
 import lan.fmnode.android.storage.ProfileEntity
 
 /**
@@ -15,6 +16,9 @@ import lan.fmnode.android.storage.ProfileEntity
  */
 class NetworkManager(
     private val db: AppDatabase,
+    private val profileDatabases: (String) -> ProfileDatabase = {
+        throw IllegalStateException("profile databases are not configured")
+    },
     private val apiFactory: (String) -> FmApiClient = { FmApiClient(it) },
 ) {
     val profiles: Flow<List<ProfileEntity>> = db.profileDao().observeAll()
@@ -101,6 +105,18 @@ class NetworkManager(
     /** Decrypts the profile's Ed25519 seed (requires the correct password). */
     fun seedOf(profile: ProfileEntity, password: String): ByteArray =
         KeyVault.decrypt(profile.encryptedSeed(), password)
+
+    /**
+     * Opens the network session of [profile]: its own database, API client
+     * bound to the profile's key pair and the sync engine.
+     */
+    suspend fun openSession(profile: ProfileEntity, password: String): NetworkSession {
+        val seed = seedOf(profile, password)
+        val api = apiFactory(profile.apiUrl)
+        api.setNodeEd25519PublicKey(Encoding.base64Decode(profile.nodePublicKeyB64))
+        api.responseDecryptionKey = CryptoService.x25519PrivateKeyFromSeed(seed)
+        return NetworkSession(profile, profileDatabases(profile.id), api, seed)
+    }
 
     private fun defaultTitle(invite: Invite, address: String): String {
         val host = runCatching { java.net.URI(invite.appUrl).host }.getOrNull() ?: invite.appUrl
