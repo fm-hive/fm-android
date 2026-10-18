@@ -22,6 +22,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
+import lan.fmnode.android.network.FmApiException
 import lan.fmnode.android.network.Invite
 import lan.fmnode.android.network.InviteParser
 import lan.fmnode.android.network.NetworkManager
@@ -41,6 +42,7 @@ enum class AppScreen {
     Search, Protocols,
     QrScanner,
     Admin,
+    EchoBrowser,
     Settings,
 }
 
@@ -62,6 +64,7 @@ data class EchoUi(
     val name: String,
     val description: String,
     val unread: Int,
+    val subscribed: Boolean = true,
 )
 
 data class MessageUi(
@@ -162,6 +165,9 @@ data class UiState(
     val searchQuery: String = "",
     val searchResults: List<SearchResultUi> = emptyList(),
     val searchLoading: Boolean = false,
+    val allEchoes: List<EchoUi> = emptyList(),
+    val showPolicyResign: Boolean = false,
+    val policyResignText: String = "",
     val scanPurpose: ScanPurpose = ScanPurpose.AddNetwork,
     val voucherCode: String? = null,
     val voucherLoading: Boolean = false,
@@ -306,6 +312,22 @@ class AppViewModel(
                 }
             }
             launch {
+                combine(
+                    opened.database.echoDao().observeAll(),
+                    opened.database.messageDao().observeUnreadSummary(opened.profile.address),
+                ) { echoes, unread ->
+                    val counts = unread.associate { it.echoName to it.count }
+                    echoes.map { echo ->
+                        EchoUi(
+                            name = echo.name,
+                            description = echo.description,
+                            unread = counts[echo.name] ?: 0,
+                            subscribed = echo.subscribed,
+                        )
+                    }
+                }.collect { list -> _state.update { it.copy(allEchoes = list) } }
+            }
+            launch {
                 opened.database.messageDao().observeProtocols().collect { rows ->
                     _state.update { it.copy(protocols = rows.mapNotNull { row -> row.toProtocolUi() }) }
                 }
@@ -360,10 +382,52 @@ class AppViewModel(
             opened.sync()
             _state.update { it.copy(syncing = false, syncError = null) }
         } catch (e: Exception) {
+            if (e is FmApiException && e.next == "policy") {
+                _state.update { it.copy(syncing = false, syncError = null) }
+                startPolicyResign(opened)
+                return
+            }
             _state.update {
                 it.copy(syncing = false, syncError = UiError.Failed(e.message ?: "Failed"))
             }
         }
+    }
+
+    private var pendingPolicy: PolicyInfo? = null
+
+    private suspend fun startPolicyResign(opened: NetworkSession) {
+        if (_state.value.showPolicyResign) return
+        runCatching { opened.fetchPolicy() }
+            .onSuccess { policy ->
+                pendingPolicy = policy
+                _state.update {
+                    it.copy(showPolicyResign = true, policyResignText = formatPolicy(policy.payload))
+                }
+            }
+            .onFailure { e ->
+                _state.update { it.copy(syncError = UiError.Failed(e.message ?: "Failed")) }
+            }
+    }
+
+    fun acceptPolicyResign() {
+        val policy = pendingPolicy ?: return
+        val opened = networkSession ?: return
+        viewModelScope.launch {
+            try {
+                opened.resignPolicy(policy)
+                manager.updateProfilePolicy(opened.profile.id, policy.payload.toString())
+                pendingPolicy = null
+                _state.update { it.copy(showPolicyResign = false, policyResignText = "") }
+                syncOnce(opened)
+            } catch (e: Exception) {
+                _state.update { it.copy(syncError = UiError.Failed(e.message ?: "Failed")) }
+            }
+        }
+    }
+
+    fun cancelPolicyResign() {
+        pendingPolicy = null
+        _state.update { it.copy(showPolicyResign = false, policyResignText = "") }
     }
 
     // --------------------------------------------------------------- navigation
@@ -725,6 +789,24 @@ class AppViewModel(
                 screen = AppScreen.AddNetwork,
                 add = it.add.copy(url = value.trim(), error = null, step = AddStep.Url),
             )
+        }
+    }
+
+    // ----------------------------------------------------------- echo browser
+
+    fun openEchoBrowser() {
+        _state.update { it.copy(screen = AppScreen.EchoBrowser) }
+    }
+
+    fun closeEchoBrowser() {
+        _state.update { it.copy(screen = AppScreen.Echoes) }
+    }
+
+    fun toggleSubscription(echoName: String, subscribed: Boolean) {
+        val opened = networkSession ?: return
+        viewModelScope.launch {
+            runCatching { opened.setSubscribed(echoName, subscribed) }
+            runCatching { opened.refreshEchoes() }
         }
     }
 

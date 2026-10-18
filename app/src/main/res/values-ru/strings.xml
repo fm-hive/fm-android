@@ -73,4 +73,7 @@
     <string name="nodes_empty">Нет узлов</string>
     <string name="node_recover">восстановление</string>
     <string name="send_voucher">Послать ваучер</string>
+    <string name="browse_echoes">Эхо-конференции</string>
+    <string name="policy_changed_title">Политика сети изменилась</string>
+    <string name="policy_accept">Принять политику</string>
 </resources>

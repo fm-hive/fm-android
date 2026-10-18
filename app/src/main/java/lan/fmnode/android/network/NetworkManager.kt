@@ -86,6 +86,12 @@ class NetworkManager(
         return profile
     }
 
+    /** Stores the last accepted policy payload of a profile (after re-signing). */
+    suspend fun updateProfilePolicy(id: String, policyJson: String) {
+        val profile = db.profileDao().getById(id) ?: return
+        db.profileDao().upsert(profile.copy(policyJson = policyJson))
+    }
+
     suspend fun setActive(id: String) {
         db.appStateDao().put(AppStateEntity(KEY_ACTIVE_PROFILE, id))
     }

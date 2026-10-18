@@ -129,6 +129,11 @@ class MainActivity : ComponentActivity() {
                     onScanPeer = { viewModel.openScanner(ScanPurpose.Merge) },
                     onCreateVoucher = viewModel::createVoucher,
                     onDismissVoucher = viewModel::dismissVoucher,
+                    onOpenEchoBrowser = viewModel::openEchoBrowser,
+                    onCloseEchoBrowser = viewModel::closeEchoBrowser,
+                    onToggleSubscription = viewModel::toggleSubscription,
+                    onAcceptPolicyResign = viewModel::acceptPolicyResign,
+                    onCancelPolicyResign = viewModel::cancelPolicyResign,
                     onExportKeys = { password ->
                         viewModel.exportKeysJson(password)?.let { json ->
                             pendingExport = json

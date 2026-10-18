@@ -73,4 +73,7 @@
     <string name="nodes_empty">No nodes</string>
     <string name="node_recover">recover</string>
     <string name="send_voucher">Send voucher</string>
+    <string name="browse_echoes">Echo conferences</string>
+    <string name="policy_changed_title">The network policy has changed</string>
+    <string name="policy_accept">Accept the policy</string>
 </resources>

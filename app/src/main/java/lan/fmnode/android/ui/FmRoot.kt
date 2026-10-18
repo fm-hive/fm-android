@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.EmojiEmotions
 import androidx.compose.material.icons.filled.HowToVote
 import androidx.compose.material.icons.filled.Search
@@ -128,7 +129,19 @@ fun FmRoot(
     onScanPeer: () -> Unit = {},
     onCreateVoucher: () -> Unit = {},
     onDismissVoucher: () -> Unit = {},
+    onOpenEchoBrowser: () -> Unit = {},
+    onCloseEchoBrowser: () -> Unit = {},
+    onToggleSubscription: (String, Boolean) -> Unit = { _, _ -> },
+    onAcceptPolicyResign: () -> Unit = {},
+    onCancelPolicyResign: () -> Unit = {},
 ) {
+    if (state.showPolicyResign) {
+        PolicyResignDialog(
+            policyText = state.policyResignText,
+            onAccept = onAcceptPolicyResign,
+            onDismiss = onCancelPolicyResign,
+        )
+    }
     when (state.screen) {
         AppScreen.Unlock -> UnlockScreen(state.unlockError, onUnlock)
         AppScreen.Networks -> NetworksScreen(
@@ -167,6 +180,7 @@ fun FmRoot(
             onSettings = onOpenSettings,
             onSearch = onOpenSearch,
             onProtocols = onOpenProtocols,
+            onBrowseEchoes = onOpenEchoBrowser,
         )
         AppScreen.Echo -> EchoConversationScreen(
             echoName = state.selectedEcho?.name ?: "",
@@ -223,6 +237,11 @@ fun FmRoot(
             onSubject = onNetmailSubject,
             onBody = onNetmailBody,
             onSend = onSendNetmail,
+        )
+        AppScreen.EchoBrowser -> EchoBrowserScreen(
+            echoes = state.allEchoes,
+            onBack = onCloseEchoBrowser,
+            onToggle = onToggleSubscription,
         )
         AppScreen.Admin -> AdminScreen(
             nodes = state.adminNodes,
@@ -562,6 +581,7 @@ fun EchoesListScreen(
     onSettings: () -> Unit,
     onSearch: () -> Unit,
     onProtocols: () -> Unit,
+    onBrowseEchoes: () -> Unit,
 ) {
     Scaffold(
         bottomBar = {
@@ -574,6 +594,9 @@ fun EchoesListScreen(
                     if (syncing) {
                         CircularProgressIndicator(modifier = Modifier.width(20.dp).height(20.dp))
                         Spacer(Modifier.width(8.dp))
+                    }
+                    IconButton(onClick = onBrowseEchoes) {
+                        Icon(Icons.Default.Explore, contentDescription = stringResource(R.string.browse_echoes))
                     }
                     IconButton(onClick = onSearch) {
                         Icon(Icons.Default.Search, contentDescription = stringResource(R.string.search_title))

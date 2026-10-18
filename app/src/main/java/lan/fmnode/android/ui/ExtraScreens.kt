@@ -2,6 +2,8 @@ package lan.fmnode.android.ui
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -35,6 +38,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -317,4 +321,94 @@ private fun decodeDataUrl(url: String): androidx.compose.ui.graphics.ImageBitmap
         ?: return null
     val bitmap = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return null
     return bitmap.asImageBitmap()
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun EchoBrowserScreen(
+    echoes: List<EchoUi>,
+    onBack: () -> Unit,
+    onToggle: (String, Boolean) -> Unit,
+) {
+    Scaffold(
+        topBar = {
+            CenterAlignedTopAppBar(
+                title = { Text(stringResource(R.string.browse_echoes)) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
+                    }
+                },
+            )
+        },
+    ) { padding ->
+        if (echoes.isEmpty()) {
+            Box(Modifier.fillMaxSize().padding(padding).padding(24.dp), contentAlignment = Alignment.Center) {
+                Text(
+                    text = stringResource(R.string.echoes_empty),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            return@Scaffold
+        }
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(
+                start = 12.dp,
+                end = 12.dp,
+                top = padding.calculateTopPadding() + 8.dp,
+                bottom = padding.calculateBottomPadding() + 8.dp,
+            ),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            items(echoes, key = { it.name }) { echo ->
+                Card(Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(echo.name, fontWeight = FontWeight.SemiBold)
+                            if (echo.description.isNotBlank()) {
+                                Text(
+                                    text = echo.description,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                        Switch(
+                            checked = echo.subscribed,
+                            onCheckedChange = { checked -> onToggle(echo.name, checked) },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun PolicyResignDialog(
+    policyText: String,
+    onAccept: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.policy_changed_title)) },
+        text = {
+            Column(
+                modifier = Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState()),
+            ) {
+                Text(policyText, style = MaterialTheme.typography.bodySmall)
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onAccept) { Text(stringResource(R.string.policy_accept)) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
+        },
+    )
 }

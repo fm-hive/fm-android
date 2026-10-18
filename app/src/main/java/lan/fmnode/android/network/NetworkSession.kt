@@ -70,10 +70,26 @@ class NetworkSession(
     }
 
     suspend fun setSubscribed(echoName: String, subscribed: Boolean) {
-        val body = buildJsonObject { put("echo_name", echoName) }
+        val body = buildJsonObject {
+            put("echo_name", echoName)
+            put("user_address", profile.address)
+        }
         api.post(if (subscribed) "subscribe_echo" else "unsubscribe_echo", body.toString(), auth)
         database.echoDao().setSubscribed(echoName, subscribed)
     }
+
+    /** Fetches the current network policy (phase 1, encrypted for us). */
+    suspend fun fetchPolicy(): PolicyInfo =
+        PolicyClient(api).fetchPolicy(userPublicKey = publicKey)
+
+    /** Re-signs the current policy with the profile key (policy changed). */
+    suspend fun resignPolicy(policy: PolicyInfo): Registration =
+        PolicyClient(api).acceptPolicy(
+            policy = policy,
+            seed = seed,
+            publicKey = publicKey,
+            name = profile.displayName,
+        )
 
     suspend fun markRead(echoName: String, timestamp: Long) {
         database.echoDao().setLastRead(echoName, timestamp)

@@ -90,6 +90,38 @@ class NetworkSessionTest {
                         // auto pubkey response itself is sent).
                         if ((outgoing?.size ?: 0) > 0) emptySendReceive() else sendReceiveResponse
                     }
+                    "policy" -> {
+                        val data = control["data"] as? JsonObject
+                        if (data?.get("policy") != null) {
+                            val userPub = Encoding.base64Decode(data["sig_pkey"]!!.jsonPrimitive.content)
+                            check(CryptoService.verifyJws(data["policy"]!!.jsonPrimitive.content, userPub))
+                            buildJsonObject {
+                                put("request", "policy")
+                                put(
+                                    "data",
+                                    buildJsonObject {
+                                        put("address", ":0:1")
+                                        put("is_admin", false)
+                                        put("is_moderator", false)
+                                        put("name", "Ivan")
+                                    },
+                                )
+                            }
+                        } else {
+                            val policyPayload = buildJsonObject { put("id", "policy-1") }.toString()
+                            buildJsonObject {
+                                put("request", "policy")
+                                put(
+                                    "data",
+                                    buildJsonObject {
+                                        put("policy", node.policyJws(policyPayload))
+                                        put("sig_pkey", node.sigPkeyB64())
+                                    },
+                                )
+                            }
+                        }
+                    }
+                    "subscribe_echo", "unsubscribe_echo" -> JsonObject(emptyMap())
                     "voucher" -> voucherResponse
                     "nodes" -> buildJsonArray {
                         add(buildJsonObject { put("address", ":0:1"); put("url", "https://node.example") })
@@ -347,6 +379,41 @@ class NetworkSessionTest {
             assertTrue(payload["nonce"]!!.jsonPrimitive.content.isNotBlank())
             assertEquals("invite", data["type"]!!.jsonPrimitive.content)
         }
+    }
+
+    @Test
+    fun `setSubscribed posts the subscription and updates the local flag`() = runBlocking {
+        db.echoDao().upsertAll(
+            listOf(
+                lan.fmnode.android.storage.EchoEntity(
+                    name = "General",
+                    serverId = 1,
+                    description = "",
+                    rulesJson = "",
+                    subscribed = false,
+                    isLocal = false,
+                    lastReadTimestamp = 0,
+                ),
+            ),
+        )
+        session.setSubscribed("General", true)
+        assertEquals(true, db.echoDao().getByName("General")!!.subscribed)
+        val data = lastControl!!["data"]!!.jsonObject
+        assertEquals("General", data["echo_name"]!!.jsonPrimitive.content)
+        assertEquals(":0:1", data["user_address"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun `policy can be re-fetched and re-signed`() = runBlocking {
+        val policy = session.fetchPolicy()
+        val registration = session.resignPolicy(policy)
+        assertEquals(":0:1", registration.address)
+
+        val data = lastControl!!["data"]!!.jsonObject
+        val userJws = data["policy"]!!.jsonPrimitive.content
+        assertTrue(CryptoService.verifyJws(userJws, userPublicKey))
+        assertEquals(policy.payload.toString(), CryptoService.jwsPayload(userJws))
+        assertEquals(Encoding.base64Encode(userPublicKey), data["sig_pkey"]!!.jsonPrimitive.content)
     }
 
     @Test
