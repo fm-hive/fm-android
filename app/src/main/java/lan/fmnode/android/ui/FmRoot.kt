@@ -667,7 +667,7 @@ private fun MessageCard(message: MessageUi) {
             }
             if (message.body.isNotBlank()) {
                 Spacer(Modifier.height(4.dp))
-                Text(message.body, style = MaterialTheme.typography.bodyMedium)
+                Text(MarkdownRenderer.render(message.body), style = MaterialTheme.typography.bodyMedium)
             }
         }
     }

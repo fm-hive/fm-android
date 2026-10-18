@@ -197,7 +197,7 @@ fun NetmailDetailScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.height(12.dp))
-            Text(message.body, style = MaterialTheme.typography.bodyMedium)
+            Text(MarkdownRenderer.render(message.body), style = MaterialTheme.typography.bodyMedium)
         }
     }
 }
