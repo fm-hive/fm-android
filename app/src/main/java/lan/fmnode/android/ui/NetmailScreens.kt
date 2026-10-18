@@ -203,6 +203,10 @@ fun NetmailDetailScreen(
             )
             Spacer(Modifier.height(12.dp))
             Text(MarkdownRenderer.render(message.body), style = MaterialTheme.typography.bodyMedium)
+            if (message.attachments.isNotEmpty()) {
+                Spacer(Modifier.height(8.dp))
+                AttachmentsRow(message.attachments)
+            }
         }
     }
 }

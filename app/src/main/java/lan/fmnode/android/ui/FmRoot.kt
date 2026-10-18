@@ -22,6 +22,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.EmojiEmotions
 import androidx.compose.material.icons.filled.HowToVote
@@ -117,6 +118,16 @@ fun FmRoot(
     onOpenScanner: () -> Unit = {},
     onCloseScanner: () -> Unit = {},
     onQrScanned: (String) -> Unit = {},
+    onAttachFiles: () -> Unit = {},
+    onRemoveAttachment: (Int) -> Unit = {},
+    onOpenAdmin: () -> Unit = {},
+    onCloseAdmin: () -> Unit = {},
+    onAdminRefresh: () -> Unit = {},
+    onAdminMergeUrl: (String) -> Unit = {},
+    onStartMerge: () -> Unit = {},
+    onScanPeer: () -> Unit = {},
+    onCreateVoucher: () -> Unit = {},
+    onDismissVoucher: () -> Unit = {},
 ) {
     when (state.screen) {
         AppScreen.Unlock -> UnlockScreen(state.unlockError, onUnlock)
@@ -172,6 +183,8 @@ fun FmRoot(
             onSubject = onComposeSubject,
             onBody = onComposeBody,
             onSend = onSendCompose,
+            onAttachFiles = onAttachFiles,
+            onRemoveAttachment = onRemoveAttachment,
         )
         AppScreen.QrScanner -> QrScannerScreen(
             onBack = onCloseScanner,
@@ -211,6 +224,18 @@ fun FmRoot(
             onBody = onNetmailBody,
             onSend = onSendNetmail,
         )
+        AppScreen.Admin -> AdminScreen(
+            nodes = state.adminNodes,
+            loading = state.adminLoading,
+            mergeUrl = state.adminMergeUrl,
+            mergeStatus = state.adminMergeStatus,
+            mergeError = state.adminMergeError,
+            onBack = onCloseAdmin,
+            onRefresh = onAdminRefresh,
+            onMergeUrl = onAdminMergeUrl,
+            onScanPeer = onScanPeer,
+            onStartMerge = onStartMerge,
+        )
         AppScreen.Settings -> SettingsScreen(
             profile = state.activeProfile,
             onLock = onLock,
@@ -218,6 +243,12 @@ fun FmRoot(
             onEchoes = onSelectEchoTab,
             onNetmail = onOpenNetmail,
             onExportKeys = onExportKeys,
+            onOpenAdmin = onOpenAdmin,
+            onCreateVoucher = onCreateVoucher,
+            voucherCode = state.voucherCode,
+            voucherLoading = state.voucherLoading,
+            voucherError = state.voucherError,
+            onDismissVoucher = onDismissVoucher,
         )
     }
 }
@@ -715,6 +746,10 @@ private fun MessageCard(message: MessageUi) {
                 Spacer(Modifier.height(4.dp))
                 Text(MarkdownRenderer.render(message.body), style = MaterialTheme.typography.bodyMedium)
             }
+            if (message.attachments.isNotEmpty()) {
+                Spacer(Modifier.height(6.dp))
+                AttachmentsRow(message.attachments)
+            }
         }
     }
 }
@@ -728,6 +763,8 @@ fun EchoComposeScreen(
     onSubject: (String) -> Unit,
     onBody: (String) -> Unit,
     onSend: () -> Unit,
+    onAttachFiles: () -> Unit,
+    onRemoveAttachment: (Int) -> Unit,
 ) {
     var showEmoji by remember { mutableStateOf(false) }
     if (showEmoji) {
@@ -746,6 +783,9 @@ fun EchoComposeScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = onAttachFiles) {
+                        Icon(Icons.Default.AttachFile, contentDescription = stringResource(R.string.attach_file))
+                    }
                     IconButton(onClick = { showEmoji = true }) {
                         Icon(Icons.Default.EmojiEmotions, contentDescription = stringResource(R.string.emoji_title))
                     }
@@ -778,6 +818,10 @@ fun EchoComposeScreen(
                 label = { Text(stringResource(R.string.body)) },
                 modifier = Modifier.fillMaxWidth().weight(1f),
             )
+            if (state.attachments.isNotEmpty()) {
+                Spacer(Modifier.height(8.dp))
+                ComposerAttachments(attachments = state.attachments, onRemove = onRemoveAttachment)
+            }
             state.error?.let {
                 Spacer(Modifier.height(8.dp))
                 Text(errorText(it), color = MaterialTheme.colorScheme.error)

@@ -18,8 +18,10 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.put
 import lan.fmnode.android.network.Invite
 import lan.fmnode.android.network.InviteParser
 import lan.fmnode.android.network.NetworkManager
@@ -38,10 +40,13 @@ enum class AppScreen {
     Netmail, NetmailDetail, NetmailCompose,
     Search, Protocols,
     QrScanner,
+    Admin,
     Settings,
 }
 
 enum class NetmailFolder { Inbox, Sent }
+
+enum class ScanPurpose { AddNetwork, Merge }
 
 enum class AddStep { Url, Policy }
 
@@ -68,6 +73,7 @@ data class MessageUi(
     val subject: String,
     val body: String,
     val own: Boolean,
+    val attachments: List<AttachmentUi> = emptyList(),
 )
 
 data class NetmailComposeState(
@@ -88,6 +94,19 @@ data class SearchResultUi(
     val body: String,
 )
 
+data class AttachmentUi(
+    val name: String,
+    val type: String,
+    val size: Int,
+    val dataUrl: String,
+)
+
+data class NodeUi(
+    val address: String,
+    val url: String,
+    val isRecoverNode: Boolean,
+)
+
 data class ProtocolUi(
     val messageId: String,
     val type: String,
@@ -103,6 +122,7 @@ data class ProtocolUi(
 data class ComposeState(
     val subject: String = "",
     val body: String = "",
+    val attachments: List<AttachmentUi> = emptyList(),
     val sending: Boolean = false,
     val error: UiError? = null,
 )
@@ -142,6 +162,15 @@ data class UiState(
     val searchQuery: String = "",
     val searchResults: List<SearchResultUi> = emptyList(),
     val searchLoading: Boolean = false,
+    val scanPurpose: ScanPurpose = ScanPurpose.AddNetwork,
+    val voucherCode: String? = null,
+    val voucherLoading: Boolean = false,
+    val voucherError: UiError? = null,
+    val adminNodes: List<NodeUi> = emptyList(),
+    val adminLoading: Boolean = false,
+    val adminMergeUrl: String = "",
+    val adminMergeStatus: String? = null,
+    val adminMergeError: UiError? = null,
     val add: AddNetworkState = AddNetworkState(),
     val unlockError: UiError? = null,
     val syncError: UiError? = null,
@@ -411,6 +440,43 @@ class AppViewModel(
     fun setComposeBody(value: String) =
         _state.update { it.copy(compose = it.compose.copy(body = value, error = null)) }
 
+    /** Adds files (already read from the system picker) to the composer. */
+    fun addAttachments(files: List<Triple<String, String, ByteArray>>) {
+        val existing = _state.value.compose.attachments
+        val result = existing.toMutableList()
+        var total = existing.sumOf { it.size }
+        for ((name, type, bytes) in files) {
+            if (bytes.size > MAX_ATTACHMENT_BYTES) {
+                _state.update {
+                    it.copy(compose = it.compose.copy(error = UiError.Failed("Attachment is too large (max 2 MiB)")))
+                }
+                return
+            }
+            total += bytes.size
+            if (total > MAX_ATTACHMENTS_TOTAL) {
+                _state.update {
+                    it.copy(compose = it.compose.copy(error = UiError.Failed("Attachments are too large (max 6 MiB)")))
+                }
+                return
+            }
+            result += AttachmentUi(
+                name = name,
+                type = type,
+                size = bytes.size,
+                dataUrl = "data:$type;base64," + android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP),
+            )
+        }
+        _state.update { it.copy(compose = it.compose.copy(attachments = result, error = null)) }
+    }
+
+    fun removeAttachment(index: Int) {
+        _state.update {
+            val list = it.compose.attachments.toMutableList()
+            if (index in list.indices) list.removeAt(index)
+            it.copy(compose = it.compose.copy(attachments = list))
+        }
+    }
+
     fun sendCompose() {
         val current = _state.value
         val echo = current.selectedEcho ?: return
@@ -422,7 +488,28 @@ class AppViewModel(
         viewModelScope.launch {
             _state.update { it.copy(compose = it.compose.copy(sending = true, error = null)) }
             try {
-                opened.postEcho(echo.name, current.compose.subject.trim(), current.compose.body.trim())
+                val attachments = if (current.compose.attachments.isEmpty()) {
+                    null
+                } else {
+                    kotlinx.serialization.json.buildJsonArray {
+                        current.compose.attachments.forEach { attachment ->
+                            add(
+                                buildJsonObject {
+                                    put("name", attachment.name)
+                                    put("type", attachment.type)
+                                    put("size", attachment.size)
+                                    put("data", attachment.dataUrl)
+                                },
+                            )
+                        }
+                    }
+                }
+                opened.postEcho(
+                    echo.name,
+                    current.compose.subject.trim(),
+                    current.compose.body.trim(),
+                    attachments = attachments,
+                )
                 _state.update {
                     it.copy(screen = AppScreen.Echo, compose = ComposeState())
                 }
@@ -618,23 +705,104 @@ class AppViewModel(
 
     // ------------------------------------------------------------------- QR
 
-    fun openScanner() {
-        if (_state.value.screen == AppScreen.AddNetwork) {
-            _state.update { it.copy(screen = AppScreen.QrScanner) }
-        }
+    fun openScanner(purpose: ScanPurpose = ScanPurpose.AddNetwork) {
+        _state.update { it.copy(screen = AppScreen.QrScanner, scanPurpose = purpose) }
     }
 
     fun closeScanner() {
-        _state.update { it.copy(screen = AppScreen.AddNetwork) }
+        val screen = if (_state.value.scanPurpose == ScanPurpose.Merge) AppScreen.Admin else AppScreen.AddNetwork
+        _state.update { it.copy(screen = screen) }
     }
 
     fun onQrScanned(value: String) {
+        if (_state.value.scanPurpose == ScanPurpose.Merge) {
+            _state.update { it.copy(screen = AppScreen.Admin, adminMergeUrl = value.trim()) }
+            startMerge()
+            return
+        }
         _state.update {
             it.copy(
                 screen = AppScreen.AddNetwork,
                 add = it.add.copy(url = value.trim(), error = null, step = AddStep.Url),
             )
         }
+    }
+
+    // ------------------------------------------------------------------- admin
+
+    fun openAdmin() {
+        _state.update { it.copy(screen = AppScreen.Admin, adminMergeStatus = null, adminMergeError = null) }
+        loadNodes()
+    }
+
+    fun closeAdmin() {
+        _state.update { it.copy(screen = AppScreen.Settings) }
+    }
+
+    fun loadNodes() {
+        val opened = networkSession ?: return
+        viewModelScope.launch {
+            _state.update { it.copy(adminLoading = true) }
+            try {
+                val nodes = opened.nodeList().mapNotNull { node ->
+                    val address = (node["address"] as? JsonPrimitive)?.contentOrNull ?: return@mapNotNull null
+                    NodeUi(
+                        address = address,
+                        url = (node["url"] as? JsonPrimitive)?.contentOrNull.orEmpty(),
+                        isRecoverNode = (node["is_recover_node"] as? JsonPrimitive)?.content == "true",
+                    )
+                }
+                _state.update { it.copy(adminNodes = nodes, adminLoading = false) }
+            } catch (e: Exception) {
+                _state.update { it.copy(adminLoading = false, adminMergeError = UiError.Failed(e.message ?: "Failed")) }
+            }
+        }
+    }
+
+    fun setAdminMergeUrl(value: String) {
+        _state.update { it.copy(adminMergeUrl = value, adminMergeError = null, adminMergeStatus = null) }
+    }
+
+    fun startMerge() {
+        val opened = networkSession ?: return
+        val url = _state.value.adminMergeUrl.trim()
+        val invite = InviteParser.parse(url)
+        if (invite == null) {
+            _state.update { it.copy(adminMergeError = UiError.Failed("Invalid invite URL")) }
+            return
+        }
+        viewModelScope.launch {
+            _state.update { it.copy(adminLoading = true, adminMergeError = null, adminMergeStatus = null) }
+            try {
+                val stateKey = opened.startMerge(invite)
+                _state.update {
+                    it.copy(adminLoading = false, adminMergeStatus = "Merge proposed: $stateKey")
+                }
+            } catch (e: Exception) {
+                _state.update {
+                    it.copy(adminLoading = false, adminMergeError = UiError.Failed(e.message ?: "Failed"))
+                }
+            }
+        }
+    }
+
+    fun createVoucher() {
+        val opened = networkSession ?: return
+        viewModelScope.launch {
+            _state.update { it.copy(voucherLoading = true, voucherError = null) }
+            try {
+                val code = opened.createVoucher()
+                _state.update { it.copy(voucherLoading = false, voucherCode = code) }
+            } catch (e: Exception) {
+                _state.update {
+                    it.copy(voucherLoading = false, voucherError = UiError.Failed(e.message ?: "Failed"))
+                }
+            }
+        }
+    }
+
+    fun dismissVoucher() {
+        _state.update { it.copy(voucherCode = null) }
     }
 
     // ------------------------------------------------------------------ netmail
@@ -820,6 +988,17 @@ class AppViewModel(
             !senderName.isNullOrBlank() -> senderName!!
             else -> senderAddress
         }
+        val attachments = (data?.get("attachments") as? kotlinx.serialization.json.JsonArray)
+            ?.mapNotNull { element ->
+                val att = element as? JsonObject ?: return@mapNotNull null
+                AttachmentUi(
+                    name = (att["name"] as? JsonPrimitive)?.contentOrNull.orEmpty(),
+                    type = (att["type"] as? JsonPrimitive)?.contentOrNull.orEmpty(),
+                    size = (att["size"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull() ?: 0,
+                    dataUrl = (att["data"] as? JsonPrimitive)?.contentOrNull.orEmpty(),
+                )
+            }
+            ?: emptyList()
         return MessageUi(
             messageId = messageId,
             senderName = name,
@@ -829,6 +1008,7 @@ class AppViewModel(
             subject = subject,
             body = body,
             own = own,
+            attachments = attachments,
         )
     }
 
@@ -850,6 +1030,9 @@ class AppViewModel(
     }
 
     companion object {
+        private const val MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024
+        private const val MAX_ATTACHMENTS_TOTAL = 6 * 1024 * 1024
+
         fun factory(manager: NetworkManager, session: Session): ViewModelProvider.Factory =
             object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")

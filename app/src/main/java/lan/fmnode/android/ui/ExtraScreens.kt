@@ -1,5 +1,6 @@
 package lan.fmnode.android.ui
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -11,11 +12,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -27,6 +30,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -34,12 +38,16 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.material3.IconButton
 import lan.fmnode.android.R
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -249,4 +257,64 @@ fun EmojiPickerDialog(onPick: (String) -> Unit, onDismiss: () -> Unit) {
             TextButton(onClick = onDismiss) { Text(stringResource(R.string.close)) }
         },
     )
+}
+
+/** Renders message attachments: image thumbnails or file chips. */
+@Composable
+fun AttachmentsRow(attachments: List<AttachmentUi>, modifier: Modifier = Modifier) {
+    if (attachments.isEmpty()) return
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = modifier) {
+        items(attachments) { attachment ->
+            val bitmap = remember(attachment.dataUrl) { decodeDataUrl(attachment.dataUrl) }
+            if (bitmap != null) {
+                Image(
+                    bitmap = bitmap,
+                    contentDescription = attachment.name,
+                    modifier = Modifier.size(72.dp),
+                    contentScale = ContentScale.Crop,
+                )
+            } else {
+                AssistChip(onClick = {}, label = { Text(attachment.name) })
+            }
+        }
+    }
+}
+
+/** Composer attachments with a remove button. */
+@Composable
+fun ComposerAttachments(
+    attachments: List<AttachmentUi>,
+    onRemove: (Int) -> Unit,
+) {
+    if (attachments.isEmpty()) return
+    Column {
+        attachments.forEachIndexed { index, attachment ->
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = attachment.name,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.weight(1f),
+                )
+                IconButton(onClick = { onRemove(index) }) {
+                    Icon(Icons.Default.Close, contentDescription = stringResource(R.string.delete))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ComposerAttachmentsRow(attachments: List<AttachmentUi>) {
+    AttachmentsRow(attachments)
+}
+
+private fun decodeDataUrl(url: String): androidx.compose.ui.graphics.ImageBitmap? {
+    val marker = ";base64,"
+    val index = url.indexOf(marker)
+    if (index < 0) return null
+    val encoded = url.substring(index + marker.length)
+    val bytes = runCatching { android.util.Base64.decode(encoded, android.util.Base64.DEFAULT) }.getOrNull()
+        ?: return null
+    val bitmap = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return null
+    return bitmap.asImageBitmap()
 }

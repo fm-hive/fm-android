@@ -48,9 +48,21 @@ fun SettingsScreen(
     onEchoes: () -> Unit,
     onNetmail: () -> Unit,
     onExportKeys: (String) -> Unit,
+    onOpenAdmin: () -> Unit,
+    onCreateVoucher: () -> Unit,
+    voucherCode: String?,
+    voucherLoading: Boolean,
+    voucherError: UiError?,
+    onDismissVoucher: () -> Unit,
 ) {
     var showExportDialog by remember { mutableStateOf(false) }
     var showInviteDialog by remember { mutableStateOf(false) }
+    if (voucherCode != null && profile != null) {
+        InviteQrDialog(
+            url = inviteUrl(profile) + "&voucher=" + voucherCode,
+            onDismiss = onDismissVoucher,
+        )
+    }
     if (showInviteDialog && profile != null) {
         InviteQrDialog(url = inviteUrl(profile), onDismiss = { showInviteDialog = false })
     }
@@ -125,6 +137,21 @@ fun SettingsScreen(
             }
             OutlinedButton(onClick = { showInviteDialog = true }, modifier = Modifier.fillMaxWidth()) {
                 Text(stringResource(R.string.show_invite_qr))
+            }
+            OutlinedButton(
+                onClick = onCreateVoucher,
+                enabled = !voucherLoading,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(stringResource(R.string.send_voucher))
+            }
+            voucherError?.let {
+                Text(errorText(it), color = MaterialTheme.colorScheme.error)
+            }
+            if (profile.isAdmin) {
+                OutlinedButton(onClick = onOpenAdmin, modifier = Modifier.fillMaxWidth()) {
+                    Text(stringResource(R.string.admin_title))
+                }
             }
             TextButton(onClick = onDeleteNetwork, modifier = Modifier.fillMaxWidth()) {
                 Text(stringResource(R.string.delete_network), color = MaterialTheme.colorScheme.error)

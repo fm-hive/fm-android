@@ -64,4 +64,13 @@
     <string name="invite_qr_title">QR-приглашение</string>
     <string name="close">Закрыть</string>
     <string name="emoji_title">Эмодзи</string>
+    <string name="attach_file">Прикрепить файл</string>
+    <string name="admin_title">Админка</string>
+    <string name="merge_title">Слияние с другой сетью</string>
+    <string name="merge_peer_invite">Ссылка-приглашение пира</string>
+    <string name="merge_start">Начать слияние</string>
+    <string name="nodes_title">Узлы</string>
+    <string name="nodes_empty">Нет узлов</string>
+    <string name="node_recover">восстановление</string>
+    <string name="send_voucher">Послать ваучер</string>
 </resources>

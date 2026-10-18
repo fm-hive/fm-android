@@ -64,4 +64,13 @@
     <string name="invite_qr_title">Invite QR</string>
     <string name="close">Close</string>
     <string name="emoji_title">Emoji</string>
+    <string name="attach_file">Attach file</string>
+    <string name="admin_title">Admin</string>
+    <string name="merge_title">Merge with another network</string>
+    <string name="merge_peer_invite">Peer invite URL</string>
+    <string name="merge_start">Start merge</string>
+    <string name="nodes_title">Nodes</string>
+    <string name="nodes_empty">No nodes</string>
+    <string name="node_recover">recover</string>
+    <string name="send_voucher">Send voucher</string>
 </resources>

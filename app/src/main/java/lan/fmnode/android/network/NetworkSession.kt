@@ -146,6 +146,7 @@ class NetworkSession(
         subject: String,
         body: String,
         replyToMessageId: String? = null,
+        attachments: JsonArray? = null,
     ): SendResult {
         val data = buildJsonObject {
             put("subject", subject)
@@ -153,6 +154,7 @@ class NetworkSession(
             put("timestamp", nowSeconds())
             put("sender_name", senderName())
             if (replyToMessageId != null) put("reply_to_message_id", replyToMessageId)
+            if (attachments != null && attachments.isNotEmpty()) put("attachments", attachments)
         }.toString()
         return try {
             sendMessages(listOf(signMessage("echomail", data, echoName = echoName)))
@@ -236,6 +238,51 @@ class NetworkSession(
     }
 
     suspend fun key(address: String): PubkeyEntity? = database.pubkeyDao().get(address)
+
+    // --------------------------------------------------------------- admin
+
+    /** Creates a signed invite voucher and returns its code. */
+    suspend fun createVoucher(): String {
+        val nonce = "${System.currentTimeMillis()}-${java.util.UUID.randomUUID().toString().take(8)}"
+        val payload = buildJsonObject {
+            put("type", "invite")
+            put("nonce", nonce)
+        }.toString()
+        val data = buildJsonObject {
+            put("voucher", CryptoService.createJws(seed, payload, publicKey))
+            put("type", "invite")
+        }.toString()
+        val response = api.post("voucher", data, auth)
+        return when (response) {
+            is JsonPrimitive -> response.content
+            is JsonObject -> response.string("voucher")
+                ?: throw FmApiException(0, "invalid voucher response")
+            else -> throw FmApiException(0, "invalid voucher response")
+        }
+    }
+
+    /** Nodelist as reported by the node. */
+    suspend fun nodeList(): List<JsonObject> {
+        val response = api.post("nodes", null, auth = null)
+        return (response as? JsonArray)?.mapNotNull { it as? JsonObject } ?: emptyList()
+    }
+
+    /**
+     * Proposes a merge to the peer from its invite: sends the merge request to
+     * our own node (phase 0 starts inside our network).
+     */
+    suspend fun startMerge(peer: Invite): String {
+        val peerKey = peer.nodePublicKey ?: throw FmApiException(0, "the invite has no peer public key")
+        val data = buildJsonObject {
+            put("url", peer.apiUrl)
+            if (!peer.address.isNullOrBlank()) put("address", peer.address)
+            put("pubkey", Encoding.base64Encode(peerKey))
+        }.toString()
+        val response = api.post("merge", data, auth)
+        return (response as? JsonObject)?.string("state_key")
+            ?: (response as? JsonObject)?.string("status")
+            ?: "ok"
+    }
 
     /** Requesters waiting for our key (the UI offers to send it, stage 4). */
     suspend fun pendingPubkeyRequests(): List<Pair<String, String>> {

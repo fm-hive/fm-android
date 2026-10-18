@@ -15,6 +15,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import lan.fmnode.android.ui.AppViewModel
 import lan.fmnode.android.ui.FmRoot
+import lan.fmnode.android.ui.ScanPurpose
 import lan.fmnode.android.ui.theme.FmTheme
 
 class MainActivity : ComponentActivity() {
@@ -37,6 +38,22 @@ class MainActivity : ComponentActivity() {
                             contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
                         }.getOrNull()
                         viewModel.onImportFile(text)
+                    }
+                }
+                val attachLauncher = rememberLauncherForActivityResult(
+                    ActivityResultContracts.OpenMultipleDocuments(),
+                ) { uris: List<Uri> ->
+                    if (uris.isNotEmpty()) {
+                        val files = uris.mapNotNull { uri ->
+                            runCatching {
+                                val name = uri.lastPathSegment?.substringAfterLast('/') ?: "file"
+                                val type = contentResolver.getType(uri) ?: "application/octet-stream"
+                                val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                                    ?: return@runCatching null
+                                Triple(name, type, bytes)
+                            }.getOrNull()
+                        }
+                        viewModel.addAttachments(files)
                     }
                 }
                 var pendingExport by remember { mutableStateOf<String?>(null) }
@@ -99,9 +116,19 @@ class MainActivity : ComponentActivity() {
                     onOpenProtocols = viewModel::openProtocols,
                     onCloseProtocols = viewModel::closeProtocols,
                     onCastVote = viewModel::castVote,
-                    onOpenScanner = viewModel::openScanner,
+                    onOpenScanner = { viewModel.openScanner(ScanPurpose.AddNetwork) },
                     onCloseScanner = viewModel::closeScanner,
                     onQrScanned = viewModel::onQrScanned,
+                    onAttachFiles = { attachLauncher.launch(arrayOf("*/*")) },
+                    onRemoveAttachment = viewModel::removeAttachment,
+                    onOpenAdmin = viewModel::openAdmin,
+                    onCloseAdmin = viewModel::closeAdmin,
+                    onAdminRefresh = viewModel::loadNodes,
+                    onAdminMergeUrl = viewModel::setAdminMergeUrl,
+                    onStartMerge = viewModel::startMerge,
+                    onScanPeer = { viewModel.openScanner(ScanPurpose.Merge) },
+                    onCreateVoucher = viewModel::createVoucher,
+                    onDismissVoucher = viewModel::dismissVoucher,
                     onExportKeys = { password ->
                         viewModel.exportKeysJson(password)?.let { json ->
                             pendingExport = json

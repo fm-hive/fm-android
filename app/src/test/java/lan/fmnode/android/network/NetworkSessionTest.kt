@@ -51,9 +51,11 @@ class NetworkSessionTest {
     private val sentMessages = mutableListOf<JsonObject>()
     private val serviceRequests = mutableListOf<JsonObject>()
     private var lastSendReceiveControl: JsonObject? = null
+    private var lastControl: JsonObject? = null
     private var echoList: JsonElement = buildJsonArray {}
     private var sendReceiveResponse: JsonObject = emptySendReceive()
     private var otherAddress = ":0:2"
+    private var voucherResponse: JsonElement = JsonPrimitive("voucher-code-1")
 
     private fun emptySendReceive(): JsonObject = buildJsonObject {
         put("messages", buildJsonArray {})
@@ -71,6 +73,7 @@ class NetworkSessionTest {
             override fun dispatch(request: RecordedRequest): MockResponse {
                 val opened = node.open(request.body.readUtf8())
                 val control = Json.parseToJsonElement(opened.control).jsonObject
+                lastControl = control
                 val name = (control["request"] as? JsonPrimitive)?.content
                 val data = control["data"] as? JsonObject
                 val response: JsonElement = when (name) {
@@ -86,6 +89,15 @@ class NetworkSessionTest {
                         // an empty list (also prevents a feedback loop when the
                         // auto pubkey response itself is sent).
                         if ((outgoing?.size ?: 0) > 0) emptySendReceive() else sendReceiveResponse
+                    }
+                    "voucher" -> voucherResponse
+                    "nodes" -> buildJsonArray {
+                        add(buildJsonObject { put("address", ":0:1"); put("url", "https://node.example") })
+                        add(buildJsonObject { put("address", ":0:2"); put("is_recover_node", true) })
+                    }
+                    "merge" -> buildJsonObject {
+                        put("status", "merge_proposed")
+                        put("state_key", "merge::0:0_:1:0_1")
                     }
                     "service" -> {
                         (data?.get("messages") as? JsonArray)?.forEach { element ->
@@ -318,6 +330,54 @@ class NetworkSessionTest {
             assertEquals(
                 Encoding.base64Encode(userPublicKey),
                 request["requestor_pubkey"]!!.jsonPrimitive.content,
+            )
+        }
+    }
+
+    @Test
+    fun `createVoucher signs the invite payload and returns the code`() {
+        runBlocking {
+            val code = session.createVoucher()
+            assertEquals("voucher-code-1", code)
+            val data = lastControl!!["data"]!!.jsonObject
+            val jws = data["voucher"]!!.jsonPrimitive.content
+            assertTrue(CryptoService.verifyJws(jws, userPublicKey))
+            val payload = Json.parseToJsonElement(CryptoService.jwsPayload(jws)!!).jsonObject
+            assertEquals("invite", payload["type"]!!.jsonPrimitive.content)
+            assertTrue(payload["nonce"]!!.jsonPrimitive.content.isNotBlank())
+            assertEquals("invite", data["type"]!!.jsonPrimitive.content)
+        }
+    }
+
+    @Test
+    fun `node list is parsed`() {
+        runBlocking {
+            val nodes = session.nodeList()
+            assertEquals(2, nodes.size)
+            assertEquals(":0:1", nodes[0]["address"]!!.jsonPrimitive.content)
+            assertEquals("https://node.example", nodes[0]["url"]!!.jsonPrimitive.content)
+            assertEquals("true", nodes[1]["is_recover_node"]!!.jsonPrimitive.content)
+        }
+    }
+
+    @Test
+    fun `startMerge sends the peer invite to our node`() {
+        runBlocking {
+            val peer = Invite(
+                appUrl = "https://peer.example/app",
+                apiUrl = "https://peer.example/api",
+                nodePublicKey = otherPublicKey,
+                voucher = null,
+                address = ":1:0",
+            )
+            val stateKey = session.startMerge(peer)
+            assertEquals("merge::0:0_:1:0_1", stateKey)
+            val data = lastControl!!["data"]!!.jsonObject
+            assertEquals("https://peer.example/api", data["url"]!!.jsonPrimitive.content)
+            assertEquals(":1:0", data["address"]!!.jsonPrimitive.content)
+            assertEquals(
+                Encoding.base64Encode(otherPublicKey),
+                data["pubkey"]!!.jsonPrimitive.content,
             )
         }
     }
