@@ -22,12 +22,15 @@ Work in progress. Implemented so far:
   keys import/export in the fm-app format;
 - per-network Room store and send_receive sync (echomail, netmail, key
   exchange, outbox, delivered-packet acks);
-- UI: networks/unlock/add-network (paste or QR scan), echoes list and
-  conversation with a markdown composer (emoji), netmail folders/detail/
-  composer, search, protocols list with vote casting, settings with invite
-  QR sharing;
-- 43 unit tests (crypto vectors, policy, sync, DAO, markdown, i18n parity);
-  ru/en strings for every implemented screen.
+- UI: networks/unlock/add-network (paste or QR scan), echo conferences with
+  subscribe switches, conversation with markdown + emoji + attachments,
+  reactions, netmail folders/detail/composer, search, protocols screen
+  (vote/election voting, refill responses), outbox, settings (invite QR,
+  vouchers, keys import/export), admin (nodelist, merge initiation,
+  excommunicate proposals);
+- client_synchronize multi-device sync; automatic policy re-sign;
+- all fm-app translations (997 keys, ru/en) generated into fm_strings.xml;
+- 54 unit tests (crypto vectors, policy, sync, DAO, markdown, i18n parity).
 
 ## Build
 
