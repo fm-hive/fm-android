@@ -94,4 +94,23 @@
     <string name="protocol_respond">Respond 👍</string>
     <string name="election_vote">Vote for the candidate</string>
     <string name="election_retract">Retract</string>
+    <string name="view_policy">Show policy</string>
+    <string name="remove_echo_title">Remove a conference</string>
+    <string name="remove_echo_name">Conference name</string>
+    <string name="remove_echo_reason">Reason</string>
+    <string name="remove_echo_submit">Submit proposal</string>
+    <string name="change_policy_title">Propose a policy change</string>
+    <string name="change_policy_text">Policy text</string>
+    <string name="change_policy_params">Parameters (JSON)</string>
+    <string name="change_policy_all_chunks">Accept only if all chunks pass</string>
+    <string name="change_policy_submit">Submit proposal</string>
+    <string name="moderation_title">Moderation action</string>
+    <string name="moderation_warning">Warning</string>
+    <string name="moderation_punishment">Punishment</string>
+    <string name="moderation_duration">Duration, hours</string>
+    <string name="moderation_reason">Reason</string>
+    <string name="moderation_submit">Apply</string>
+    <string name="moderate">Moderate</string>
+    <string name="merge_sessions_title">Merge messages</string>
+    <string name="merge_sessions_empty">No merge messages</string>
 </resources>

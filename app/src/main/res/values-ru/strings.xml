@@ -94,4 +94,23 @@
     <string name="protocol_respond">Ответить 👍</string>
     <string name="election_vote">Голосовать за кандидата</string>
     <string name="election_retract">Отозвать</string>
+    <string name="view_policy">Показать политику</string>
+    <string name="remove_echo_title">Удаление конференции</string>
+    <string name="remove_echo_name">Название конференции</string>
+    <string name="remove_echo_reason">Причина</string>
+    <string name="remove_echo_submit">Предложить</string>
+    <string name="change_policy_title">Предложить изменение политики</string>
+    <string name="change_policy_text">Текст политики</string>
+    <string name="change_policy_params">Параметры (JSON)</string>
+    <string name="change_policy_all_chunks">Принимать только если прошли все чанки</string>
+    <string name="change_policy_submit">Предложить</string>
+    <string name="moderation_title">Модерация</string>
+    <string name="moderation_warning">Предупреждение</string>
+    <string name="moderation_punishment">Наказание</string>
+    <string name="moderation_duration">Длительность, часы</string>
+    <string name="moderation_reason">Причина</string>
+    <string name="moderation_submit">Применить</string>
+    <string name="moderate">Модерировать</string>
+    <string name="merge_sessions_title">Сообщения слияния</string>
+    <string name="merge_sessions_empty">Нет сообщений слияния</string>
 </resources>

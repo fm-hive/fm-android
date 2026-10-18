@@ -609,3 +609,186 @@ fun CreateEchoDialog(
         },
     )
 }
+
+@Composable
+fun PolicyViewerDialog(text: String, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.policy_title)) },
+        text = {
+            Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+                Text(text, style = MaterialTheme.typography.bodySmall)
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.close)) }
+        },
+    )
+}
+
+@Composable
+fun RemoveEchoDialog(
+    name: String,
+    reason: String,
+    sending: Boolean,
+    status: String?,
+    error: UiError?,
+    onName: (String) -> Unit,
+    onReason: (String) -> Unit,
+    onSubmit: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.remove_echo_title)) },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = onName,
+                    label = { Text(stringResource(R.string.remove_echo_name)) },
+                    singleLine = true,
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = reason,
+                    onValueChange = onReason,
+                    label = { Text(stringResource(R.string.remove_echo_reason)) },
+                )
+                status?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
+                error?.let { Text(errorText(it), color = MaterialTheme.colorScheme.error) }
+                if (sending) {
+                    Spacer(Modifier.height(8.dp))
+                    CircularProgressIndicator(modifier = Modifier.width(24.dp).height(24.dp))
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onSubmit, enabled = !sending) {
+                Text(stringResource(R.string.remove_echo_submit))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
+        },
+    )
+}
+
+@Composable
+fun PolicyEditDialog(
+    text: String,
+    params: String,
+    allChunks: Boolean,
+    sending: Boolean,
+    status: String?,
+    error: UiError?,
+    onText: (String) -> Unit,
+    onParams: (String) -> Unit,
+    onAllChunks: (Boolean) -> Unit,
+    onSubmit: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.change_policy_title)) },
+        text = {
+            Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState())) {
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = onText,
+                    label = { Text(stringResource(R.string.change_policy_text)) },
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = params,
+                    onValueChange = onParams,
+                    label = { Text(stringResource(R.string.change_policy_params)) },
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Switch(checked = allChunks, onCheckedChange = onAllChunks)
+                    Spacer(Modifier.width(8.dp))
+                    Text(stringResource(R.string.change_policy_all_chunks))
+                }
+                status?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
+                error?.let { Text(errorText(it), color = MaterialTheme.colorScheme.error) }
+                if (sending) {
+                    Spacer(Modifier.height(8.dp))
+                    CircularProgressIndicator(modifier = Modifier.width(24.dp).height(24.dp))
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onSubmit, enabled = !sending) {
+                Text(stringResource(R.string.change_policy_submit))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
+        },
+    )
+}
+
+@Composable
+fun ModerationDialog(
+    severity: String,
+    duration: String,
+    reason: String,
+    sending: Boolean,
+    error: UiError?,
+    onSeverity: (String) -> Unit,
+    onDuration: (String) -> Unit,
+    onReason: (String) -> Unit,
+    onSubmit: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.moderation_title)) },
+        text = {
+            Column {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = { onSeverity("warning") }) {
+                        Text(
+                            stringResource(R.string.moderation_warning),
+                            color = if (severity == "warning") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    OutlinedButton(onClick = { onSeverity("punishment") }) {
+                        Text(
+                            stringResource(R.string.moderation_punishment),
+                            color = if (severity == "punishment") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                if (severity == "punishment") {
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = duration,
+                        onValueChange = onDuration,
+                        label = { Text(stringResource(R.string.moderation_duration)) },
+                        singleLine = true,
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = reason,
+                    onValueChange = onReason,
+                    label = { Text(stringResource(R.string.moderation_reason)) },
+                )
+                error?.let { Text(errorText(it), color = MaterialTheme.colorScheme.error) }
+                if (sending) {
+                    Spacer(Modifier.height(8.dp))
+                    CircularProgressIndicator(modifier = Modifier.width(24.dp).height(24.dp))
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onSubmit, enabled = !sending) {
+                Text(stringResource(R.string.moderation_submit))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
+        },
+    )
+}

@@ -205,6 +205,27 @@ data class UiState(
     val createEchoName: String = "",
     val createEchoDescription: String = "",
     val createEchoError: UiError? = null,
+    val policyViewer: Boolean = false,
+    val policyViewText: String = "",
+    val removeEchoDialog: Boolean = false,
+    val removeEchoName: String = "",
+    val removeEchoReason: String = "",
+    val removeEchoSending: Boolean = false,
+    val removeEchoStatus: String? = null,
+    val removeEchoError: UiError? = null,
+    val policyEditDialog: Boolean = false,
+    val policyEditText: String = "",
+    val policyEditParams: String = "",
+    val policyEditAllChunks: Boolean = false,
+    val policyEditSending: Boolean = false,
+    val policyEditStatus: String? = null,
+    val policyEditError: UiError? = null,
+    val moderationTarget: MessageUi? = null,
+    val moderationSeverity: String = "warning",
+    val moderationDuration: String = "24",
+    val moderationReason: String = "",
+    val moderationSending: Boolean = false,
+    val moderationError: UiError? = null,
     val add: AddNetworkState = AddNetworkState(),
     val unlockError: UiError? = null,
     val syncError: UiError? = null,
@@ -1036,6 +1057,205 @@ class AppViewModel(
             } catch (e: Exception) {
                 _state.update {
                     it.copy(excommSending = false, excommError = UiError.Failed(e.message ?: "Failed"))
+                }
+            }
+        }
+    }
+
+    // ------------------------------------------------------------ policy view
+
+    fun openPolicyViewer() {
+        val payload = _state.value.activeProfile?.policyJson ?: return
+        val text = runCatching {
+            val parsed = messageJson.parseToJsonElement(payload)
+            formatPolicy(parsed)
+        }.getOrDefault(payload)
+        _state.update { it.copy(policyViewer = true, policyViewText = text) }
+    }
+
+    fun closePolicyViewer() {
+        _state.update { it.copy(policyViewer = false) }
+    }
+
+    // ------------------------------------------------------------- remove echo
+
+    fun openRemoveEchoDialog() {
+        _state.update {
+            it.copy(removeEchoDialog = true, removeEchoName = "", removeEchoReason = "", removeEchoStatus = null, removeEchoError = null)
+        }
+    }
+
+    fun closeRemoveEchoDialog() {
+        _state.update { it.copy(removeEchoDialog = false) }
+    }
+
+    fun setRemoveEchoName(value: String) =
+        _state.update { it.copy(removeEchoName = value, removeEchoError = null) }
+
+    fun setRemoveEchoReason(value: String) =
+        _state.update { it.copy(removeEchoReason = value, removeEchoError = null) }
+
+    fun submitRemoveEcho() {
+        val opened = networkSession ?: return
+        val target = _state.value.removeEchoName.trim()
+        if (target.isEmpty()) {
+            _state.update { it.copy(removeEchoError = UiError.Failed("Echo name is required")) }
+            return
+        }
+        viewModelScope.launch {
+            _state.update { it.copy(removeEchoSending = true, removeEchoError = null, removeEchoStatus = null) }
+            try {
+                val data = buildJsonObject {
+                    put("proto", "remove_echo")
+                    put("type", "")
+                    put("from", opened.profile.address)
+                    put("to", "all")
+                    put("message", _state.value.removeEchoReason.trim().ifBlank { "Remove echo: $target" })
+                    put("date", java.time.Instant.now().toString())
+                    put("echo", "Moderators council")
+                    put("node1", opened.profile.address)
+                    put("subject", "Remove echo: $target")
+                    put("variants", kotlinx.serialization.json.buildJsonArray {
+                        add(JsonPrimitive("remove"))
+                        add(JsonPrimitive("keep"))
+                    })
+                    put("echo_name", target)
+                }.toString()
+                opened.postProtocol("Moderators council", "remove_echo", data)
+                _state.update { it.copy(removeEchoSending = false, removeEchoStatus = "Proposal submitted") }
+                syncOnce(opened)
+            } catch (e: Exception) {
+                _state.update {
+                    it.copy(removeEchoSending = false, removeEchoError = UiError.Failed(e.message ?: "Failed"))
+                }
+            }
+        }
+    }
+
+    // ------------------------------------------------------------- policy edit
+
+    fun openPolicyEditDialog() {
+        val payload = _state.value.activeProfile?.policyJson ?: return
+        val parsed = runCatching { messageJson.parseToJsonElement(payload).jsonObject }.getOrNull()
+        val policy = (parsed?.get("policy") as? JsonObject)
+        val text = (policy?.get("text") as? JsonPrimitive)?.contentOrNull.orEmpty()
+        val params = policy?.get("parameters")?.let {
+            runCatching { prettyJson.encodeToString(JsonElement.serializer(), it) }.getOrNull().orEmpty()
+        }.orEmpty()
+        _state.update {
+            it.copy(
+                policyEditDialog = true,
+                policyEditText = text,
+                policyEditParams = params,
+                policyEditAllChunks = false,
+                policyEditStatus = null,
+                policyEditError = null,
+            )
+        }
+    }
+
+    fun closePolicyEditDialog() {
+        _state.update { it.copy(policyEditDialog = false) }
+    }
+
+    fun setPolicyEditText(value: String) = _state.update { it.copy(policyEditText = value) }
+    fun setPolicyEditParams(value: String) = _state.update { it.copy(policyEditParams = value) }
+    fun setPolicyEditAllChunks(value: Boolean) = _state.update { it.copy(policyEditAllChunks = value) }
+
+    fun submitPolicyEdit() {
+        val opened = networkSession ?: return
+        val parameters = runCatching {
+            messageJson.parseToJsonElement(_state.value.policyEditParams)
+        }.getOrElse {
+            _state.update { it.copy(policyEditError = UiError.Failed("Parameters must be valid JSON")) }
+            return
+        }
+        viewModelScope.launch {
+            _state.update { it.copy(policyEditSending = true, policyEditError = null, policyEditStatus = null) }
+            try {
+                val data = buildJsonObject {
+                    put("proto", "change_policy")
+                    put("from", opened.profile.address)
+                    put("to", "all")
+                    put("subject", "Change policy")
+                    put("message", "Policy change proposal")
+                    put("date", java.time.Instant.now().toString())
+                    put("node1", opened.profile.address)
+                    put("all_chunks_only", _state.value.policyEditAllChunks)
+                    put(
+                        "proposed_policy",
+                        buildJsonObject {
+                            put("text", _state.value.policyEditText)
+                            put("parameters", parameters)
+                        },
+                    )
+                }.toString()
+                opened.postProtocol("Admin council", "change_policy", data)
+                _state.update { it.copy(policyEditSending = false, policyEditStatus = "Proposal submitted") }
+                syncOnce(opened)
+            } catch (e: Exception) {
+                _state.update {
+                    it.copy(policyEditSending = false, policyEditError = UiError.Failed(e.message ?: "Failed"))
+                }
+            }
+        }
+    }
+
+    // ------------------------------------------------------------- moderation
+
+    fun openModeration(message: MessageUi) {
+        _state.update {
+            it.copy(moderationTarget = message, moderationSeverity = "warning", moderationDuration = "24", moderationReason = "", moderationError = null)
+        }
+    }
+
+    fun closeModeration() = _state.update { it.copy(moderationTarget = null) }
+
+    fun setModerationSeverity(value: String) = _state.update { it.copy(moderationSeverity = value) }
+    fun setModerationDuration(value: String) = _state.update { it.copy(moderationDuration = value) }
+    fun setModerationReason(value: String) = _state.update { it.copy(moderationReason = value) }
+
+    fun submitModeration() {
+        val opened = networkSession ?: return
+        val echo = _state.value.selectedEcho ?: return
+        val target = _state.value.moderationTarget ?: return
+        viewModelScope.launch {
+            _state.update { it.copy(moderationSending = true, moderationError = null) }
+            try {
+                val original = opened.database.messageDao().getById(target.messageId)
+                val originalJson = buildJsonObject {
+                    put("message_id", target.messageId)
+                    put("sender_address", target.senderAddress)
+                    put("timestamp", target.timestamp)
+                    put("type", original?.type ?: "echomail")
+                    put("echo_name", echo.name)
+                    if (original != null) {
+                        put("data", original.dataJson)
+                        if (original.jws != null) put("jws", original.jws)
+                    }
+                }
+                val data = buildJsonObject {
+                    put("severity", _state.value.moderationSeverity)
+                    put("to", target.senderAddress)
+                    put("message", _state.value.moderationReason.trim().ifBlank {
+                        "Moderation: ${_state.value.moderationSeverity}"
+                    })
+                    put("echo", echo.name)
+                    put("originalMessage", originalJson)
+                    put("rules", buildJsonObject {})
+                    if (_state.value.moderationSeverity == "punishment") {
+                        put(
+                            "duration_hours",
+                            _state.value.moderationDuration.trim().toIntOrNull() ?: 24,
+                        )
+                    }
+                }.toString()
+                opened.postProtocol(echo.name, "echomail", data)
+                _state.update { it.copy(moderationSending = false, moderationTarget = null) }
+                syncOnce(opened)
+            } catch (e: Exception) {
+                _state.update {
+                    it.copy(moderationSending = false, moderationError = UiError.Failed(e.message ?: "Failed"))
                 }
             }
         }

@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Explore
+import androidx.compose.material.icons.filled.Gavel
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.EmojiEmotions
 import androidx.compose.material.icons.filled.HowToVote
@@ -154,7 +155,71 @@ fun FmRoot(
     onSubmitExcomm: () -> Unit = {},
     onRespondRefill: (ProtocolUi) -> Unit = {},
     onVoteElection: (ProtocolUi, String) -> Unit = { _, _ -> },
+    onOpenPolicyViewer: () -> Unit = {},
+    onClosePolicyViewer: () -> Unit = {},
+    onOpenRemoveEcho: () -> Unit = {},
+    onCloseRemoveEcho: () -> Unit = {},
+    onRemoveEchoName: (String) -> Unit = {},
+    onRemoveEchoReason: (String) -> Unit = {},
+    onSubmitRemoveEcho: () -> Unit = {},
+    onOpenPolicyEdit: () -> Unit = {},
+    onClosePolicyEdit: () -> Unit = {},
+    onPolicyEditText: (String) -> Unit = {},
+    onPolicyEditParams: (String) -> Unit = {},
+    onPolicyEditAllChunks: (Boolean) -> Unit = {},
+    onSubmitPolicyEdit: () -> Unit = {},
+    onOpenModeration: (MessageUi) -> Unit = {},
+    onCloseModeration: () -> Unit = {},
+    onModerationSeverity: (String) -> Unit = {},
+    onModerationDuration: (String) -> Unit = {},
+    onModerationReason: (String) -> Unit = {},
+    onSubmitModeration: () -> Unit = {},
 ) {
+    if (state.policyViewer) {
+        PolicyViewerDialog(text = state.policyViewText, onDismiss = onClosePolicyViewer)
+    }
+    if (state.removeEchoDialog) {
+        RemoveEchoDialog(
+            name = state.removeEchoName,
+            reason = state.removeEchoReason,
+            sending = state.removeEchoSending,
+            status = state.removeEchoStatus,
+            error = state.removeEchoError,
+            onName = onRemoveEchoName,
+            onReason = onRemoveEchoReason,
+            onSubmit = onSubmitRemoveEcho,
+            onDismiss = onCloseRemoveEcho,
+        )
+    }
+    if (state.policyEditDialog) {
+        PolicyEditDialog(
+            text = state.policyEditText,
+            params = state.policyEditParams,
+            allChunks = state.policyEditAllChunks,
+            sending = state.policyEditSending,
+            status = state.policyEditStatus,
+            error = state.policyEditError,
+            onText = onPolicyEditText,
+            onParams = onPolicyEditParams,
+            onAllChunks = onPolicyEditAllChunks,
+            onSubmit = onSubmitPolicyEdit,
+            onDismiss = onClosePolicyEdit,
+        )
+    }
+    state.moderationTarget?.let {
+        ModerationDialog(
+            severity = state.moderationSeverity,
+            duration = state.moderationDuration,
+            reason = state.moderationReason,
+            sending = state.moderationSending,
+            error = state.moderationError,
+            onSeverity = onModerationSeverity,
+            onDuration = onModerationDuration,
+            onReason = onModerationReason,
+            onSubmit = onSubmitModeration,
+            onDismiss = onCloseModeration,
+        )
+    }
     if (state.createEchoDialog) {
         CreateEchoDialog(
             name = state.createEchoName,
@@ -227,11 +292,13 @@ fun FmRoot(
             echoName = state.selectedEcho?.name ?: "",
             messages = state.messages,
             syncing = state.syncing,
+            canModerate = state.activeProfile?.let { it.isAdmin || it.isModerator } == true,
             onBack = onBackFromEcho,
             onRefresh = onRefresh,
             onCompose = onOpenCompose,
             onRefill = onOpenRefillDialog,
             onReact = onReactMessage,
+            onModerate = onOpenModeration,
         )
         AppScreen.Compose -> EchoComposeScreen(
             echoName = state.selectedEcho?.name ?: "",
@@ -311,9 +378,12 @@ fun FmRoot(
             excommSending = state.excommSending,
             excommStatus = state.excommStatus,
             excommError = state.excommError,
+            mergeMessages = state.protocols.filter { it.type == "merge" },
             onExcommTarget = onExcommTarget,
             onExcommReason = onExcommReason,
             onSubmitExcomm = onSubmitExcomm,
+            onOpenRemoveEcho = onOpenRemoveEcho,
+            onOpenPolicyEdit = onOpenPolicyEdit,
         )
         AppScreen.Settings -> SettingsScreen(
             profile = state.activeProfile,
@@ -329,6 +399,7 @@ fun FmRoot(
             voucherError = state.voucherError,
             onDismissVoucher = onDismissVoucher,
             onOpenOutbox = onOpenOutbox,
+            onOpenPolicyViewer = onOpenPolicyViewer,
         )
     }
 }
@@ -741,11 +812,13 @@ fun EchoConversationScreen(
     echoName: String,
     messages: List<MessageUi>,
     syncing: Boolean,
+    canModerate: Boolean,
     onBack: () -> Unit,
     onRefresh: () -> Unit,
     onCompose: () -> Unit,
     onRefill: () -> Unit,
     onReact: (MessageUi, String) -> Unit,
+    onModerate: (MessageUi) -> Unit,
 ) {
     Scaffold(
         topBar = {
@@ -799,14 +872,24 @@ fun EchoConversationScreen(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             items(messages, key = { it.messageId }) { message ->
-                MessageCard(message = message, onReact = onReact)
+                MessageCard(
+                    message = message,
+                    canModerate = canModerate,
+                    onReact = onReact,
+                    onModerate = onModerate,
+                )
             }
         }
     }
 }
 
 @Composable
-private fun MessageCard(message: MessageUi, onReact: (MessageUi, String) -> Unit) {
+private fun MessageCard(
+    message: MessageUi,
+    canModerate: Boolean,
+    onReact: (MessageUi, String) -> Unit,
+    onModerate: (MessageUi) -> Unit,
+) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.fillMaxWidth().padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -816,6 +899,11 @@ private fun MessageCard(message: MessageUi, onReact: (MessageUi, String) -> Unit
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.weight(1f),
                 )
+                if (canModerate && !message.own) {
+                    IconButton(onClick = { onModerate(message) }) {
+                        Icon(Icons.Default.Gavel, contentDescription = stringResource(R.string.moderate))
+                    }
+                }
                 Text(
                     text = formatTimestamp(message.timestamp),
                     style = MaterialTheme.typography.labelSmall,

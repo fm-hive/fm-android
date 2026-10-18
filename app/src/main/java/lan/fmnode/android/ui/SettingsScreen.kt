@@ -55,6 +55,7 @@ fun SettingsScreen(
     voucherError: UiError?,
     onDismissVoucher: () -> Unit,
     onOpenOutbox: () -> Unit,
+    onOpenPolicyViewer: () -> Unit,
 ) {
     var showExportDialog by remember { mutableStateOf(false) }
     var showInviteDialog by remember { mutableStateOf(false) }
@@ -151,6 +152,9 @@ fun SettingsScreen(
             }
             OutlinedButton(onClick = onOpenOutbox, modifier = Modifier.fillMaxWidth()) {
                 Text(stringResource(R.string.outbox_title))
+            }
+            OutlinedButton(onClick = onOpenPolicyViewer, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.view_policy))
             }
             if (profile.isAdmin) {
                 OutlinedButton(onClick = onOpenAdmin, modifier = Modifier.fillMaxWidth()) {

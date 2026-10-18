@@ -49,6 +49,7 @@ fun AdminScreen(
     excommSending: Boolean,
     excommStatus: String?,
     excommError: UiError?,
+    mergeMessages: List<ProtocolUi>,
     onBack: () -> Unit,
     onRefresh: () -> Unit,
     onMergeUrl: (String) -> Unit,
@@ -57,6 +58,8 @@ fun AdminScreen(
     onExcommTarget: (String) -> Unit,
     onExcommReason: (String) -> Unit,
     onSubmitExcomm: () -> Unit,
+    onOpenRemoveEcho: () -> Unit,
+    onOpenPolicyEdit: () -> Unit,
 ) {
     Scaffold(
         topBar = {
@@ -129,6 +132,29 @@ fun AdminScreen(
             }
             excommStatus?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
             excommError?.let { Text(errorText(it), color = MaterialTheme.colorScheme.error) }
+
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = onOpenRemoveEcho) {
+                    Text(stringResource(R.string.remove_echo_title))
+                }
+                OutlinedButton(onClick = onOpenPolicyEdit) {
+                    Text(stringResource(R.string.change_policy_title))
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+            Text(stringResource(R.string.merge_sessions_title), style = MaterialTheme.typography.titleMedium)
+            if (mergeMessages.isEmpty()) {
+                Text(stringResource(R.string.merge_sessions_empty), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else {
+                mergeMessages.take(10).forEach { message ->
+                    Text(
+                        text = "${message.echoName}: ${message.title}",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
 
             Spacer(Modifier.height(8.dp))
             Text(stringResource(R.string.nodes_title), style = MaterialTheme.typography.titleMedium)
