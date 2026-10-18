@@ -85,6 +85,19 @@ fun FmRoot(
     onComposeSubject: (String) -> Unit = {},
     onComposeBody: (String) -> Unit = {},
     onSendCompose: () -> Unit = {},
+    onOpenNetmail: () -> Unit = {},
+    onOpenSettings: () -> Unit = {},
+    onNetmailFolder: (NetmailFolder) -> Unit = {},
+    onOpenNetmailMessage: (String) -> Unit = {},
+    onBackFromNetmailDetail: () -> Unit = {},
+    onOpenNetmailCompose: () -> Unit = {},
+    onBackFromNetmailCompose: () -> Unit = {},
+    onNetmailRecipient: (String) -> Unit = {},
+    onNetmailSubject: (String) -> Unit = {},
+    onNetmailBody: (String) -> Unit = {},
+    onSendNetmail: () -> Unit = {},
+    onSelectEchoTab: () -> Unit = {},
+    onDeleteActiveNetwork: () -> Unit = {},
 ) {
     when (state.screen) {
         AppScreen.Unlock -> UnlockScreen(state.unlockError, onUnlock)
@@ -116,6 +129,8 @@ fun FmRoot(
             onNetworks = onOpenNetworks,
             onLock = onLock,
             onSelectEcho = onSelectEcho,
+            onNetmail = onOpenNetmail,
+            onSettings = onOpenSettings,
         )
         AppScreen.Echo -> EchoConversationScreen(
             echoName = state.selectedEcho?.name ?: "",
@@ -132,6 +147,34 @@ fun FmRoot(
             onSubject = onComposeSubject,
             onBody = onComposeBody,
             onSend = onSendCompose,
+        )
+        AppScreen.Netmail -> NetmailScreen(
+            messages = state.netmail,
+            folder = state.netmailFolder,
+            onFolder = onNetmailFolder,
+            onOpen = onOpenNetmailMessage,
+            onCompose = onOpenNetmailCompose,
+            onEchoes = onSelectEchoTab,
+            onSettings = onOpenSettings,
+        )
+        AppScreen.NetmailDetail -> NetmailDetailScreen(
+            message = state.selectedNetmail,
+            onBack = onBackFromNetmailDetail,
+        )
+        AppScreen.NetmailCompose -> NetmailComposeScreen(
+            state = state.netmailCompose,
+            onBack = onBackFromNetmailCompose,
+            onRecipient = onNetmailRecipient,
+            onSubject = onNetmailSubject,
+            onBody = onNetmailBody,
+            onSend = onSendNetmail,
+        )
+        AppScreen.Settings -> SettingsScreen(
+            profile = state.activeProfile,
+            onLock = onLock,
+            onDeleteNetwork = onDeleteActiveNetwork,
+            onEchoes = onSelectEchoTab,
+            onNetmail = onOpenNetmail,
         )
     }
 }
@@ -418,8 +461,13 @@ fun EchoesListScreen(
     onNetworks: () -> Unit,
     onLock: () -> Unit,
     onSelectEcho: (String) -> Unit,
+    onNetmail: () -> Unit,
+    onSettings: () -> Unit,
 ) {
     Scaffold(
+        bottomBar = {
+            MainBottomBar(AppScreen.Echoes, onEchoes = {}, onNetmail = onNetmail, onSettings = onSettings)
+        },
         topBar = {
             CenterAlignedTopAppBar(
                 title = { Text(title, maxLines = 1) },
@@ -777,6 +825,7 @@ private fun EchoPreview() {
                         messageId = "1",
                         senderName = "Petya",
                         senderAddress = ":0:2",
+                        recipientAddress = null,
                         timestamp = 1792200000,
                         subject = "Привет",
                         body = "Как дела?",
@@ -786,6 +835,7 @@ private fun EchoPreview() {
                         messageId = "2",
                         senderName = "Ivan",
                         senderAddress = ":0:1",
+                        recipientAddress = null,
                         timestamp = 1792200600,
                         subject = "Re: Привет",
                         body = "Всё хорошо!",

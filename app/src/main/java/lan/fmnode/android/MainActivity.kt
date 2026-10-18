@@ -46,6 +46,19 @@ class MainActivity : ComponentActivity() {
                     onComposeSubject = viewModel::setComposeSubject,
                     onComposeBody = viewModel::setComposeBody,
                     onSendCompose = viewModel::sendCompose,
+                    onOpenNetmail = viewModel::openNetmail,
+                    onOpenSettings = viewModel::openSettings,
+                    onNetmailFolder = viewModel::selectNetmailFolder,
+                    onOpenNetmailMessage = viewModel::openNetmailMessage,
+                    onBackFromNetmailDetail = viewModel::backFromNetmailDetail,
+                    onOpenNetmailCompose = { viewModel.openNetmailCompose() },
+                    onBackFromNetmailCompose = viewModel::backFromNetmailCompose,
+                    onNetmailRecipient = viewModel::setNetmailRecipient,
+                    onNetmailSubject = viewModel::setNetmailSubject,
+                    onNetmailBody = viewModel::setNetmailBody,
+                    onSendNetmail = viewModel::sendNetmailCompose,
+                    onSelectEchoTab = viewModel::backFromEcho,
+                    onDeleteActiveNetwork = viewModel::deleteActiveNetwork,
                 )
             }
         }

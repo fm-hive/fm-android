@@ -29,7 +29,14 @@ import lan.fmnode.android.session.Session
 import lan.fmnode.android.storage.MessageRow
 import lan.fmnode.android.storage.ProfileEntity
 
-enum class AppScreen { Unlock, Networks, AddNetwork, Echoes, Echo, Compose }
+enum class AppScreen {
+    Unlock, Networks, AddNetwork,
+    Echoes, Echo, Compose,
+    Netmail, NetmailDetail, NetmailCompose,
+    Settings,
+}
+
+enum class NetmailFolder { Inbox, Sent }
 
 enum class AddStep { Url, Policy }
 
@@ -51,10 +58,20 @@ data class MessageUi(
     val messageId: String,
     val senderName: String,
     val senderAddress: String,
+    val recipientAddress: String?,
     val timestamp: Long,
     val subject: String,
     val body: String,
     val own: Boolean,
+)
+
+data class NetmailComposeState(
+    val recipient: String = "",
+    val subject: String = "",
+    val body: String = "",
+    val sending: Boolean = false,
+    val error: UiError? = null,
+    val keyRequested: Boolean = false,
 )
 
 data class ComposeState(
@@ -88,6 +105,10 @@ data class UiState(
     val selectedEcho: EchoUi? = null,
     val messages: List<MessageUi> = emptyList(),
     val compose: ComposeState = ComposeState(),
+    val netmail: List<MessageUi> = emptyList(),
+    val netmailFolder: NetmailFolder = NetmailFolder.Inbox,
+    val selectedNetmail: MessageUi? = null,
+    val netmailCompose: NetmailComposeState = NetmailComposeState(),
     val add: AddNetworkState = AddNetworkState(),
     val unlockError: UiError? = null,
     val syncError: UiError? = null,
@@ -218,6 +239,13 @@ class AppViewModel(
                         }
                         s.copy(echoes = list, selectedEcho = selected)
                     }
+                }
+            }
+            launch {
+                opened.database.messageDao().observeEchoRows(NetworkSession.NETMAIL_ECHO).collect { rows ->
+                    val me = opened.profile.address
+                    val myName = opened.profile.displayName
+                    _state.update { it.copy(netmail = rows.map { row -> row.toUi(me, myName) }) }
                 }
             }
             launch {
@@ -473,6 +501,97 @@ class AppViewModel(
         }
     }
 
+    // ------------------------------------------------------------------ netmail
+
+    fun openNetmail() {
+        _state.update { it.copy(screen = AppScreen.Netmail) }
+    }
+
+    fun selectNetmailFolder(folder: NetmailFolder) {
+        _state.update { it.copy(netmailFolder = folder) }
+    }
+
+    fun openNetmailMessage(messageId: String) {
+        viewModelScope.launch {
+            val opened = networkSession ?: return@launch
+            val message = _state.value.netmail.firstOrNull { it.messageId == messageId } ?: return@launch
+            runCatching { opened.markRead(NetworkSession.NETMAIL_ECHO, System.currentTimeMillis() / 1000) }
+            _state.update { it.copy(screen = AppScreen.NetmailDetail, selectedNetmail = message) }
+        }
+    }
+
+    fun backFromNetmailDetail() {
+        _state.update { it.copy(screen = AppScreen.Netmail, selectedNetmail = null) }
+    }
+
+    fun openNetmailCompose(recipient: String = "") {
+        _state.update {
+            it.copy(
+                screen = AppScreen.NetmailCompose,
+                netmailCompose = NetmailComposeState(recipient = recipient),
+            )
+        }
+    }
+
+    fun backFromNetmailCompose() {
+        _state.update { it.copy(screen = AppScreen.Netmail, netmailCompose = NetmailComposeState()) }
+    }
+
+    fun setNetmailRecipient(value: String) =
+        _state.update { it.copy(netmailCompose = it.netmailCompose.copy(recipient = value, error = null)) }
+
+    fun setNetmailSubject(value: String) =
+        _state.update { it.copy(netmailCompose = it.netmailCompose.copy(subject = value, error = null)) }
+
+    fun setNetmailBody(value: String) =
+        _state.update { it.copy(netmailCompose = it.netmailCompose.copy(body = value, error = null)) }
+
+    fun sendNetmailCompose() {
+        val current = _state.value.netmailCompose
+        val opened = networkSession ?: return
+        if (current.recipient.isBlank()) {
+            _state.update { it.copy(netmailCompose = it.netmailCompose.copy(error = UiError.Failed("Recipient is required"))) }
+            return
+        }
+        if (current.body.isBlank()) {
+            _state.update { it.copy(netmailCompose = it.netmailCompose.copy(error = UiError.Failed("Message is empty"))) }
+            return
+        }
+        viewModelScope.launch {
+            _state.update { it.copy(netmailCompose = it.netmailCompose.copy(sending = true, error = null)) }
+            try {
+                val result = opened.sendNetmail(
+                    recipient = current.recipient.trim(),
+                    subject = current.subject.trim(),
+                    body = current.body.trim(),
+                )
+                if (result.needsKey) {
+                    _state.update {
+                        it.copy(netmailCompose = it.netmailCompose.copy(sending = false, keyRequested = true))
+                    }
+                    return@launch
+                }
+                _state.update { it.copy(screen = AppScreen.Netmail, netmailCompose = NetmailComposeState()) }
+                syncOnce(opened)
+            } catch (e: Exception) {
+                _state.update {
+                    it.copy(netmailCompose = it.netmailCompose.copy(sending = false, error = UiError.Failed(e.message ?: "Failed")))
+                }
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------- settings
+
+    fun openSettings() {
+        _state.update { it.copy(screen = AppScreen.Settings) }
+    }
+
+    fun deleteActiveNetwork() {
+        val id = _state.value.activeId ?: return
+        deleteProfile(id)
+    }
+
     // ------------------------------------------------------------------ helpers
 
     private fun MessageRow.toUi(me: String, myName: String): MessageUi {
@@ -491,6 +610,7 @@ class AppViewModel(
             messageId = messageId,
             senderName = name,
             senderAddress = senderAddress,
+            recipientAddress = recipientAddress,
             timestamp = timestamp,
             subject = subject,
             body = body,

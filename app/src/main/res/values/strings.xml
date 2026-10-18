@@ -27,4 +27,20 @@
     <string name="subject">Subject</string>
     <string name="body">Message</string>
     <string name="send">Send</string>
+    <string name="echoes_tab">Echoes</string>
+    <string name="netmail_tab">Netmail</string>
+    <string name="settings_tab">Settings</string>
+    <string name="netmail_compose">New private message</string>
+    <string name="inbox">Inbox</string>
+    <string name="sent">Sent</string>
+    <string name="no_netmail">No messages</string>
+    <string name="recipient">Recipient</string>
+    <string name="no_subject">(no subject)</string>
+    <string name="key_requested">Recipient key requested. Send again when it arrives.</string>
+    <string name="address_label">Address</string>
+    <string name="network_label">Network</string>
+    <string name="node_key_label">Node public key</string>
+    <string name="delete_network">Delete network</string>
+    <string name="role_admin">admin</string>
+    <string name="role_moderator">moderator</string>
 </resources>

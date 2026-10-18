@@ -27,4 +27,20 @@
     <string name="subject">Тема</string>
     <string name="body">Сообщение</string>
     <string name="send">Отправить</string>
+    <string name="echoes_tab">Эхи</string>
+    <string name="netmail_tab">Личные</string>
+    <string name="settings_tab">Настройки</string>
+    <string name="netmail_compose">Новое личное сообщение</string>
+    <string name="inbox">Входящие</string>
+    <string name="sent">Отправленные</string>
+    <string name="no_netmail">Нет сообщений</string>
+    <string name="recipient">Получатель</string>
+    <string name="no_subject">(без темы)</string>
+    <string name="key_requested">Ключ получателя запрошен. Отправьте снова, когда он придёт.</string>
+    <string name="address_label">Адрес</string>
+    <string name="network_label">Сеть</string>
+    <string name="node_key_label">Публичный ключ узла</string>
+    <string name="delete_network">Удалить сеть</string>
+    <string name="role_admin">админ</string>
+    <string name="role_moderator">модератор</string>
 </resources>
