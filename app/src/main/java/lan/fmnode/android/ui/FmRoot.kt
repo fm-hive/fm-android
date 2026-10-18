@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Explore
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.EmojiEmotions
 import androidx.compose.material.icons.filled.HowToVote
 import androidx.compose.material.icons.filled.Search
@@ -134,7 +135,26 @@ fun FmRoot(
     onToggleSubscription: (String, Boolean) -> Unit = { _, _ -> },
     onAcceptPolicyResign: () -> Unit = {},
     onCancelPolicyResign: () -> Unit = {},
+    onReactMessage: (MessageUi, String) -> Unit = { _, _ -> },
+    onOpenOutbox: () -> Unit = {},
+    onCloseOutbox: () -> Unit = {},
+    onRetryOutbox: () -> Unit = {},
+    onDeleteOutbox: (Long) -> Unit = {},
+    onOpenRefillDialog: () -> Unit = {},
+    onCloseRefillDialog: () -> Unit = {},
+    onRefillDate: (String) -> Unit = {},
+    onSendRefill: () -> Unit = {},
 ) {
+    if (state.refillDialog) {
+        RefillDialog(
+            date = state.refillDate,
+            sending = state.refillSending,
+            error = state.refillError,
+            onDate = onRefillDate,
+            onSend = onSendRefill,
+            onDismiss = onCloseRefillDialog,
+        )
+    }
     if (state.showPolicyResign) {
         PolicyResignDialog(
             policyText = state.policyResignText,
@@ -189,6 +209,8 @@ fun FmRoot(
             onBack = onBackFromEcho,
             onRefresh = onRefresh,
             onCompose = onOpenCompose,
+            onRefill = onOpenRefillDialog,
+            onReact = onReactMessage,
         )
         AppScreen.Compose -> EchoComposeScreen(
             echoName = state.selectedEcho?.name ?: "",
@@ -238,6 +260,12 @@ fun FmRoot(
             onBody = onNetmailBody,
             onSend = onSendNetmail,
         )
+        AppScreen.Outbox -> OutboxScreen(
+            entries = state.outbox,
+            onBack = onCloseOutbox,
+            onRetry = onRetryOutbox,
+            onDelete = onDeleteOutbox,
+        )
         AppScreen.EchoBrowser -> EchoBrowserScreen(
             echoes = state.allEchoes,
             onBack = onCloseEchoBrowser,
@@ -268,6 +296,7 @@ fun FmRoot(
             voucherLoading = state.voucherLoading,
             voucherError = state.voucherError,
             onDismissVoucher = onDismissVoucher,
+            onOpenOutbox = onOpenOutbox,
         )
     }
 }
@@ -683,6 +712,8 @@ fun EchoConversationScreen(
     onBack: () -> Unit,
     onRefresh: () -> Unit,
     onCompose: () -> Unit,
+    onRefill: () -> Unit,
+    onReact: (MessageUi, String) -> Unit,
 ) {
     Scaffold(
         topBar = {
@@ -697,6 +728,9 @@ fun EchoConversationScreen(
                     if (syncing) {
                         CircularProgressIndicator(modifier = Modifier.width(20.dp).height(20.dp))
                         Spacer(Modifier.width(8.dp))
+                    }
+                    IconButton(onClick = onRefill) {
+                        Icon(Icons.Default.History, contentDescription = stringResource(R.string.refill_title))
                     }
                     IconButton(onClick = onRefresh) {
                         Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.refresh))
@@ -733,14 +767,14 @@ fun EchoConversationScreen(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             items(messages, key = { it.messageId }) { message ->
-                MessageCard(message)
+                MessageCard(message = message, onReact = onReact)
             }
         }
     }
 }
 
 @Composable
-private fun MessageCard(message: MessageUi) {
+private fun MessageCard(message: MessageUi, onReact: (MessageUi, String) -> Unit) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.fillMaxWidth().padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -772,6 +806,26 @@ private fun MessageCard(message: MessageUi) {
             if (message.attachments.isNotEmpty()) {
                 Spacer(Modifier.height(6.dp))
                 AttachmentsRow(message.attachments)
+            }
+            val quick = listOf("👍", "❤️", "😂")
+            Spacer(Modifier.height(2.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                quick.forEach { emoji ->
+                    val count = message.reactions[emoji] ?: 0
+                    TextButton(onClick = { onReact(message, emoji) }) {
+                        Text(
+                            text = if (count > 0) "$emoji $count" else emoji,
+                            color = if (message.myReaction == emoji) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                        )
+                    }
+                }
+                message.reactions.filterKeys { it !in quick }.forEach { (emoji, count) ->
+                    AssistChip(onClick = { onReact(message, emoji) }, label = { Text("$emoji $count") })
+                }
             }
         }
     }

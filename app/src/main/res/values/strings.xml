@@ -76,4 +76,11 @@
     <string name="browse_echoes">Echo conferences</string>
     <string name="policy_changed_title">The network policy has changed</string>
     <string name="policy_accept">Accept the policy</string>
+    <string name="outbox_title">Outbox</string>
+    <string name="outbox_empty">No queued messages</string>
+    <string name="retry">Retry</string>
+    <string name="refill_title">Refill history</string>
+    <string name="refill_hint">Request older messages of this conference from the network</string>
+    <string name="refill_before">Before date (YYYY-MM-DD)</string>
+    <string name="refill_send">Request</string>
 </resources>

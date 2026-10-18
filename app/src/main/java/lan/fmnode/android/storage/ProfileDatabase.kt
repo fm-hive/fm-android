@@ -226,6 +226,9 @@ interface OutboxDao {
     @Query("SELECT * FROM outbox ORDER BY id")
     suspend fun getAll(): List<OutboxEntity>
 
+    @Query("SELECT * FROM outbox ORDER BY id")
+    fun observeAll(): Flow<List<OutboxEntity>>
+
     @Query("DELETE FROM outbox WHERE id = :id")
     suspend fun delete(id: Long)
 

@@ -227,6 +227,42 @@ class NetworkSession(
         } ?: false
     }
 
+    /** Adds or retracts ([emoji] empty) a reaction to a message. */
+    suspend fun postReaction(targetMessageId: String, emoji: String, echoName: String): SendResult {
+        val data = buildJsonObject {
+            put("reaction", emoji)
+            put("reactionMessageId", targetMessageId)
+            put("echo", echoName)
+            put("message", "")
+        }.toString()
+        return postProtocol(echoName, "echomail", data)
+    }
+
+    /** Requests old messages of an echo before [beforeIso] (refill protocol). */
+    suspend fun postRefillRequest(echoName: String, beforeIso: String): SendResult {
+        val messageId = "refill_${echoName}_${profile.address}_${System.currentTimeMillis()}_" +
+            java.util.UUID.randomUUID().toString().take(6)
+        val data = buildJsonObject {
+            put("proto", "refill")
+            put("type", "request")
+            put("from", profile.address)
+            put("to", "all")
+            put("message", "Refill request for $echoName")
+            put("date", java.time.Instant.now().toString())
+            put("echo", echoName)
+            put(
+                "refill",
+                buildJsonObject {
+                    put("from", profile.address)
+                    put("echo", echoName)
+                    put("before", beforeIso)
+                    put("messageId", messageId)
+                },
+            )
+        }.toString()
+        return postProtocol(echoName, "refill", data)
+    }
+
     /** Sends our public key to a user who requested it. */
     suspend fun respondToPubkeyRequest(requester: String, requestorPubkeyB64: String) {
         val requestorEd = Encoding.base64Decode(requestorPubkeyB64)

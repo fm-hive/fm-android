@@ -28,6 +28,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -409,6 +411,126 @@ fun PolicyResignDialog(
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
+        },
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun OutboxScreen(
+    entries: List<OutboxUi>,
+    onBack: () -> Unit,
+    onRetry: () -> Unit,
+    onDelete: (Long) -> Unit,
+) {
+    Scaffold(
+        topBar = {
+            CenterAlignedTopAppBar(
+                title = { Text(stringResource(R.string.outbox_title)) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
+                    }
+                },
+                actions = {
+                    IconButton(onClick = onRetry) {
+                        Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.retry))
+                    }
+                },
+            )
+        },
+    ) { padding ->
+        if (entries.isEmpty()) {
+            Box(Modifier.fillMaxSize().padding(padding).padding(24.dp), contentAlignment = Alignment.Center) {
+                Text(
+                    text = stringResource(R.string.outbox_empty),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            return@Scaffold
+        }
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(
+                start = 12.dp,
+                end = 12.dp,
+                top = padding.calculateTopPadding() + 8.dp,
+                bottom = padding.calculateBottomPadding() + 8.dp,
+            ),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            items(entries, key = { it.id }) { entry ->
+                Card(Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                text = entry.echoName ?: entry.recipient ?: entry.type,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Text(
+                                text = buildString {
+                                    append(entry.type)
+                                    if (entry.attempts > 0) append(" · attempts: ").append(entry.attempts)
+                                    if (!entry.lastError.isNullOrBlank()) append(" · ").append(entry.lastError)
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        IconButton(onClick = { onDelete(entry.id) }) {
+                            Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.delete))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun RefillDialog(
+    date: String,
+    sending: Boolean,
+    error: UiError?,
+    onDate: (String) -> Unit,
+    onSend: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.refill_title)) },
+        text = {
+            Column {
+                Text(stringResource(R.string.refill_hint), style = MaterialTheme.typography.bodySmall)
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = date,
+                    onValueChange = onDate,
+                    label = { Text(stringResource(R.string.refill_before)) },
+                    singleLine = true,
+                )
+                error?.let {
+                    Spacer(Modifier.height(8.dp))
+                    Text(errorText(it), color = MaterialTheme.colorScheme.error)
+                }
+                if (sending) {
+                    Spacer(Modifier.height(8.dp))
+                    CircularProgressIndicator(modifier = Modifier.width(24.dp).height(24.dp))
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onSend, enabled = !sending) {
+                Text(stringResource(R.string.refill_send))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.cancel))
+            }
         },
     )
 }

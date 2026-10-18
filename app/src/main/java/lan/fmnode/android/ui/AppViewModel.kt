@@ -43,6 +43,7 @@ enum class AppScreen {
     QrScanner,
     Admin,
     EchoBrowser,
+    Outbox,
     Settings,
 }
 
@@ -77,6 +78,17 @@ data class MessageUi(
     val body: String,
     val own: Boolean,
     val attachments: List<AttachmentUi> = emptyList(),
+    val reactions: Map<String, Int> = emptyMap(),
+    val myReaction: String? = null,
+)
+
+data class OutboxUi(
+    val id: Long,
+    val type: String,
+    val echoName: String?,
+    val recipient: String?,
+    val attempts: Int,
+    val lastError: String?,
 )
 
 data class NetmailComposeState(
@@ -166,6 +178,11 @@ data class UiState(
     val searchResults: List<SearchResultUi> = emptyList(),
     val searchLoading: Boolean = false,
     val allEchoes: List<EchoUi> = emptyList(),
+    val outbox: List<OutboxUi> = emptyList(),
+    val refillDialog: Boolean = false,
+    val refillDate: String = "",
+    val refillSending: Boolean = false,
+    val refillError: UiError? = null,
     val showPolicyResign: Boolean = false,
     val policyResignText: String = "",
     val scanPurpose: ScanPurpose = ScanPurpose.AddNetwork,
@@ -328,6 +345,24 @@ class AppViewModel(
                 }.collect { list -> _state.update { it.copy(allEchoes = list) } }
             }
             launch {
+                opened.database.outboxDao().observeAll().collect { rows ->
+                    _state.update {
+                        it.copy(
+                            outbox = rows.map { entry ->
+                                OutboxUi(
+                                    id = entry.id,
+                                    type = entry.type,
+                                    echoName = entry.echoName,
+                                    recipient = entry.recipientAddress,
+                                    attempts = entry.attempts,
+                                    lastError = entry.lastError,
+                                )
+                            },
+                        )
+                    }
+                }
+            }
+            launch {
                 opened.database.messageDao().observeProtocols().collect { rows ->
                     _state.update { it.copy(protocols = rows.mapNotNull { row -> row.toProtocolUi() }) }
                 }
@@ -349,9 +384,7 @@ class AppViewModel(
                             return@collectLatest
                         }
                         opened.database.messageDao().observeEchoRows(echoName).collect { rows ->
-                            val me = opened.profile.address
-                            val myName = opened.profile.displayName
-                            _state.update { it.copy(messages = rows.map { row -> row.toUi(me, myName) }) }
+                            _state.update { it.copy(messages = mapMessages(rows, opened)) }
                         }
                     }
             }
@@ -792,6 +825,77 @@ class AppViewModel(
         }
     }
 
+    // ---------------------------------------------------------------- outbox
+
+    fun openOutbox() {
+        _state.update { it.copy(screen = AppScreen.Outbox) }
+    }
+
+    fun closeOutbox() {
+        _state.update { it.copy(screen = AppScreen.Settings) }
+    }
+
+    fun retryOutbox() {
+        val opened = networkSession ?: return
+        viewModelScope.launch { syncOnce(opened) }
+    }
+
+    fun deleteOutboxEntry(id: Long) {
+        val opened = networkSession ?: return
+        viewModelScope.launch { opened.database.outboxDao().delete(id) }
+    }
+
+    // ---------------------------------------------------------------- refill
+
+    fun openRefillDialog() {
+        _state.update {
+            it.copy(
+                refillDialog = true,
+                refillDate = java.time.LocalDate.now().toString(),
+                refillError = null,
+            )
+        }
+    }
+
+    fun closeRefillDialog() {
+        _state.update { it.copy(refillDialog = false) }
+    }
+
+    fun setRefillDate(value: String) {
+        _state.update { it.copy(refillDate = value, refillError = null) }
+    }
+
+    fun sendRefill() {
+        val echo = _state.value.selectedEcho ?: return
+        val opened = networkSession ?: return
+        val date = _state.value.refillDate.trim()
+        viewModelScope.launch {
+            _state.update { it.copy(refillSending = true, refillError = null) }
+            try {
+                val parsed = java.time.LocalDate.parse(date)
+                opened.postRefillRequest(echo.name, parsed.toString() + "T00:00:00.000Z")
+                _state.update { it.copy(refillDialog = false, refillSending = false) }
+                syncOnce(opened)
+            } catch (e: Exception) {
+                _state.update {
+                    it.copy(refillSending = false, refillError = UiError.Failed(e.message ?: "Failed"))
+                }
+            }
+        }
+    }
+
+    // -------------------------------------------------------------- reactions
+
+    fun toggleReaction(message: MessageUi, emoji: String) {
+        val opened = networkSession ?: return
+        val echo = _state.value.selectedEcho ?: return
+        viewModelScope.launch {
+            val next = if (message.myReaction == emoji) "" else emoji
+            runCatching { opened.postReaction(message.messageId, next, echo.name) }
+            syncOnce(opened)
+        }
+    }
+
     // ----------------------------------------------------------- echo browser
 
     fun openEchoBrowser() {
@@ -1026,6 +1130,41 @@ class AppViewModel(
     }
 
     // ------------------------------------------------------------------ helpers
+
+    private fun mapMessages(rows: List<MessageRow>, opened: NetworkSession): List<MessageUi> {
+        val me = opened.profile.address
+        val myName = opened.profile.displayName
+        // target message -> sender -> (emoji, timestamp); last reaction wins.
+        val reactions = mutableMapOf<String, MutableMap<String, Pair<String, Long>>>()
+        val messageRows = mutableListOf<MessageRow>()
+        for (row in rows) {
+            val data = runCatching {
+                messageJson.parseToJsonElement(row.dataJson).jsonObject
+            }.getOrNull()
+            val reaction = (data?.get("reaction") as? JsonPrimitive)?.contentOrNull.orEmpty()
+            val target = (data?.get("reactionMessageId") as? JsonPrimitive)?.contentOrNull.orEmpty()
+            if (target.isNotEmpty()) {
+                val bySender = reactions.getOrPut(target) { mutableMapOf() }
+                val previous = bySender[row.senderAddress]
+                if (previous == null || row.timestamp >= previous.second) {
+                    if (reaction.isEmpty()) bySender.remove(row.senderAddress)
+                    else bySender[row.senderAddress] = reaction to row.timestamp
+                }
+                continue
+            }
+            messageRows += row
+        }
+        return messageRows.map { row ->
+            val bySender = reactions[row.messageId]
+            val counts = mutableMapOf<String, Int>()
+            var mine: String? = null
+            bySender?.forEach { (sender, pair) ->
+                counts[pair.first] = (counts[pair.first] ?: 0) + 1
+                if (sender == me) mine = pair.first
+            }
+            row.toUi(me, myName).copy(reactions = counts, myReaction = mine)
+        }
+    }
 
     private fun MessageRow.toProtocolUi(): ProtocolUi? {
         val data = runCatching {

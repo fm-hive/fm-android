@@ -76,4 +76,11 @@
     <string name="browse_echoes">Эхо-конференции</string>
     <string name="policy_changed_title">Политика сети изменилась</string>
     <string name="policy_accept">Принять политику</string>
+    <string name="outbox_title">Исходящие</string>
+    <string name="outbox_empty">Нет отложенных сообщений</string>
+    <string name="retry">Повторить</string>
+    <string name="refill_title">Запрос истории</string>
+    <string name="refill_hint">Запросить у сети более старые сообщения этой конференции</string>
+    <string name="refill_before">До даты (ГГГГ-ММ-ДД)</string>
+    <string name="refill_send">Запросить</string>
 </resources>

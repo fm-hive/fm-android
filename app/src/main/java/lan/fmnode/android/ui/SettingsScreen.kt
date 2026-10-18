@@ -54,6 +54,7 @@ fun SettingsScreen(
     voucherLoading: Boolean,
     voucherError: UiError?,
     onDismissVoucher: () -> Unit,
+    onOpenOutbox: () -> Unit,
 ) {
     var showExportDialog by remember { mutableStateOf(false) }
     var showInviteDialog by remember { mutableStateOf(false) }
@@ -147,6 +148,9 @@ fun SettingsScreen(
             }
             voucherError?.let {
                 Text(errorText(it), color = MaterialTheme.colorScheme.error)
+            }
+            OutlinedButton(onClick = onOpenOutbox, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.outbox_title))
             }
             if (profile.isAdmin) {
                 OutlinedButton(onClick = onOpenAdmin, modifier = Modifier.fillMaxWidth()) {

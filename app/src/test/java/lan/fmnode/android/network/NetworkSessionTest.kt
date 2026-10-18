@@ -349,6 +349,40 @@ class NetworkSessionTest {
     }
 
     @Test
+    fun `postReaction sends the reaction message`() {
+        runBlocking {
+            session.postReaction("m1", "👍", "General")
+            val message = sentMessages.last()
+            assertEquals("echomail", message["type"]!!.jsonPrimitive.content)
+            assertEquals("General", message["echo_name"]!!.jsonPrimitive.content)
+            val data = Json.parseToJsonElement(
+                CryptoService.jwsPayload(message["jws"]!!.jsonPrimitive.content)!!,
+            ).jsonObject
+            assertEquals("👍", data["reaction"]!!.jsonPrimitive.content)
+            assertEquals("m1", data["reactionMessageId"]!!.jsonPrimitive.content)
+            assertEquals("General", data["echo"]!!.jsonPrimitive.content)
+        }
+    }
+
+    @Test
+    fun `postRefillRequest sends the refill protocol message`() {
+        runBlocking {
+            session.postRefillRequest("General", "2026-01-01T00:00:00.000Z")
+            val message = sentMessages.last()
+            assertEquals("refill", message["type"]!!.jsonPrimitive.content)
+            val data = Json.parseToJsonElement(
+                CryptoService.jwsPayload(message["jws"]!!.jsonPrimitive.content)!!,
+            ).jsonObject
+            assertEquals("refill", data["proto"]!!.jsonPrimitive.content)
+            assertEquals("request", data["type"]!!.jsonPrimitive.content)
+            val refill = data["refill"]!!.jsonObject
+            assertEquals("General", refill["echo"]!!.jsonPrimitive.content)
+            assertEquals("2026-01-01T00:00:00.000Z", refill["before"]!!.jsonPrimitive.content)
+            assertEquals(":0:1", refill["from"]!!.jsonPrimitive.content)
+        }
+    }
+
+    @Test
     fun `missing recipient key requests it when enabled`() {
         runBlocking {
             session.setAutoRequestPubkeys(true)
