@@ -151,6 +151,39 @@ interface MessageDao {
 
     @Query(
         """
+        SELECT m.messageId AS messageId, m.echoName AS echoName, m.type AS type,
+               m.senderAddress AS senderAddress, m.recipientAddress AS recipientAddress,
+               m.timestamp AS timestamp, m.dataJson AS dataJson, m.jws AS jws, m.jwe AS jwe,
+               n.name AS senderName
+        FROM messages m
+        LEFT JOIN names n ON n.address = m.senderAddress
+        WHERE LOWER(m.dataJson) LIKE '%' || LOWER(:query) || '%'
+           OR LOWER(COALESCE(n.name, '')) LIKE '%' || LOWER(:query) || '%'
+           OR LOWER(m.senderAddress) LIKE '%' || LOWER(:query) || '%'
+        ORDER BY m.timestamp DESC
+        LIMIT 300
+        """,
+    )
+    suspend fun search(query: String): List<MessageRow>
+
+    @Query(
+        """
+        SELECT m.messageId AS messageId, m.echoName AS echoName, m.type AS type,
+               m.senderAddress AS senderAddress, m.recipientAddress AS recipientAddress,
+               m.timestamp AS timestamp, m.dataJson AS dataJson, m.jws AS jws, m.jwe AS jwe,
+               n.name AS senderName
+        FROM messages m
+        LEFT JOIN names n ON n.address = m.senderAddress
+        WHERE m.type IN ('vote', 'election', 'excommunicate', 'change_policy',
+                         'remove_echo', 'refill', 'merge', 'conflict', 'recover', 'appeal')
+        ORDER BY m.timestamp DESC
+        LIMIT 300
+        """,
+    )
+    fun observeProtocols(): Flow<List<MessageRow>>
+
+    @Query(
+        """
         SELECT m.echoName AS echoName, COUNT(*) AS count
         FROM messages m
         JOIN echoes e ON e.name = m.echoName

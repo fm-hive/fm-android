@@ -100,6 +100,31 @@ class ProfileDatabaseTest {
     }
 
     @Test
+    fun `search finds messages by body, sender name and address`() = runBlocking {
+        db.nameDao().upsert(NameEntity(":0:2", "Petya", 0))
+        db.messageDao().upsertAll(
+            listOf(
+                message("m1", "General", ":0:2", 100, """{"subject":"Hello","body":"world"}"""),
+                message("m2", "Tech", ":0:3", 200, """{"subject":"Other","body":"nothing"}"""),
+            ),
+        )
+        assertEquals(listOf("m1"), db.messageDao().search("world").map { it.messageId })
+        assertEquals(listOf("m1"), db.messageDao().search("petya").map { it.messageId })
+        assertEquals(listOf("m1"), db.messageDao().search(":0:2").map { it.messageId })
+    }
+
+    @Test
+    fun `protocols query keeps protocol messages only`() = runBlocking {
+        val vote = message("p1", "General", ":0:2", 100).copy(type = "vote")
+        val election = message("p2", "General", ":0:2", 200).copy(type = "election")
+        val echomail = message("p3", "General", ":0:2", 300)
+        db.messageDao().upsertAll(listOf(vote, election, echomail))
+
+        val protocols = db.messageDao().observeProtocols().first()
+        assertEquals(listOf("p2", "p1"), protocols.map { it.messageId })
+    }
+
+    @Test
     fun `marking an echo read resets its unread counter`() = runBlocking {
         db.echoDao().upsertAll(listOf(echo("General", subscribed = true)))
         db.messageDao().upsert(message("m1", "General", ":0:2", 200))

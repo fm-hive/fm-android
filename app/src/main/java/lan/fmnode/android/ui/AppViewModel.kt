@@ -36,6 +36,7 @@ enum class AppScreen {
     Unlock, Networks, AddNetwork,
     Echoes, Echo, Compose,
     Netmail, NetmailDetail, NetmailCompose,
+    Search, Protocols,
     Settings,
 }
 
@@ -77,6 +78,27 @@ data class NetmailComposeState(
     val keyRequested: Boolean = false,
 )
 
+data class SearchResultUi(
+    val messageId: String,
+    val echoName: String,
+    val senderName: String,
+    val timestamp: Long,
+    val subject: String,
+    val body: String,
+)
+
+data class ProtocolUi(
+    val messageId: String,
+    val type: String,
+    val echoName: String,
+    val senderName: String,
+    val timestamp: Long,
+    val title: String,
+    val detail: String,
+    val variants: List<String>,
+    val isPoster: Boolean,
+)
+
 data class ComposeState(
     val subject: String = "",
     val body: String = "",
@@ -115,6 +137,10 @@ data class UiState(
     val netmailFolder: NetmailFolder = NetmailFolder.Inbox,
     val selectedNetmail: MessageUi? = null,
     val netmailCompose: NetmailComposeState = NetmailComposeState(),
+    val protocols: List<ProtocolUi> = emptyList(),
+    val searchQuery: String = "",
+    val searchResults: List<SearchResultUi> = emptyList(),
+    val searchLoading: Boolean = false,
     val add: AddNetworkState = AddNetworkState(),
     val unlockError: UiError? = null,
     val syncError: UiError? = null,
@@ -247,6 +273,11 @@ class AppViewModel(
                         }
                         s.copy(echoes = list, selectedEcho = selected)
                     }
+                }
+            }
+            launch {
+                opened.database.messageDao().observeProtocols().collect { rows ->
+                    _state.update { it.copy(protocols = rows.mapNotNull { row -> row.toProtocolUi() }) }
                 }
             }
             launch {
@@ -511,6 +542,79 @@ class AppViewModel(
         }
     }
 
+    // ------------------------------------------------------------------- search
+
+    private var searchJob: Job? = null
+
+    fun openSearch() {
+        _state.update { it.copy(screen = AppScreen.Search, searchQuery = "", searchResults = emptyList()) }
+    }
+
+    fun closeSearch() {
+        searchJob?.cancel()
+        _state.update { it.copy(screen = AppScreen.Echoes, searchQuery = "", searchResults = emptyList()) }
+    }
+
+    fun setSearchQuery(query: String) {
+        _state.update { it.copy(searchQuery = query) }
+        searchJob?.cancel()
+        val opened = networkSession ?: return
+        if (query.trim().length < 2) {
+            _state.update { it.copy(searchResults = emptyList()) }
+            return
+        }
+        searchJob = viewModelScope.launch {
+            _state.update { it.copy(searchLoading = true) }
+            val rows = runCatching { opened.database.messageDao().search(query.trim()) }.getOrDefault(emptyList())
+            val me = opened.profile.address
+            val myName = opened.profile.displayName
+            _state.update {
+                it.copy(
+                    searchLoading = false,
+                    searchResults = rows.map { row ->
+                        val data = runCatching {
+                            messageJson.parseToJsonElement(row.dataJson).jsonObject
+                        }.getOrNull()
+                        SearchResultUi(
+                            messageId = row.messageId,
+                            echoName = row.echoName,
+                            senderName = row.senderName ?: if (row.senderAddress == me) myName else row.senderAddress,
+                            timestamp = row.timestamp,
+                            subject = (data?.get("subject") as? JsonPrimitive)?.contentOrNull.orEmpty(),
+                            body = (data?.get("body") as? JsonPrimitive)?.contentOrNull.orEmpty(),
+                        )
+                    },
+                )
+            }
+        }
+    }
+
+    fun openSearchResult(result: SearchResultUi) {
+        if (result.echoName == NetworkSession.NETMAIL_ECHO) {
+            openNetmailMessage(result.messageId)
+        } else {
+            selectEcho(result.echoName)
+        }
+    }
+
+    // --------------------------------------------------------------- protocols
+
+    fun openProtocols() {
+        _state.update { it.copy(screen = AppScreen.Protocols) }
+    }
+
+    fun closeProtocols() {
+        _state.update { it.copy(screen = AppScreen.Echoes) }
+    }
+
+    fun castVote(protocol: ProtocolUi, variant: String) {
+        val opened = networkSession ?: return
+        viewModelScope.launch {
+            runCatching { opened.postVote(protocol.echoName, protocol.title, variant) }
+            syncOnce(opened)
+        }
+    }
+
     // ------------------------------------------------------------------ netmail
 
     fun openNetmail() {
@@ -650,6 +754,37 @@ class AppViewModel(
     }
 
     // ------------------------------------------------------------------ helpers
+
+    private fun MessageRow.toProtocolUi(): ProtocolUi? {
+        val data = runCatching {
+            messageJson.parseToJsonElement(dataJson).jsonObject
+        }.getOrNull() ?: return null
+        val innerType = (data["type"] as? JsonPrimitive)?.contentOrNull.orEmpty()
+        val title = (data["message"] as? JsonPrimitive)?.contentOrNull.orEmpty()
+        val variants = (data["variants"] as? kotlinx.serialization.json.JsonArray)
+            ?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
+            ?: emptyList()
+        val vote = (data["vote"] as? JsonPrimitive)?.contentOrNull.orEmpty()
+        val result = (data["result"] as? JsonPrimitive)?.contentOrNull.orEmpty()
+        val detail = when {
+            innerType == "vote" && vote.isNotEmpty() -> vote
+            innerType == "vote" && vote.isEmpty() -> "retract"
+            innerType == "result" -> result
+            variants.isNotEmpty() -> variants.joinToString(", ")
+            else -> ""
+        }
+        return ProtocolUi(
+            messageId = messageId,
+            type = type,
+            echoName = echoName,
+            senderName = senderName ?: senderAddress,
+            timestamp = timestamp,
+            title = title,
+            detail = detail,
+            variants = variants,
+            isPoster = innerType == "poster" && variants.isNotEmpty(),
+        )
+    }
 
     private fun MessageRow.toUi(me: String, myName: String): MessageUi {
         val data = runCatching {

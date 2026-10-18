@@ -23,6 +23,8 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.HowToVote
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AssistChip
@@ -104,6 +106,13 @@ fun FmRoot(
     onImportPassword: (String) -> Unit = {},
     onCancelImport: () -> Unit = {},
     onExportKeys: (String) -> Unit = {},
+    onOpenSearch: () -> Unit = {},
+    onCloseSearch: () -> Unit = {},
+    onSearchQuery: (String) -> Unit = {},
+    onOpenSearchResult: (SearchResultUi) -> Unit = {},
+    onOpenProtocols: () -> Unit = {},
+    onCloseProtocols: () -> Unit = {},
+    onCastVote: (ProtocolUi, String) -> Unit = { _, _ -> },
 ) {
     when (state.screen) {
         AppScreen.Unlock -> UnlockScreen(state.unlockError, onUnlock)
@@ -140,6 +149,8 @@ fun FmRoot(
             onSelectEcho = onSelectEcho,
             onNetmail = onOpenNetmail,
             onSettings = onOpenSettings,
+            onSearch = onOpenSearch,
+            onProtocols = onOpenProtocols,
         )
         AppScreen.Echo -> EchoConversationScreen(
             echoName = state.selectedEcho?.name ?: "",
@@ -156,6 +167,19 @@ fun FmRoot(
             onSubject = onComposeSubject,
             onBody = onComposeBody,
             onSend = onSendCompose,
+        )
+        AppScreen.Search -> SearchScreen(
+            query = state.searchQuery,
+            loading = state.searchLoading,
+            results = state.searchResults,
+            onBack = onCloseSearch,
+            onQuery = onSearchQuery,
+            onOpenResult = onOpenSearchResult,
+        )
+        AppScreen.Protocols -> ProtocolsScreen(
+            protocols = state.protocols,
+            onBack = onCloseProtocols,
+            onVote = onCastVote,
         )
         AppScreen.Netmail -> NetmailScreen(
             messages = state.netmail,
@@ -491,6 +515,8 @@ fun EchoesListScreen(
     onSelectEcho: (String) -> Unit,
     onNetmail: () -> Unit,
     onSettings: () -> Unit,
+    onSearch: () -> Unit,
+    onProtocols: () -> Unit,
 ) {
     Scaffold(
         bottomBar = {
@@ -503,6 +529,12 @@ fun EchoesListScreen(
                     if (syncing) {
                         CircularProgressIndicator(modifier = Modifier.width(20.dp).height(20.dp))
                         Spacer(Modifier.width(8.dp))
+                    }
+                    IconButton(onClick = onSearch) {
+                        Icon(Icons.Default.Search, contentDescription = stringResource(R.string.search_title))
+                    }
+                    IconButton(onClick = onProtocols) {
+                        Icon(Icons.Default.HowToVote, contentDescription = stringResource(R.string.protocols_title))
                     }
                     IconButton(onClick = onRefresh) {
                         Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.refresh))
@@ -779,7 +811,7 @@ internal fun errorText(error: UiError): String = when (error) {
     is UiError.Failed -> error.text
 }
 
-private fun formatTimestamp(seconds: Long): String {
+internal fun formatTimestamp(seconds: Long): String {
     val millis = if (seconds < 10_000_000_000L) seconds * 1000 else seconds
     return SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()).format(Date(millis))
 }

@@ -92,6 +92,13 @@ class MainActivity : ComponentActivity() {
                     onImportKeys = { importLauncher.launch(arrayOf("application/json", "text/plain")) },
                     onImportPassword = viewModel::confirmImportPassword,
                     onCancelImport = viewModel::cancelImport,
+                    onOpenSearch = viewModel::openSearch,
+                    onCloseSearch = viewModel::closeSearch,
+                    onSearchQuery = viewModel::setSearchQuery,
+                    onOpenSearchResult = viewModel::openSearchResult,
+                    onOpenProtocols = viewModel::openProtocols,
+                    onCloseProtocols = viewModel::closeProtocols,
+                    onCastVote = viewModel::castVote,
                     onExportKeys = { password ->
                         viewModel.exportKeysJson(password)?.let { json ->
                             pendingExport = json

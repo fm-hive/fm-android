@@ -286,6 +286,25 @@ class NetworkSessionTest {
     }
 
     @Test
+    fun `postVote sends a signed vote message`() {
+        runBlocking {
+            val result = session.postVote("General", "Vote: choose", "yes")
+            assertEquals(false, result.queued)
+            val message = sentMessages.last()
+            assertEquals("vote", message["type"]!!.jsonPrimitive.content)
+            assertEquals("General", message["echo_name"]!!.jsonPrimitive.content)
+            val jws = message["jws"]!!.jsonPrimitive.content
+            assertTrue(CryptoService.verifyJws(jws, userPublicKey))
+            val data = Json.parseToJsonElement(CryptoService.jwsPayload(jws)!!).jsonObject
+            assertEquals("vote", data["proto"]!!.jsonPrimitive.content)
+            assertEquals("vote", data["type"]!!.jsonPrimitive.content)
+            assertEquals("yes", data["vote"]!!.jsonPrimitive.content)
+            assertEquals("Vote: choose", data["poster_message"]!!.jsonPrimitive.content)
+            assertEquals(":0:1", data["from"]!!.jsonPrimitive.content)
+        }
+    }
+
+    @Test
     fun `missing recipient key requests it when enabled`() {
         runBlocking {
             session.setAutoRequestPubkeys(true)

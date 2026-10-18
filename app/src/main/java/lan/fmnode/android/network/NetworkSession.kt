@@ -110,6 +110,36 @@ class NetworkSession(
 
     // ------------------------------------------------------------------ sending
 
+    /** Posts a signed protocol message of any type to an echo. */
+    suspend fun postProtocol(echoName: String, type: String, dataJson: String): SendResult {
+        return try {
+            sendMessages(listOf(signMessage(type, dataJson, echoName = echoName)))
+            SendResult(queued = false)
+        } catch (e: Exception) {
+            queueOutbox(type, echoName, null, dataJson, e)
+            SendResult(queued = true)
+        }
+    }
+
+    /**
+     * Casts (or retracts with an empty [variant]) a vote on a poster (vote
+     * protocol, matching fm-app's vote message shape).
+     */
+    suspend fun postVote(echoName: String, posterMessage: String, variant: String): SendResult {
+        val data = buildJsonObject {
+            put("echo", echoName)
+            put("proto", "vote")
+            put("type", "vote")
+            put("from", profile.address)
+            put("to", "all")
+            put("vote", variant)
+            put("poster_message", posterMessage)
+            put("message", if (variant.isEmpty()) "Retract vote" else "Vote: $variant")
+            put("date", java.time.Instant.now().toString())
+        }.toString()
+        return postProtocol(echoName, "vote", data)
+    }
+
     /** Posts an echomail message; network failures queue it in the outbox. */
     suspend fun postEcho(
         echoName: String,
