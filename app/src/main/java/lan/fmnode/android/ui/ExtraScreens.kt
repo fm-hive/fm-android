@@ -792,3 +792,56 @@ fun ModerationDialog(
         },
     )
 }
+
+@Composable
+fun ContactsDialog(
+    contacts: List<ContactUi>,
+    address: String,
+    name: String,
+    onAddress: (String) -> Unit,
+    onName: (String) -> Unit,
+    onAdd: () -> Unit,
+    onPick: (String) -> Unit,
+    onDelete: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.contacts_title)) },
+        text = {
+            Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+                contacts.forEach { contact ->
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = if (contact.name.isBlank()) contact.address else "${contact.name} (${contact.address})",
+                            modifier = Modifier.weight(1f).clickable { onPick(contact.address) },
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        IconButton(onClick = { onDelete(contact.address) }) {
+                            Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.delete))
+                        }
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = address,
+                    onValueChange = onAddress,
+                    label = { Text(stringResource(R.string.contact_address)) },
+                    singleLine = true,
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = onName,
+                    label = { Text(stringResource(R.string.contact_name)) },
+                    singleLine = true,
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(onClick = onAdd) { Text(stringResource(R.string.contact_add)) }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.close)) }
+        },
+    )
+}

@@ -68,6 +68,12 @@ data class EchoUi(
     val subscribed: Boolean = true,
 )
 
+data class MessageVersionUi(
+    val subject: String,
+    val body: String,
+    val timestamp: Long,
+)
+
 data class MessageUi(
     val messageId: String,
     val senderName: String,
@@ -80,6 +86,12 @@ data class MessageUi(
     val attachments: List<AttachmentUi> = emptyList(),
     val reactions: Map<String, Int> = emptyMap(),
     val myReaction: String? = null,
+    val versions: List<MessageVersionUi> = emptyList(),
+)
+
+data class ContactUi(
+    val address: String,
+    val name: String,
 )
 
 data class OutboxUi(
@@ -180,6 +192,12 @@ data class UiState(
     val searchResults: List<SearchResultUi> = emptyList(),
     val searchLoading: Boolean = false,
     val allEchoes: List<EchoUi> = emptyList(),
+    val contacts: List<ContactUi> = emptyList(),
+    val contactsDialog: Boolean = false,
+    val selectionMode: Boolean = false,
+    val selectedMessages: Set<String> = emptySet(),
+    val newContactAddress: String = "",
+    val newContactName: String = "",
     val outbox: List<OutboxUi> = emptyList(),
     val refillDialog: Boolean = false,
     val refillDate: String = "",
@@ -377,6 +395,13 @@ class AppViewModel(
                 }.collect { list -> _state.update { it.copy(allEchoes = list) } }
             }
             launch {
+                opened.database.contactDao().observeAll().collect { rows ->
+                    _state.update {
+                        it.copy(contacts = rows.map { contact -> ContactUi(contact.address, contact.name) })
+                    }
+                }
+            }
+            launch {
                 opened.database.outboxDao().observeAll().collect { rows ->
                     _state.update {
                         it.copy(
@@ -556,10 +581,40 @@ class AppViewModel(
     }
 
     fun openCompose() {
+        val echo = _state.value.selectedEcho ?: return
+        val opened = networkSession
         _state.update { it.copy(screen = AppScreen.Compose, compose = ComposeState()) }
+        if (opened != null) {
+            viewModelScope.launch {
+                opened.database.draftDao().get(echo.name)?.let { draft ->
+                    _state.update {
+                        if (it.screen == AppScreen.Compose) {
+                            it.copy(compose = it.compose.copy(subject = draft.subject, body = draft.body))
+                        } else {
+                            it
+                        }
+                    }
+                }
+            }
+        }
     }
 
     fun backFromCompose() {
+        val echo = _state.value.selectedEcho
+        val opened = networkSession
+        val compose = _state.value.compose
+        if (echo != null && opened != null && (compose.subject.isNotBlank() || compose.body.isNotBlank())) {
+            viewModelScope.launch {
+                opened.database.draftDao().upsert(
+                    lan.fmnode.android.storage.DraftEntity(
+                        echoName = echo.name,
+                        subject = compose.subject,
+                        body = compose.body,
+                        updatedAt = System.currentTimeMillis(),
+                    ),
+                )
+            }
+        }
         _state.update { it.copy(screen = AppScreen.Echo, compose = ComposeState()) }
     }
 
@@ -639,6 +694,7 @@ class AppViewModel(
                     current.compose.body.trim(),
                     attachments = attachments,
                 )
+                runCatching { opened.database.draftDao().delete(echo.name) }
                 _state.update {
                     it.copy(screen = AppScreen.Echo, compose = ComposeState())
                 }
@@ -756,6 +812,124 @@ class AppViewModel(
                     it.copy(add = it.add.copy(isLoading = false, error = UiError.Failed(e.message ?: "Failed")))
                 }
             }
+        }
+    }
+
+    // ----------------------------------------------------------------- contacts
+
+    fun openContacts() = _state.update { it.copy(contactsDialog = true) }
+
+    fun closeContacts() = _state.update { it.copy(contactsDialog = false) }
+
+    fun setNewContactAddress(value: String) =
+        _state.update { it.copy(newContactAddress = value) }
+
+    fun setNewContactName(value: String) =
+        _state.update { it.copy(newContactName = value) }
+
+    fun addContact() {
+        val opened = networkSession ?: return
+        val address = _state.value.newContactAddress.trim()
+        if (address.isEmpty()) return
+        viewModelScope.launch {
+            opened.database.contactDao().upsert(
+                lan.fmnode.android.storage.ContactEntity(
+                    address = address,
+                    name = _state.value.newContactName.trim(),
+                    updatedAt = System.currentTimeMillis(),
+                ),
+            )
+            _state.update { it.copy(newContactAddress = "", newContactName = "") }
+        }
+    }
+
+    fun deleteContact(address: String) {
+        val opened = networkSession ?: return
+        viewModelScope.launch { opened.database.contactDao().delete(address) }
+    }
+
+    fun pickContact(address: String) {
+        _state.update {
+            it.copy(
+                contactsDialog = false,
+                netmailCompose = it.netmailCompose.copy(recipient = address, error = null),
+            )
+        }
+    }
+
+    // --------------------------------------------------------------- forwarding
+
+    fun toggleSelectionMode() {
+        _state.update {
+            if (it.selectionMode) {
+                it.copy(selectionMode = false, selectedMessages = emptySet())
+            } else {
+                it.copy(selectionMode = true, selectedMessages = emptySet())
+            }
+        }
+    }
+
+    fun toggleMessageSelection(messageId: String) {
+        _state.update {
+            val next = it.selectedMessages.toMutableSet()
+            if (!next.add(messageId)) next.remove(messageId)
+            it.copy(selectedMessages = next)
+        }
+    }
+
+    fun forwardSelected() {
+        val state = _state.value
+        val selected = state.messages.filter { it.messageId in state.selectedMessages }
+        if (selected.isEmpty()) return
+        val quote = buildString {
+            selected.forEachIndexed { index, message ->
+                if (index > 0) append("\n")
+                append("> ")
+                append(message.senderName)
+                append(" (")
+                append(message.senderAddress)
+                append("):\n")
+                message.body.lineSequence().forEach { line ->
+                    append("> ")
+                    append(line)
+                    append('\n')
+                }
+            }
+        }
+        _state.update {
+            it.copy(
+                screen = AppScreen.NetmailCompose,
+                selectionMode = false,
+                selectedMessages = emptySet(),
+                netmailCompose = NetmailComposeState(
+                    subject = "Fwd: ${selected.size} message(s)",
+                    body = quote,
+                ),
+            )
+        }
+    }
+
+    fun forwardMessage(message: MessageUi) {
+        val quote = buildString {
+            append("> ")
+            append(message.senderName)
+            append(" (")
+            append(message.senderAddress)
+            append("):\n")
+            message.body.lineSequence().forEach { line ->
+                append("> ")
+                append(line)
+                append('\n')
+            }
+        }
+        _state.update {
+            it.copy(
+                screen = AppScreen.NetmailCompose,
+                netmailCompose = NetmailComposeState(
+                    subject = "Fwd: ${message.subject}",
+                    body = quote,
+                ),
+            )
         }
     }
 
@@ -1558,6 +1732,21 @@ class AppViewModel(
                 )
             }
             ?: emptyList()
+        val versions = versionsJson?.let { raw ->
+            runCatching {
+                (messageJson.parseToJsonElement(raw) as kotlinx.serialization.json.JsonArray).mapNotNull { element ->
+                    val version = element as? JsonObject ?: return@mapNotNull null
+                    val versionData = (version["data"] as? JsonPrimitive)?.contentOrNull?.let { data ->
+                        runCatching { messageJson.parseToJsonElement(data).jsonObject }.getOrNull()
+                    }
+                    MessageVersionUi(
+                        subject = (versionData?.get("subject") as? JsonPrimitive)?.contentOrNull.orEmpty(),
+                        body = (versionData?.get("body") as? JsonPrimitive)?.contentOrNull.orEmpty(),
+                        timestamp = (version["timestamp"] as? JsonPrimitive)?.contentOrNull?.toLongOrNull() ?: 0,
+                    )
+                }
+            }.getOrDefault(emptyList())
+        } ?: emptyList()
         return MessageUi(
             messageId = messageId,
             senderName = name,
@@ -1568,6 +1757,7 @@ class AppViewModel(
             body = body,
             own = own,
             attachments = attachments,
+            versions = versions,
         )
     }
 

@@ -20,6 +20,8 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.EmojiEmotions
 import androidx.compose.material.icons.filled.Forum
+import androidx.compose.material.icons.filled.Forward
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Mail
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Card
@@ -170,6 +172,7 @@ private fun NetmailCard(message: MessageUi, folder: NetmailFolder, onClick: () -
 fun NetmailDetailScreen(
     message: MessageUi?,
     onBack: () -> Unit,
+    onForward: (MessageUi) -> Unit,
 ) {
     Scaffold(
         topBar = {
@@ -178,6 +181,13 @@ fun NetmailDetailScreen(
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
+                    }
+                },
+                actions = {
+                    if (message != null) {
+                        IconButton(onClick = { onForward(message) }) {
+                            Icon(Icons.Default.Forward, contentDescription = stringResource(R.string.forward))
+                        }
                     }
                 },
             )
@@ -220,6 +230,7 @@ fun NetmailComposeScreen(
     onSubject: (String) -> Unit,
     onBody: (String) -> Unit,
     onSend: () -> Unit,
+    onContacts: () -> Unit,
 ) {
     var showEmoji by remember { mutableStateOf(false) }
     if (showEmoji) {
@@ -238,6 +249,9 @@ fun NetmailComposeScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = onContacts) {
+                        Icon(Icons.Default.Person, contentDescription = stringResource(R.string.contacts_title))
+                    }
                     IconButton(onClick = { showEmoji = true }) {
                         Icon(Icons.Default.EmojiEmotions, contentDescription = stringResource(R.string.emoji_title))
                     }

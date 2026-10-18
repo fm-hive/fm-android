@@ -41,6 +41,7 @@ data class MessageEntity(
     val jws: String?,
     val jwe: String?,
     val receivedAt: Long,
+    val versionsJson: String? = null,
 )
 
 /** Public key cache of other network participants. */
@@ -73,6 +74,23 @@ data class NameEntity(
     val updatedAt: Long,
 )
 
+/** Unsent composer draft of one conference. */
+@Entity(tableName = "drafts")
+data class DraftEntity(
+    @PrimaryKey val echoName: String,
+    val subject: String,
+    val body: String,
+    val updatedAt: Long,
+)
+
+/** Address book entry for netmail recipients. */
+@Entity(tableName = "contacts")
+data class ContactEntity(
+    @PrimaryKey val address: String,
+    val name: String,
+    val updatedAt: Long,
+)
+
 /** Per-profile key/value state (sync cursors, protocol settings, ...). */
 @Entity(tableName = "meta")
 data class MetaEntity(
@@ -91,6 +109,7 @@ data class MessageRow(
     val dataJson: String,
     val jws: String?,
     val jwe: String?,
+    val versionsJson: String?,
     val senderName: String?,
 )
 
@@ -140,7 +159,7 @@ interface MessageDao {
         SELECT m.messageId AS messageId, m.echoName AS echoName, m.type AS type,
                m.senderAddress AS senderAddress, m.recipientAddress AS recipientAddress,
                m.timestamp AS timestamp, m.dataJson AS dataJson, m.jws AS jws, m.jwe AS jwe,
-               n.name AS senderName
+               m.versionsJson AS versionsJson, n.name AS senderName
         FROM messages m
         LEFT JOIN names n ON n.address = m.senderAddress
         WHERE m.echoName = :echo
@@ -154,7 +173,7 @@ interface MessageDao {
         SELECT m.messageId AS messageId, m.echoName AS echoName, m.type AS type,
                m.senderAddress AS senderAddress, m.recipientAddress AS recipientAddress,
                m.timestamp AS timestamp, m.dataJson AS dataJson, m.jws AS jws, m.jwe AS jwe,
-               n.name AS senderName
+               m.versionsJson AS versionsJson, n.name AS senderName
         FROM messages m
         LEFT JOIN names n ON n.address = m.senderAddress
         WHERE LOWER(m.dataJson) LIKE '%' || LOWER(:query) || '%'
@@ -171,7 +190,7 @@ interface MessageDao {
         SELECT m.messageId AS messageId, m.echoName AS echoName, m.type AS type,
                m.senderAddress AS senderAddress, m.recipientAddress AS recipientAddress,
                m.timestamp AS timestamp, m.dataJson AS dataJson, m.jws AS jws, m.jwe AS jwe,
-               n.name AS senderName
+               m.versionsJson AS versionsJson, n.name AS senderName
         FROM messages m
         LEFT JOIN names n ON n.address = m.senderAddress
         WHERE m.type IN ('vote', 'election', 'excommunicate', 'change_policy',
@@ -207,6 +226,9 @@ interface MessageDao {
 
     @Query("SELECT COUNT(*) FROM messages WHERE echoName = '__netmail__' AND timestamp > :since AND senderAddress != :me")
     fun observeUnreadNetmail(since: Long, me: String): Flow<Int>
+
+    @Query("UPDATE messages SET dataJson = :dataJson, versionsJson = :versionsJson, receivedAt = :receivedAt WHERE messageId = :messageId")
+    suspend fun updateContent(messageId: String, dataJson: String, versionsJson: String?, receivedAt: Long)
 }
 
 @Dao
@@ -249,6 +271,30 @@ interface NameDao {
 }
 
 @Dao
+interface DraftDao {
+    @Query("SELECT * FROM drafts WHERE echoName = :echoName")
+    suspend fun get(echoName: String): DraftEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(draft: DraftEntity)
+
+    @Query("DELETE FROM drafts WHERE echoName = :echoName")
+    suspend fun delete(echoName: String)
+}
+
+@Dao
+interface ContactDao {
+    @Query("SELECT * FROM contacts ORDER BY name, address")
+    fun observeAll(): Flow<List<ContactEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(contact: ContactEntity)
+
+    @Query("DELETE FROM contacts WHERE address = :address")
+    suspend fun delete(address: String)
+}
+
+@Dao
 interface MetaDao {
     @Query("SELECT value FROM meta WHERE `key` = :key")
     suspend fun get(key: String): String?
@@ -268,8 +314,10 @@ interface MetaDao {
         OutboxEntity::class,
         NameEntity::class,
         MetaEntity::class,
+        DraftEntity::class,
+        ContactEntity::class,
     ],
-    version = 1,
+    version = 2,
     exportSchema = true,
 )
 abstract class ProfileDatabase : RoomDatabase() {
@@ -279,11 +327,33 @@ abstract class ProfileDatabase : RoomDatabase() {
     abstract fun outboxDao(): OutboxDao
     abstract fun nameDao(): NameDao
     abstract fun metaDao(): MetaDao
+    abstract fun draftDao(): DraftDao
+    abstract fun contactDao(): ContactDao
+
+    companion object {
+        /** Adds drafts, contacts and the message edit history (v1 -> v2). */
+        val MIGRATION_1_2 = object : androidx.room.migration.Migration(1, 2) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS drafts (" +
+                        "echoName TEXT NOT NULL PRIMARY KEY, subject TEXT NOT NULL, " +
+                        "body TEXT NOT NULL, updatedAt INTEGER NOT NULL)",
+                )
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS contacts (" +
+                        "address TEXT NOT NULL PRIMARY KEY, name TEXT NOT NULL, " +
+                        "updatedAt INTEGER NOT NULL)",
+                )
+                db.execSQL("ALTER TABLE messages ADD COLUMN versionsJson TEXT")
+            }
+        }
+    }
 }
 
 object ProfileDatabases {
     /** Opens (or creates) the message database of one network profile. */
     fun open(context: Context, profileId: String): ProfileDatabase =
         Room.databaseBuilder(context, ProfileDatabase::class.java, "fm_profile_$profileId.db")
+            .addMigrations(ProfileDatabase.MIGRATION_1_2)
             .build()
 }

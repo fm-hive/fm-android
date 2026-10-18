@@ -113,4 +113,11 @@
     <string name="moderate">Moderate</string>
     <string name="merge_sessions_title">Merge messages</string>
     <string name="merge_sessions_empty">No merge messages</string>
+    <string name="contacts_title">Contacts</string>
+    <string name="contact_address">Address</string>
+    <string name="contact_name">Name</string>
+    <string name="contact_add">Add contact</string>
+    <string name="forward">Forward</string>
+    <string name="select_messages">Select messages</string>
+    <string name="versions_title">Edit history</string>
 </resources>

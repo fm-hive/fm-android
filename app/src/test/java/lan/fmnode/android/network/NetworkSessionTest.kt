@@ -605,6 +605,41 @@ class NetworkSessionTest {
     }
 
     @Test
+    fun `plain message updates replace the original and keep history`() = runBlocking {
+        db.messageDao().upsert(
+            lan.fmnode.android.storage.MessageEntity(
+                messageId = "m1",
+                echoName = "General",
+                type = "echomail",
+                senderAddress = otherAddress,
+                recipientAddress = null,
+                timestamp = 100,
+                dataJson = data("subject" to "Old", "body" to "Old body"),
+                jws = null,
+                jwe = null,
+                receivedAt = 0,
+            ),
+        )
+        val updateData = data(
+            "subject" to "New",
+            "body" to "New body",
+            "updateMessageId" to "m1",
+        )
+        sendReceiveResponse = buildJsonObject {
+            put("messages", buildJsonArray {
+                add(incomingEcho("u1", "General", updateData))
+            })
+            put("local_packet_ids", buildJsonArray {})
+        }
+        session.sync()
+
+        val updated = db.messageDao().getById("m1")!!
+        assertTrue(updated.dataJson.contains("New body"))
+        assertTrue(updated.versionsJson != null && updated.versionsJson!!.contains("Old body"))
+        assertNull(db.messageDao().getById("u1"))
+    }
+
+    @Test
     fun `pubkey requests are queued and answered when enabled`() {
         runBlocking {
             val requestPayload = data(

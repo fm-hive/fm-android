@@ -10,11 +10,13 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -25,6 +27,8 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Explore
+import androidx.compose.material.icons.filled.Checklist
+import androidx.compose.material.icons.filled.Forward
 import androidx.compose.material.icons.filled.Gavel
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.EmojiEmotions
@@ -35,6 +39,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Badge
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Card
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.CircularProgressIndicator
@@ -44,6 +49,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -174,7 +180,31 @@ fun FmRoot(
     onModerationDuration: (String) -> Unit = {},
     onModerationReason: (String) -> Unit = {},
     onSubmitModeration: () -> Unit = {},
+    onOpenContacts: () -> Unit = {},
+    onCloseContacts: () -> Unit = {},
+    onNewContactAddress: (String) -> Unit = {},
+    onNewContactName: (String) -> Unit = {},
+    onAddContact: () -> Unit = {},
+    onDeleteContact: (String) -> Unit = {},
+    onPickContact: (String) -> Unit = {},
+    onForwardMessage: (MessageUi) -> Unit = {},
+    onToggleSelection: () -> Unit = {},
+    onToggleMessageSelection: (String) -> Unit = {},
+    onForwardSelected: () -> Unit = {},
 ) {
+    if (state.contactsDialog) {
+        ContactsDialog(
+            contacts = state.contacts,
+            address = state.newContactAddress,
+            name = state.newContactName,
+            onAddress = onNewContactAddress,
+            onName = onNewContactName,
+            onAdd = onAddContact,
+            onPick = onPickContact,
+            onDelete = onDeleteContact,
+            onDismiss = onCloseContacts,
+        )
+    }
     if (state.policyViewer) {
         PolicyViewerDialog(text = state.policyViewText, onDismiss = onClosePolicyViewer)
     }
@@ -293,12 +323,18 @@ fun FmRoot(
             messages = state.messages,
             syncing = state.syncing,
             canModerate = state.activeProfile?.let { it.isAdmin || it.isModerator } == true,
+            selectionMode = state.selectionMode,
+            selectedMessages = state.selectedMessages,
+            onToggleSelection = onToggleSelection,
+            onToggleMessageSelection = onToggleMessageSelection,
+            onForwardSelected = onForwardSelected,
             onBack = onBackFromEcho,
             onRefresh = onRefresh,
             onCompose = onOpenCompose,
             onRefill = onOpenRefillDialog,
             onReact = onReactMessage,
             onModerate = onOpenModeration,
+            onForward = onForwardMessage,
         )
         AppScreen.Compose -> EchoComposeScreen(
             echoName = state.selectedEcho?.name ?: "",
@@ -341,6 +377,7 @@ fun FmRoot(
         AppScreen.NetmailDetail -> NetmailDetailScreen(
             message = state.selectedNetmail,
             onBack = onBackFromNetmailDetail,
+            onForward = onForwardMessage,
         )
         AppScreen.NetmailCompose -> NetmailComposeScreen(
             state = state.netmailCompose,
@@ -349,6 +386,7 @@ fun FmRoot(
             onSubject = onNetmailSubject,
             onBody = onNetmailBody,
             onSend = onSendNetmail,
+            onContacts = onOpenContacts,
         )
         AppScreen.Outbox -> OutboxScreen(
             entries = state.outbox,
@@ -813,13 +851,23 @@ fun EchoConversationScreen(
     messages: List<MessageUi>,
     syncing: Boolean,
     canModerate: Boolean,
+    selectionMode: Boolean,
+    selectedMessages: Set<String>,
+    onToggleSelection: () -> Unit,
+    onToggleMessageSelection: (String) -> Unit,
+    onForwardSelected: () -> Unit,
     onBack: () -> Unit,
     onRefresh: () -> Unit,
     onCompose: () -> Unit,
     onRefill: () -> Unit,
     onReact: (MessageUi, String) -> Unit,
     onModerate: (MessageUi) -> Unit,
+    onForward: (MessageUi) -> Unit,
 ) {
+    var versionsMessage by remember { mutableStateOf<MessageUi?>(null) }
+    if (versionsMessage != null) {
+        MessageVersionsDialog(message = versionsMessage!!, onDismiss = { versionsMessage = null })
+    }
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
@@ -833,6 +881,14 @@ fun EchoConversationScreen(
                     if (syncing) {
                         CircularProgressIndicator(modifier = Modifier.width(20.dp).height(20.dp))
                         Spacer(Modifier.width(8.dp))
+                    }
+                    IconButton(onClick = onToggleSelection) {
+                        Icon(Icons.Default.Checklist, contentDescription = stringResource(R.string.select_messages))
+                    }
+                    if (selectionMode && selectedMessages.isNotEmpty()) {
+                        IconButton(onClick = onForwardSelected) {
+                            Icon(Icons.Default.Forward, contentDescription = stringResource(R.string.forward))
+                        }
                     }
                     IconButton(onClick = onRefill) {
                         Icon(Icons.Default.History, contentDescription = stringResource(R.string.refill_title))
@@ -875,8 +931,13 @@ fun EchoConversationScreen(
                 MessageCard(
                     message = message,
                     canModerate = canModerate,
+                    selectionMode = selectionMode,
+                    selected = message.messageId in selectedMessages,
+                    onToggleSelected = { onToggleMessageSelection(message.messageId) },
                     onReact = onReact,
                     onModerate = onModerate,
+                    onForward = onForward,
+                    onVersions = { versionsMessage = it },
                 )
             }
         }
@@ -887,18 +948,34 @@ fun EchoConversationScreen(
 private fun MessageCard(
     message: MessageUi,
     canModerate: Boolean,
+    selectionMode: Boolean,
+    selected: Boolean,
+    onToggleSelected: () -> Unit,
     onReact: (MessageUi, String) -> Unit,
     onModerate: (MessageUi) -> Unit,
+    onForward: (MessageUi) -> Unit,
+    onVersions: (MessageUi) -> Unit,
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.fillMaxWidth().padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
+                if (selectionMode) {
+                    Checkbox(checked = selected, onCheckedChange = { onToggleSelected() })
+                }
                 Text(
                     text = message.senderName,
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.weight(1f),
                 )
+                if (message.versions.isNotEmpty()) {
+                    TextButton(onClick = { onVersions(message) }) {
+                        Text("${message.versions.size}✎")
+                    }
+                }
+                IconButton(onClick = { onForward(message) }) {
+                    Icon(Icons.Default.Forward, contentDescription = stringResource(R.string.forward))
+                }
                 if (canModerate && !message.own) {
                     IconButton(onClick = { onModerate(message) }) {
                         Icon(Icons.Default.Gavel, contentDescription = stringResource(R.string.moderate))
@@ -1079,6 +1156,33 @@ internal fun errorText(error: UiError): String = when (error) {
 internal fun formatTimestamp(seconds: Long): String {
     val millis = if (seconds < 10_000_000_000L) seconds * 1000 else seconds
     return SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()).format(Date(millis))
+}
+
+@Composable
+fun MessageVersionsDialog(message: MessageUi, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("${stringResource(R.string.versions_title)} (${message.versions.size})") },
+        text = {
+            Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+                message.versions.asReversed().forEach { version ->
+                    Text(
+                        text = formatTimestamp(version.timestamp),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (version.subject.isNotBlank()) {
+                        Text(version.subject, fontWeight = FontWeight.SemiBold)
+                    }
+                    Text(version.body, style = MaterialTheme.typography.bodySmall)
+                    Spacer(Modifier.height(12.dp))
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.close)) }
+        },
+    )
 }
 
 // ------------------------------------------------------------------ previews

@@ -570,6 +570,33 @@ class NetworkSession(
         if (parsedData?.string("type") == "error") {
             return Incoming.Error(parsedData.string("error").orEmpty())
         }
+        // A plain message update (the author re-sent the text with
+        // updateMessageId) replaces the original; the old copy is kept in the
+        // edit history. Updates from other authors are ignored.
+        val updateTarget = parsedData?.string("updateMessageId")
+        if (!updateTarget.isNullOrEmpty() &&
+            parsedData.string("severity").isNullOrEmpty() &&
+            parsedData.string("reaction").isNullOrEmpty() &&
+            parsedData.string("proto").isNullOrEmpty()
+        ) {
+            val original = database.messageDao().getById(updateTarget)
+            if (original != null && original.senderAddress == sender) {
+                val versions = runCatching {
+                    (json.parseToJsonElement(original.versionsJson ?: "[]") as JsonArray).toMutableList()
+                }.getOrDefault(mutableListOf())
+                versions += buildJsonObject {
+                    put("data", original.dataJson)
+                    put("timestamp", original.timestamp)
+                }
+                database.messageDao().updateContent(
+                    original.messageId,
+                    dataJson.orEmpty(),
+                    JsonArray(versions).toString(),
+                    System.currentTimeMillis(),
+                )
+                return Incoming.Internal
+            }
+        }
         parsedData?.string("sender_name")?.takeIf { it.isNotBlank() }?.let { name ->
             if (sender.isNotEmpty()) {
                 database.nameDao().upsert(NameEntity(sender, name, System.currentTimeMillis()))

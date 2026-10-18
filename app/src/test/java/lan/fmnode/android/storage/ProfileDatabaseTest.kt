@@ -125,6 +125,26 @@ class ProfileDatabaseTest {
     }
 
     @Test
+    fun `drafts round trip per echo`() = runBlocking {
+        db.draftDao().upsert(DraftEntity("General", "Subj", "Body", 1))
+        val draft = db.draftDao().get("General")!!
+        assertEquals("Subj", draft.subject)
+        assertEquals("Body", draft.body)
+        db.draftDao().delete("General")
+        org.junit.Assert.assertNull(db.draftDao().get("General"))
+    }
+
+    @Test
+    fun `contacts are listed and removed`() = runBlocking {
+        db.contactDao().upsert(ContactEntity(":0:2", "Petya", 1))
+        db.contactDao().upsert(ContactEntity(":0:3", "Anna", 2))
+        val contacts = db.contactDao().observeAll().first()
+        assertEquals(2, contacts.size)
+        db.contactDao().delete(":0:2")
+        assertEquals(listOf(":0:3"), db.contactDao().observeAll().first().map { it.address })
+    }
+
+    @Test
     fun `marking an echo read resets its unread counter`() = runBlocking {
         db.echoDao().upsertAll(listOf(echo("General", subscribed = true)))
         db.messageDao().upsert(message("m1", "General", ":0:2", 200))
