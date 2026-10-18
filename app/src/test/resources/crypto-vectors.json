@@ -1,0 +1,35 @@
+{
+  "seed": "1111111111111111111111111111111111111111111111111111111111111111",
+  "public_key": "d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737",
+  "thumbprint": "ELpoLIrRNROXHotWiBqri9cCu4B3luyoGTLHNalNbm0",
+  "x25519_public_key": "7a46e129fd805047448437e4744f1f1576be8c449fdf57e0c580d36c5cfc6668",
+  "x25519_private_key": "805b920bda4cd49d251d3329144a0cf8bdaaa07502626fa87f08e80faedab15f",
+  "jws": {
+    "payload": "{\"id\":\"golden\",\"policy\":\"test policy\",\"data\":\"vector\"}",
+    "token": "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCIsImtpZCI6IkVMcG9MSXJSTlJPWEhvdFdpQnFyaTljQ3U0QjNsdXlvR1RMSE5hbE5ibTAifQ.eyJpZCI6ImdvbGRlbiIsInBvbGljeSI6InRlc3QgcG9saWN5IiwiZGF0YSI6InZlY3RvciJ9.v5FcrCRdIOHGyj04hVmKUZIxsy2pLziDV7oBD7zPMcUZ5U_yfHTQtkzaGLuT4b9GFm3ugdrYhgtbtorOrwC_CQ"
+  },
+  "jwe": {
+    "recipient_seed": "2222222222222222222222222222222222222222222222222222222222222222",
+    "recipient_ed_public_key": "a09aa5f47a6759802ff955f8dc2d2a14a5c99d23be97f864127ff9383455a4f0",
+    "recipient_x_public_key": "9d8d78b9c9e6661e552f2f1af02095ee2f8743fa2e6183f41bb7077ef51b5379",
+    "recipient_x_private_key": "68c3eb1cd6dbdd0037d503e6655229500a83f464be62ca753bff884c43788778",
+    "ephemeral_seed": "3333333333333333333333333333333333333333333333333333333333333333",
+    "ephemeral_public_key": "7b0d47d93427f8311160781c7c733fd89f88970aef490d8aa0ee19a4cb8a1b14",
+    "nonce": "444444444444444444444444",
+    "plaintext": "{\"request\":\"policy\",\"data\":{\"pubkey\":\"AAECAw==\"}}",
+    "token": "eyJlcGhlbWVyYWxfcHVibGljIjoiZXcxSDJUUW4tREVSWUhnY2ZITV8ySi1JbHdydlNRMktvTzRacE11S0d4USIsIm5vbmNlIjoiUkVSRVJFUkVSRVJFUkVSRSIsImNpcGhlcnRleHQiOiJ3S3FUN0thRHV4eTFfU0JhYXlTdjRNd1ZJN3dRbnRlYzlYd3RSNDF2U1pIcmtqUXhJX3JNbFRKX2hWWXk4elByeWtOMDZDTnYySnhpcTlSemxHbWxWdlkifQ"
+  },
+  "envelope": {
+    "jwe_sha256": "31_K_5GA838458kBr4qDGcVFlM7u6qwLBewNcpKw4SI",
+    "data_json": "{\"request\":\"policy\",\"data\":{\"pubkey\":\"AAECAw==\"}}",
+    "data_sha256": "8zht8Jt8xOwzvA9i0IlyTedEqVGOp2IXJg0zOiAPyW8"
+  },
+  "keystore": {
+    "password": "test-password",
+    "seed": "5555555555555555555555555555555555555555555555555555555555555555",
+    "salt": "22222222222222222222222222222222",
+    "iv": "444444444444444444444444",
+    "iterations": 100000,
+    "encrypted_b64": "tUnGX7azWZMAns8r4ZEqq0Sh0o64iS024gUMH4eBpj59Okm+JkSMy7LYS2ECmw1S"
+  }
+}
