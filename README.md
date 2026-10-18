@@ -28,7 +28,9 @@ Work in progress. Implemented so far:
   (vote/election voting, refill responses), outbox, settings (invite QR,
   vouchers, keys import/export), admin (nodelist, merge initiation,
   excommunicate proposals);
-- client_synchronize multi-device sync; automatic policy re-sign;
+- client_synchronize multi-device sync; automatic policy re-sign; composer
+  drafts; netmail contacts; forwarding (single and multi-select); message
+  edit history (plain updates are folded into the original);
 - all fm-app translations (997 keys, ru/en) generated into fm_strings.xml;
 - 54 unit tests (crypto vectors, policy, sync, DAO, markdown, i18n parity).
 
