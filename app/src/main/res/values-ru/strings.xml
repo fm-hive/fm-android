@@ -19,4 +19,12 @@
     <string name="error_password">Неверный пароль</string>
     <string name="error_passwords_differ">Пароли не совпадают</string>
     <string name="error_password_short">Пароль должен быть не короче 4 символов</string>
+    <string name="refresh">Обновить</string>
+    <string name="lock">Заблокировать</string>
+    <string name="echoes_empty">Пока нет подписок на эхи. Обновите или проверьте сеть.</string>
+    <string name="no_messages">Пока нет сообщений</string>
+    <string name="compose">Написать</string>
+    <string name="subject">Тема</string>
+    <string name="body">Сообщение</string>
+    <string name="send">Отправить</string>
 </resources>

@@ -25,6 +25,7 @@ class MainActivity : ComponentActivity() {
                 FmRoot(
                     state = state,
                     onUnlock = viewModel::unlock,
+                    onLock = viewModel::lock,
                     onOpenAddNetwork = viewModel::openAddNetwork,
                     onCloseAddNetwork = viewModel::closeAddNetwork,
                     onUrlChange = viewModel::setAddUrl,
@@ -35,6 +36,16 @@ class MainActivity : ComponentActivity() {
                     onRegister = viewModel::register,
                     onSelectProfile = viewModel::selectProfile,
                     onDeleteProfile = viewModel::deleteProfile,
+                    onBackFromNetworks = viewModel::backFromNetworks,
+                    onRefresh = viewModel::refresh,
+                    onOpenNetworks = viewModel::openNetworks,
+                    onSelectEcho = viewModel::selectEcho,
+                    onBackFromEcho = viewModel::backFromEcho,
+                    onOpenCompose = viewModel::openCompose,
+                    onBackFromCompose = viewModel::backFromCompose,
+                    onComposeSubject = viewModel::setComposeSubject,
+                    onComposeBody = viewModel::setComposeBody,
+                    onSendCompose = viewModel::sendCompose,
                 )
             }
         }

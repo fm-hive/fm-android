@@ -19,4 +19,12 @@
     <string name="error_password">Wrong password</string>
     <string name="error_passwords_differ">Passwords do not match</string>
     <string name="error_password_short">Password must be at least 4 characters</string>
+    <string name="refresh">Refresh</string>
+    <string name="lock">Lock</string>
+    <string name="echoes_empty">No subscribed echoes yet. Refresh or check the network.</string>
+    <string name="no_messages">No messages yet</string>
+    <string name="compose">Compose</string>
+    <string name="subject">Subject</string>
+    <string name="body">Message</string>
+    <string name="send">Send</string>
 </resources>

@@ -80,6 +80,26 @@ data class MetaEntity(
     val value: String,
 )
 
+/** Echo with the sender's cached display name (for message lists). */
+data class MessageRow(
+    val messageId: String,
+    val echoName: String,
+    val type: String,
+    val senderAddress: String,
+    val recipientAddress: String?,
+    val timestamp: Long,
+    val dataJson: String,
+    val jws: String?,
+    val jwe: String?,
+    val senderName: String?,
+)
+
+/** Unread counter of one echo. */
+data class EchoUnread(
+    val echoName: String,
+    val count: Int,
+)
+
 @Dao
 interface EchoDao {
     @Query("SELECT * FROM echoes ORDER BY name")
@@ -114,6 +134,31 @@ interface MessageDao {
 
     @Query("SELECT * FROM messages WHERE echoName = :echo ORDER BY timestamp ASC, messageId ASC")
     fun observeEcho(echo: String): Flow<List<MessageEntity>>
+
+    @Query(
+        """
+        SELECT m.messageId AS messageId, m.echoName AS echoName, m.type AS type,
+               m.senderAddress AS senderAddress, m.recipientAddress AS recipientAddress,
+               m.timestamp AS timestamp, m.dataJson AS dataJson, m.jws AS jws, m.jwe AS jwe,
+               n.name AS senderName
+        FROM messages m
+        LEFT JOIN names n ON n.address = m.senderAddress
+        WHERE m.echoName = :echo
+        ORDER BY m.timestamp ASC, m.messageId ASC
+        """,
+    )
+    fun observeEchoRows(echo: String): Flow<List<MessageRow>>
+
+    @Query(
+        """
+        SELECT m.echoName AS echoName, COUNT(*) AS count
+        FROM messages m
+        JOIN echoes e ON e.name = m.echoName
+        WHERE e.subscribed = 1 AND m.timestamp > e.lastReadTimestamp AND m.senderAddress != :me
+        GROUP BY m.echoName
+        """,
+    )
+    fun observeUnreadSummary(me: String): Flow<List<EchoUnread>>
 
     @Query("SELECT * FROM messages WHERE echoName = :echo ORDER BY timestamp ASC, messageId ASC")
     suspend fun getEcho(echo: String): List<MessageEntity>
