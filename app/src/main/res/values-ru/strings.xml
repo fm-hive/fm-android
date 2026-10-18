@@ -91,4 +91,5 @@
     <string name="excomm_target">Адрес узла</string>
     <string name="excomm_reason">Причина</string>
     <string name="excomm_submit">Предложить</string>
+    <string name="protocol_respond">Ответить 👍</string>
 </resources>

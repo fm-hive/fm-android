@@ -150,6 +150,7 @@ fun ProtocolsScreen(
     protocols: List<ProtocolUi>,
     onBack: () -> Unit,
     onVote: (ProtocolUi, String) -> Unit,
+    onRespondRefill: (ProtocolUi) -> Unit,
 ) {
     Scaffold(
         topBar = {
@@ -183,14 +184,22 @@ fun ProtocolsScreen(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             items(protocols, key = { it.messageId }) { protocol ->
-                ProtocolCard(protocol = protocol, onVote = { variant -> onVote(protocol, variant) })
+                ProtocolCard(
+                    protocol = protocol,
+                    onVote = { variant -> onVote(protocol, variant) },
+                    onRespondRefill = { onRespondRefill(protocol) },
+                )
             }
         }
     }
 }
 
 @Composable
-private fun ProtocolCard(protocol: ProtocolUi, onVote: (String) -> Unit) {
+private fun ProtocolCard(
+    protocol: ProtocolUi,
+    onVote: (String) -> Unit,
+    onRespondRefill: () -> Unit,
+) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.fillMaxWidth().padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -218,6 +227,12 @@ private fun ProtocolCard(protocol: ProtocolUi, onVote: (String) -> Unit) {
             if (protocol.detail.isNotBlank()) {
                 Spacer(Modifier.height(4.dp))
                 Text(protocol.detail, style = MaterialTheme.typography.bodySmall)
+            }
+            if (protocol.canRespondRefill) {
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(onClick = onRespondRefill) {
+                    Text(stringResource(R.string.protocol_respond))
+                }
             }
             if (protocol.isPoster) {
                 Spacer(Modifier.height(8.dp))

@@ -152,6 +152,7 @@ fun FmRoot(
     onExcommTarget: (String) -> Unit = {},
     onExcommReason: (String) -> Unit = {},
     onSubmitExcomm: () -> Unit = {},
+    onRespondRefill: (ProtocolUi) -> Unit = {},
 ) {
     if (state.createEchoDialog) {
         CreateEchoDialog(
@@ -257,6 +258,7 @@ fun FmRoot(
             protocols = state.protocols,
             onBack = onCloseProtocols,
             onVote = onCastVote,
+            onRespondRefill = onRespondRefill,
         )
         AppScreen.Netmail -> NetmailScreen(
             messages = state.netmail,

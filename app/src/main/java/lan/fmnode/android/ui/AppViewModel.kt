@@ -132,6 +132,7 @@ data class ProtocolUi(
     val detail: String,
     val variants: List<String>,
     val isPoster: Boolean,
+    val canRespondRefill: Boolean = false,
 )
 
 data class ComposeState(
@@ -801,6 +802,14 @@ class AppViewModel(
         _state.update { it.copy(screen = AppScreen.Echoes) }
     }
 
+    fun respondRefill(protocol: ProtocolUi) {
+        val opened = networkSession ?: return
+        viewModelScope.launch {
+            runCatching { opened.postReaction(protocol.messageId, "👍", protocol.echoName) }
+            syncOnce(opened)
+        }
+    }
+
     fun castVote(protocol: ProtocolUi, variant: String) {
         val opened = networkSession ?: return
         viewModelScope.launch {
@@ -1241,7 +1250,14 @@ class AppViewModel(
             }
             messageRows += row
         }
-        return messageRows.map { row ->
+        val protocolTypes = setOf(
+            "vote", "election", "excommunicate", "change_policy", "change_rules",
+            "remove_echo", "refill", "merge", "conflict", "recover", "appeal",
+            "remote_subscribe",
+        )
+        return messageRows
+            .filter { it.type !in protocolTypes }
+            .map { row ->
             val bySender = reactions[row.messageId]
             val counts = mutableMapOf<String, Int>()
             var mine: String? = null
@@ -1281,6 +1297,7 @@ class AppViewModel(
             detail = detail,
             variants = variants,
             isPoster = innerType == "poster" && variants.isNotEmpty(),
+            canRespondRefill = type == "refill" && innerType == "request",
         )
     }
 

@@ -138,6 +138,7 @@ class MainActivity : ComponentActivity() {
                     onCloseRefillDialog = viewModel::closeRefillDialog,
                     onRefillDate = viewModel::setRefillDate,
                     onSendRefill = viewModel::sendRefill,
+                    onRespondRefill = viewModel::respondRefill,
                     onCreateEchoDialog = viewModel::openCreateEchoDialog,
                     onCloseCreateEchoDialog = viewModel::closeCreateEchoDialog,
                     onCreateEchoName = viewModel::setCreateEchoName,
