@@ -151,6 +151,7 @@ fun ProtocolsScreen(
     onBack: () -> Unit,
     onVote: (ProtocolUi, String) -> Unit,
     onRespondRefill: (ProtocolUi) -> Unit,
+    onVoteElection: (ProtocolUi, String) -> Unit,
 ) {
     Scaffold(
         topBar = {
@@ -188,6 +189,7 @@ fun ProtocolsScreen(
                     protocol = protocol,
                     onVote = { variant -> onVote(protocol, variant) },
                     onRespondRefill = { onRespondRefill(protocol) },
+                    onVoteElection = { candidate -> onVoteElection(protocol, candidate) },
                 )
             }
         }
@@ -199,6 +201,7 @@ private fun ProtocolCard(
     protocol: ProtocolUi,
     onVote: (String) -> Unit,
     onRespondRefill: () -> Unit,
+    onVoteElection: (String) -> Unit,
 ) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.fillMaxWidth().padding(12.dp)) {
@@ -227,6 +230,17 @@ private fun ProtocolCard(
             if (protocol.detail.isNotBlank()) {
                 Spacer(Modifier.height(4.dp))
                 Text(protocol.detail, style = MaterialTheme.typography.bodySmall)
+            }
+            protocol.electionCandidate?.let { candidate ->
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = { onVoteElection(candidate) }) {
+                        Text(stringResource(R.string.election_vote))
+                    }
+                    OutlinedButton(onClick = { onVoteElection("") }) {
+                        Text(stringResource(R.string.election_retract))
+                    }
+                }
             }
             if (protocol.canRespondRefill) {
                 Spacer(Modifier.height(8.dp))

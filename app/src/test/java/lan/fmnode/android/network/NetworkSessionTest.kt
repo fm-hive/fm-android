@@ -372,6 +372,29 @@ class NetworkSessionTest {
     }
 
     @Test
+    fun `postElectionVote sends the election vote`() {
+        runBlocking {
+            session.postElectionVote("General", ":0:5")
+            val message = sentMessages.last()
+            assertEquals("election", message["type"]!!.jsonPrimitive.content)
+            val data = Json.parseToJsonElement(
+                CryptoService.jwsPayload(message["jws"]!!.jsonPrimitive.content)!!,
+            ).jsonObject
+            assertEquals("election", data["proto"]!!.jsonPrimitive.content)
+            assertEquals("vote", data["type"]!!.jsonPrimitive.content)
+            assertEquals(":0:5", data["to"]!!.jsonPrimitive.content)
+            assertEquals(":0:1", data["from"]!!.jsonPrimitive.content)
+
+            session.postElectionVote("General", "")
+            val retract = Json.parseToJsonElement(
+                CryptoService.jwsPayload(sentMessages.last()["jws"]!!.jsonPrimitive.content)!!,
+            ).jsonObject
+            assertEquals("", retract["to"]!!.jsonPrimitive.content)
+            assertEquals("Retract vote", retract["message"]!!.jsonPrimitive.content)
+        }
+    }
+
+    @Test
     fun `postRefillRequest sends the refill protocol message`() {
         runBlocking {
             session.postRefillRequest("General", "2026-01-01T00:00:00.000Z")

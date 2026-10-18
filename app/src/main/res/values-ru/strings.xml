@@ -92,4 +92,6 @@
     <string name="excomm_reason">Причина</string>
     <string name="excomm_submit">Предложить</string>
     <string name="protocol_respond">Ответить 👍</string>
+    <string name="election_vote">Голосовать за кандидата</string>
+    <string name="election_retract">Отозвать</string>
 </resources>

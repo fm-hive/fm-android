@@ -92,4 +92,6 @@
     <string name="excomm_reason">Reason</string>
     <string name="excomm_submit">Submit proposal</string>
     <string name="protocol_respond">Respond 👍</string>
+    <string name="election_vote">Vote for the candidate</string>
+    <string name="election_retract">Retract</string>
 </resources>

@@ -139,6 +139,7 @@ class MainActivity : ComponentActivity() {
                     onRefillDate = viewModel::setRefillDate,
                     onSendRefill = viewModel::sendRefill,
                     onRespondRefill = viewModel::respondRefill,
+                    onVoteElection = viewModel::voteElection,
                     onCreateEchoDialog = viewModel::openCreateEchoDialog,
                     onCloseCreateEchoDialog = viewModel::closeCreateEchoDialog,
                     onCreateEchoName = viewModel::setCreateEchoName,

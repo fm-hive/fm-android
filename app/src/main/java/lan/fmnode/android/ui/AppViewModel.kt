@@ -133,6 +133,7 @@ data class ProtocolUi(
     val variants: List<String>,
     val isPoster: Boolean,
     val canRespondRefill: Boolean = false,
+    val electionCandidate: String? = null,
 )
 
 data class ComposeState(
@@ -802,6 +803,14 @@ class AppViewModel(
         _state.update { it.copy(screen = AppScreen.Echoes) }
     }
 
+    fun voteElection(protocol: ProtocolUi, candidate: String) {
+        val opened = networkSession ?: return
+        viewModelScope.launch {
+            runCatching { opened.postElectionVote(protocol.echoName, candidate) }
+            syncOnce(opened)
+        }
+    }
+
     fun respondRefill(protocol: ProtocolUi) {
         val opened = networkSession ?: return
         viewModelScope.launch {
@@ -1298,6 +1307,11 @@ class AppViewModel(
             variants = variants,
             isPoster = innerType == "poster" && variants.isNotEmpty(),
             canRespondRefill = type == "refill" && innerType == "request",
+            electionCandidate = if (type == "election" && innerType == "poster") {
+                (data["from"] as? JsonPrimitive)?.contentOrNull ?: senderAddress
+            } else {
+                null
+            },
         )
     }
 

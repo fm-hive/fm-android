@@ -258,6 +258,20 @@ class NetworkSession(
         return postProtocol(echoName, "echomail", data)
     }
 
+    /** Votes for a candidate ([candidate] empty retracts) in an election. */
+    suspend fun postElectionVote(echoName: String, candidate: String): SendResult {
+        val data = buildJsonObject {
+            put("echo", echoName)
+            put("proto", "election")
+            put("type", "vote")
+            put("from", profile.address)
+            put("to", candidate)
+            put("message", if (candidate.isEmpty()) "Retract vote" else "Vote for $candidate")
+            put("date", java.time.Instant.now().toString())
+        }.toString()
+        return postProtocol(echoName, "election", data)
+    }
+
     /** Requests old messages of an echo before [beforeIso] (refill protocol). */
     suspend fun postRefillRequest(echoName: String, beforeIso: String): SendResult {
         val messageId = "refill_${echoName}_${profile.address}_${System.currentTimeMillis()}_" +
