@@ -11,6 +11,8 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.int
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
@@ -50,6 +52,7 @@ class NetworkSessionTest {
 
     private val sentMessages = mutableListOf<JsonObject>()
     private val serviceRequests = mutableListOf<JsonObject>()
+    private val clientSyncRequests = mutableListOf<JsonObject>()
     private var lastSendReceiveControl: JsonObject? = null
     private var lastControl: JsonObject? = null
     private var echoList: JsonElement = buildJsonArray {}
@@ -122,6 +125,10 @@ class NetworkSessionTest {
                         }
                     }
                     "subscribe_echo", "unsubscribe_echo" -> JsonObject(emptyMap())
+                    "client_synchronize" -> {
+                        lastControl?.let { clientSyncRequests += it }
+                        JsonObject(emptyMap())
+                    }
                     "voucher" -> voucherResponse
                     "nodes" -> buildJsonArray {
                         add(buildJsonObject { put("address", ":0:1"); put("url", "https://node.example") })
@@ -481,6 +488,88 @@ class NetworkSessionTest {
                 data["pubkey"]!!.jsonPrimitive.content,
             )
         }
+    }
+
+    private fun clientEncrypt(op: JsonObject): String = CryptoService.encryptJwe(
+        op.toString().toByteArray(),
+        CryptoService.x25519PublicKeyFromEd25519(userPublicKey),
+    )
+
+    @Test
+    fun `client sync registers and forwards messages to other clients`() = runBlocking {
+        // Another device of the same address is already registered.
+        val listEntry = buildJsonObject {
+            put("id", 1)
+            put("payload", clientEncrypt(buildJsonObject { put("op", "add"); put("client", "other-1") }))
+        }
+        sendReceiveResponse = buildJsonObject {
+            put("messages", buildJsonArray { add(incomingEcho("m1", "General", data("subject" to "Hi"))) })
+            put("local_packet_ids", buildJsonArray {})
+            put("client_synchronize", true)
+            put("client_container_entries", buildJsonArray {
+                add(buildJsonObject {
+                    put("name", "client_synchronize")
+                    put("entries", buildJsonArray { add(listEntry) })
+                })
+            })
+        }
+        session.sync()
+
+        val names = clientSyncRequests.mapNotNull { control ->
+            (control["data"] as? JsonObject)?.let { data ->
+                (data["action"] as? JsonPrimitive)?.content to (data["name"] as? JsonPrimitive)?.content
+            }
+        }
+        // Registration in the client list.
+        assertTrue(names.contains("append" to "client_synchronize"))
+        // The received message is forwarded to the other device.
+        assertTrue(names.contains("append" to "outbound_client_other-1"))
+
+        val forward = clientSyncRequests.last { control ->
+            ((control["data"] as? JsonObject)?.get("name") as? JsonPrimitive)?.content == "outbound_client_other-1"
+        }
+        val payload = (forward["data"] as? JsonObject)!!["payload"]!!.jsonPrimitive.content
+        val op = Json.parseToJsonElement(
+            String(CryptoService.decryptJwe(payload, CryptoService.x25519PrivateKeyFromSeed(userSeed))),
+        ).jsonObject
+        assertEquals("message", op["op"]!!.jsonPrimitive.content)
+        assertEquals("m1", op["message"]!!.jsonObject["message_id"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun `own client container messages are stored and acknowledged`() = runBlocking {
+        db.metaDao().put(lan.fmnode.android.storage.MetaEntity("client_id", "client-1"))
+        val netmail = incomingNetmail("n1", data("subject" to "From phone", "body" to "Hi"))
+        val ownEntry = buildJsonObject {
+            put("id", 42)
+            put("payload", clientEncrypt(buildJsonObject {
+                put("op", "message")
+                put("message", netmail)
+            }))
+        }
+        sendReceiveResponse = buildJsonObject {
+            put("messages", buildJsonArray {})
+            put("local_packet_ids", buildJsonArray {})
+            put("client_synchronize", true)
+            put("client_container_entries", buildJsonArray {
+                add(buildJsonObject {
+                    put("name", "outbound_client_client-1")
+                    put("entries", buildJsonArray { add(ownEntry) })
+                })
+            })
+        }
+        session.sync()
+
+        assertEquals("From phone", Json.parseToJsonElement(
+            db.messageDao().getById("n1")!!.dataJson,
+        ).jsonObject["subject"]!!.jsonPrimitive.content)
+
+        val delete = clientSyncRequests.last { control ->
+            ((control["data"] as? JsonObject)?.get("action") as? JsonPrimitive)?.content == "delete"
+        }
+        val data = delete["data"]!!.jsonObject
+        assertEquals("outbound_client_client-1", data["name"]!!.jsonPrimitive.content)
+        assertEquals(42, data["ids"]!!.jsonArray[0].jsonPrimitive.int)
     }
 
     @Test

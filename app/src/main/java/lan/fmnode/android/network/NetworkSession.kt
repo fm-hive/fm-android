@@ -35,6 +35,9 @@ class NetworkSession(
 ) {
     val publicKey: ByteArray = CryptoService.publicKeyFromSeed(seed)
     private val x25519Private: ByteArray = CryptoService.x25519PrivateKeyFromSeed(seed)
+    private val x25519Public: ByteArray = CryptoService.x25519PublicKeyFromEd25519(publicKey)
+    private var registeredThisSession = false
+    private var clientSyncEnabled = false
     private val auth = ApiKeys(seed, publicKey)
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -101,26 +104,43 @@ class NetworkSession(
     suspend fun sync(): SyncOutcome {
         flushOutbox()
 
+        val ownContainer = CLIENT_CONTAINER_PREFIX + clientId()
         val request = buildJsonObject {
             put("messages", buildJsonArray {})
             val pending = pendingDeliveredIds()
             if (pending.isNotEmpty()) {
                 put("delivered_local_ids", buildJsonArray { pending.forEach { add(JsonPrimitive(it)) } })
             }
+            put(
+                "client_sync_read",
+                buildJsonArray {
+                    add(JsonPrimitive(CLIENT_LIST_CONTAINER))
+                    add(JsonPrimitive(ownContainer))
+                },
+            )
         }
         val response = api.post("send_receive", request.toString(), auth)
         val obj = response as? JsonObject ?: return SyncOutcome(0, 0, emptyList())
 
         var received = 0
         val errors = mutableListOf<String>()
+        val incoming = mutableListOf<JsonObject>()
         for (element in obj["messages"] as? JsonArray ?: JsonArray(emptyList())) {
-            when (val result = processIncoming(element as? JsonObject ?: continue)) {
-                is Incoming.Stored -> received++
+            val message = element as? JsonObject ?: continue
+            when (val result = processIncoming(message)) {
+                is Incoming.Stored -> {
+                    received++
+                    incoming += message
+                }
                 is Incoming.Error -> errors += result.text
                 else -> {}
             }
         }
         val acknowledged = storeDeliveredIds(obj["local_packet_ids"] as? JsonArray)
+        clientSyncEnabled = (obj["client_synchronize"] as? JsonPrimitive)?.content == "true"
+        if (clientSyncEnabled) {
+            processClientContainers(obj["client_container_entries"] as? JsonArray, incoming)
+        }
         return SyncOutcome(received, acknowledged, errors)
     }
 
@@ -355,6 +375,121 @@ class NetworkSession(
 
     suspend fun setAutoRequestPubkeys(enabled: Boolean) {
         database.metaDao().put(MetaEntity(META_AUTO_REQUEST_PUBKEYS, if (enabled) "1" else "0"))
+    }
+
+    // -------------------------------------------------------- client sync
+
+    private suspend fun clientId(): String {
+        database.metaDao().get(META_CLIENT_ID)?.let { return it }
+        val id = java.util.UUID.randomUUID().toString()
+        database.metaDao().put(MetaEntity(META_CLIENT_ID, id))
+        return id
+    }
+
+    private fun encryptClientPayload(op: JsonObject): String =
+        CryptoService.encryptJwe(op.toString().toByteArray(Charsets.UTF_8), x25519Public)
+
+    private fun decryptClientPayload(payload: String): JsonObject? {
+        // The node wraps every payload with the user's key; the client may wrap
+        // it once more (fm-app's client-side encryption, on by default).
+        val nodeLayer = runCatching {
+            String(CryptoService.decryptJwe(payload, x25519Private), Charsets.UTF_8)
+        }.getOrElse { payload }
+        val clientLayer = runCatching {
+            String(CryptoService.decryptJwe(nodeLayer, x25519Private), Charsets.UTF_8)
+        }.getOrNull() ?: nodeLayer
+        return runCatching { json.parseToJsonElement(clientLayer).jsonObject }.getOrNull()
+    }
+
+    private suspend fun appendContainer(name: String, op: JsonObject) {
+        val data = buildJsonObject {
+            put("action", "append")
+            put("name", name)
+            put("payload", encryptClientPayload(op))
+        }
+        api.post("client_synchronize", data.toString(), auth)
+    }
+
+    private suspend fun deleteContainerEntries(name: String, ids: List<JsonElement>) {
+        if (ids.isEmpty()) return
+        val data = buildJsonObject {
+            put("action", "delete")
+            put("name", name)
+            put("ids", buildJsonArray { ids.forEach { add(it) } })
+        }
+        api.post("client_synchronize", data.toString(), auth)
+    }
+
+    /**
+     * Applies the client-sync containers returned by send_receive: rebuilds the
+     * client list, consumes this client's own queue and forwards freshly
+     * received messages to the other devices.
+     */
+    private suspend fun processClientContainers(entries: JsonArray?, incoming: List<JsonObject>) {
+        val me = clientId()
+        val ownContainer = CLIENT_CONTAINER_PREFIX + me
+        val listEntries = mutableListOf<JsonObject>()
+        val ownEntries = mutableListOf<JsonObject>()
+        entries?.forEach { element ->
+            val container = element as? JsonObject ?: return@forEach
+            when (container.string("name")) {
+                CLIENT_LIST_CONTAINER -> (container["entries"] as? JsonArray)?.forEach {
+                    (it as? JsonObject)?.let(listEntries::add)
+                }
+                ownContainer -> (container["entries"] as? JsonArray)?.forEach {
+                    (it as? JsonObject)?.let(ownEntries::add)
+                }
+            }
+        }
+
+        val clients = mutableSetOf<String>()
+        for (entry in listEntries) {
+            val op = entry.string("payload")?.let { decryptClientPayload(it) } ?: continue
+            val client = op.string("client") ?: continue
+            if (op.string("op") == "remove") clients.remove(client) else clients.add(client)
+        }
+
+        val ackIds = mutableListOf<JsonElement>()
+        for (entry in ownEntries) {
+            val op = entry.string("payload")?.let { decryptClientPayload(it) } ?: continue
+            if (op.string("op") == "message") {
+                (op["message"] as? JsonObject)?.let { message ->
+                    when (val result = processIncoming(message)) {
+                        is Incoming.Stored, is Incoming.Error -> {}
+                        else -> {}
+                    }
+                }
+            }
+            (entry["id"] as? JsonPrimitive)?.let(ackIds::add)
+        }
+        if (ackIds.isNotEmpty()) deleteContainerEntries(ownContainer, ackIds)
+
+        if (me !in clients && !registeredThisSession) {
+            appendContainer(
+                CLIENT_LIST_CONTAINER,
+                buildJsonObject {
+                    put("op", "add")
+                    put("client", me)
+                },
+            )
+            registeredThisSession = true
+            clients.add(me)
+        }
+
+        if (incoming.isNotEmpty()) {
+            for (other in clients) {
+                if (other == me) continue
+                for (message in incoming) {
+                    appendContainer(
+                        CLIENT_CONTAINER_PREFIX + other,
+                        buildJsonObject {
+                            put("op", "message")
+                            put("message", message)
+                        },
+                    )
+                }
+            }
+        }
     }
 
     // ---------------------------------------------------------------- internals
@@ -598,6 +733,9 @@ class NetworkSession(
     companion object {
         const val NETMAIL_ECHO = "__netmail__"
         private const val META_DELIVERED_IDS = "pending_delivered_ids"
+        private const val META_CLIENT_ID = "client_id"
+        const val CLIENT_LIST_CONTAINER = "client_synchronize"
+        const val CLIENT_CONTAINER_PREFIX = "outbound_client_"
         private const val META_PENDING_PUBKEY_REQUESTS = "pending_pubkey_requests"
         private const val META_AUTO_SEND_PUBKEY = "auto_send_pubkey"
         private const val META_AUTO_REQUEST_PUBKEYS = "auto_request_pubkeys"
