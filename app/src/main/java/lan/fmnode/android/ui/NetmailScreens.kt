@@ -18,6 +18,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.EmojiEmotions
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Mail
 import androidx.compose.material.icons.filled.Settings
@@ -38,6 +39,10 @@ import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -212,6 +217,13 @@ fun NetmailComposeScreen(
     onBody: (String) -> Unit,
     onSend: () -> Unit,
 ) {
+    var showEmoji by remember { mutableStateOf(false) }
+    if (showEmoji) {
+        EmojiPickerDialog(
+            onPick = { emoji -> onBody(state.body + emoji) },
+            onDismiss = { showEmoji = false },
+        )
+    }
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
@@ -222,6 +234,9 @@ fun NetmailComposeScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = { showEmoji = true }) {
+                        Icon(Icons.Default.EmojiEmotions, contentDescription = stringResource(R.string.emoji_title))
+                    }
                     TextButton(onClick = onSend, enabled = !state.sending) {
                         Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null)
                         Spacer(Modifier.width(4.dp))

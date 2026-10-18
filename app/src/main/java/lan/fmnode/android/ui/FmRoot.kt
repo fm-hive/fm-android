@@ -23,6 +23,7 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.EmojiEmotions
 import androidx.compose.material.icons.filled.HowToVote
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Lock
@@ -113,6 +114,9 @@ fun FmRoot(
     onOpenProtocols: () -> Unit = {},
     onCloseProtocols: () -> Unit = {},
     onCastVote: (ProtocolUi, String) -> Unit = { _, _ -> },
+    onOpenScanner: () -> Unit = {},
+    onCloseScanner: () -> Unit = {},
+    onQrScanned: (String) -> Unit = {},
 ) {
     when (state.screen) {
         AppScreen.Unlock -> UnlockScreen(state.unlockError, onUnlock)
@@ -137,6 +141,7 @@ fun FmRoot(
             onImportKeys = onImportKeys,
             onImportPassword = onImportPassword,
             onCancelImport = onCancelImport,
+            onScanQr = onOpenScanner,
         )
         AppScreen.Echoes -> EchoesListScreen(
             title = state.activeProfile?.title ?: stringResource(R.string.app_name),
@@ -167,6 +172,10 @@ fun FmRoot(
             onSubject = onComposeSubject,
             onBody = onComposeBody,
             onSend = onSendCompose,
+        )
+        AppScreen.QrScanner -> QrScannerScreen(
+            onBack = onCloseScanner,
+            onScanned = onQrScanned,
         )
         AppScreen.Search -> SearchScreen(
             query = state.searchQuery,
@@ -381,6 +390,7 @@ fun AddNetworkScreen(
     onImportKeys: () -> Unit,
     onImportPassword: (String) -> Unit,
     onCancelImport: () -> Unit,
+    onScanQr: () -> Unit,
 ) {
     if (state.awaitingImportPassword) {
         ImportPasswordDialog(
@@ -420,6 +430,10 @@ fun AddNetworkScreen(
                     Spacer(Modifier.height(16.dp))
                     OutlinedButton(onClick = onImportKeys, modifier = Modifier.fillMaxWidth()) {
                         Text(stringResource(R.string.import_keys))
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedButton(onClick = onScanQr, modifier = Modifier.fillMaxWidth()) {
+                        Text(stringResource(R.string.scan_qr))
                     }
                     Spacer(Modifier.height(8.dp))
                     Button(
@@ -715,6 +729,13 @@ fun EchoComposeScreen(
     onBody: (String) -> Unit,
     onSend: () -> Unit,
 ) {
+    var showEmoji by remember { mutableStateOf(false) }
+    if (showEmoji) {
+        EmojiPickerDialog(
+            onPick = { emoji -> onBody(state.body + emoji) },
+            onDismiss = { showEmoji = false },
+        )
+    }
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
@@ -725,6 +746,9 @@ fun EchoComposeScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = { showEmoji = true }) {
+                        Icon(Icons.Default.EmojiEmotions, contentDescription = stringResource(R.string.emoji_title))
+                    }
                     TextButton(onClick = onSend, enabled = !state.sending) {
                         Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null)
                         Spacer(Modifier.width(4.dp))

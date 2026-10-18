@@ -34,7 +34,9 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.Image
 import lan.fmnode.android.R
+import lan.fmnode.android.crypto.Encoding
 import lan.fmnode.android.storage.ProfileEntity
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -48,6 +50,10 @@ fun SettingsScreen(
     onExportKeys: (String) -> Unit,
 ) {
     var showExportDialog by remember { mutableStateOf(false) }
+    var showInviteDialog by remember { mutableStateOf(false) }
+    if (showInviteDialog && profile != null) {
+        InviteQrDialog(url = inviteUrl(profile), onDismiss = { showInviteDialog = false })
+    }
     if (showExportDialog) {
         ExportPasswordDialog(
             onConfirm = { password ->
@@ -117,11 +123,47 @@ fun SettingsScreen(
             OutlinedButton(onClick = { showExportDialog = true }, modifier = Modifier.fillMaxWidth()) {
                 Text(stringResource(R.string.export_keys))
             }
+            OutlinedButton(onClick = { showInviteDialog = true }, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.show_invite_qr))
+            }
             TextButton(onClick = onDeleteNetwork, modifier = Modifier.fillMaxWidth()) {
                 Text(stringResource(R.string.delete_network), color = MaterialTheme.colorScheme.error)
             }
         }
     }
+}
+
+private fun inviteUrl(profile: ProfileEntity): String {
+    val pubkey = runCatching {
+        Encoding.base64UrlEncode(Encoding.base64Decode(profile.publicKeyB64))
+    }.getOrDefault("")
+    val separator = if (profile.appUrl.contains("?")) "&" else "?"
+    return buildString {
+        append(profile.appUrl)
+        if (pubkey.isNotEmpty()) append(separator).append("pubkey=").append(pubkey)
+        if (profile.address.isNotBlank()) append('&').append("address=").append(profile.address)
+    }
+}
+
+@Composable
+private fun InviteQrDialog(url: String, onDismiss: () -> Unit) {
+    val bitmap = remember(url) { qrImageBitmap(url, 512) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.invite_qr_title)) },
+        text = {
+            Column {
+                if (bitmap != null) {
+                    Image(bitmap = bitmap, contentDescription = null)
+                }
+                Spacer(Modifier.height(8.dp))
+                Text(url, style = MaterialTheme.typography.bodySmall)
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.close)) }
+        },
+    )
 }
 
 @Composable

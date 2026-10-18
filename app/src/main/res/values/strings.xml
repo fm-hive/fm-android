@@ -57,4 +57,11 @@
     <string name="protocols_title">Protocols</string>
     <string name="protocols_empty">No protocol messages</string>
     <string name="vote_retract">Retract</string>
+    <string name="scan_qr">Scan QR</string>
+    <string name="scan_hint">Point the camera at an invite QR code</string>
+    <string name="camera_permission_required">Camera permission is required to scan QR codes</string>
+    <string name="show_invite_qr">Show invite QR</string>
+    <string name="invite_qr_title">Invite QR</string>
+    <string name="close">Close</string>
+    <string name="emoji_title">Emoji</string>
 </resources>

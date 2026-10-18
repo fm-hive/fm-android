@@ -99,6 +99,9 @@ class MainActivity : ComponentActivity() {
                     onOpenProtocols = viewModel::openProtocols,
                     onCloseProtocols = viewModel::closeProtocols,
                     onCastVote = viewModel::castVote,
+                    onOpenScanner = viewModel::openScanner,
+                    onCloseScanner = viewModel::closeScanner,
+                    onQrScanned = viewModel::onQrScanned,
                     onExportKeys = { password ->
                         viewModel.exportKeysJson(password)?.let { json ->
                             pendingExport = json

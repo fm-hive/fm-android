@@ -17,7 +17,17 @@ Work in progress. Implemented so far:
   auth payloads (`jwe_sha256`/`data_sha256`) — BouncyCastle, pure JVM, no native
   libraries;
 - control-envelope API client (JWE to the node, JWS auth, response decryption);
-- two-phase policy registration (invite URLs, vouchers, node-key pinning).
+- two-phase policy registration (invite URLs, vouchers, node-key pinning);
+- multi-network profiles (per-network key vault, switching, deletion) and
+  keys import/export in the fm-app format;
+- per-network Room store and send_receive sync (echomail, netmail, key
+  exchange, outbox, delivered-packet acks);
+- UI: networks/unlock/add-network (paste or QR scan), echoes list and
+  conversation with a markdown composer (emoji), netmail folders/detail/
+  composer, search, protocols list with vote casting, settings with invite
+  QR sharing;
+- 43 unit tests (crypto vectors, policy, sync, DAO, markdown, i18n parity);
+  ru/en strings for every implemented screen.
 
 ## Build
 

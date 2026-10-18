@@ -9,6 +9,9 @@ serialization = "1.9.0"
 okhttp = "4.12.0"
 bouncycastle = "1.86"
 markdown = "0.7.18"
+camerax = "1.6.2"
+mlkitBarcode = "17.3.0"
+zxing = "3.5.4"
 junit = "4.13.2"
 ksp = "2.2.21-2.0.5"
 room = "2.7.2"
@@ -33,6 +36,12 @@ okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhtt
 okhttp-mockwebserver = { group = "com.squareup.okhttp3", name = "mockwebserver", version.ref = "okhttp" }
 bouncycastle = { group = "org.bouncycastle", name = "bcprov-jdk18on", version.ref = "bouncycastle" }
 markdown = { group = "org.jetbrains", name = "markdown", version.ref = "markdown" }
+androidx-camera-core = { group = "androidx.camera", name = "camera-core", version.ref = "camerax" }
+androidx-camera-camera2 = { group = "androidx.camera", name = "camera-camera2", version.ref = "camerax" }
+androidx-camera-lifecycle = { group = "androidx.camera", name = "camera-lifecycle", version.ref = "camerax" }
+androidx-camera-view = { group = "androidx.camera", name = "camera-view", version.ref = "camerax" }
+mlkit-barcode = { group = "com.google.mlkit", name = "barcode-scanning", version.ref = "mlkitBarcode" }
+zxing-core = { group = "com.google.zxing", name = "core", version.ref = "zxing" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 androidx-test-core = { group = "androidx.test", name = "core", version.ref = "androidxTest" }
 androidx-room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "room" }

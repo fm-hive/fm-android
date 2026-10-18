@@ -13,9 +13,13 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
 import androidx.compose.material3.CenterAlignedTopAppBar
@@ -28,6 +32,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -213,4 +218,35 @@ private fun ProtocolCard(protocol: ProtocolUi, onVote: (String) -> Unit) {
             }
         }
     }
+}
+
+private val EMOJIS = listOf(
+    "😀", "😂", "🤣", "😊", "😍", "🤔", "😎", "😢",
+    "😡", "👍", "👎", "👏", "🙏", "🤝", "💪", "🔥",
+    "❤️", "💔", "🎉", "✨", "⭐", "🌞", "🌙", "☕",
+    "🍺", "🍕", "🎁", "📌", "📎", "✅", "❌", "⚠️",
+    "🚀", "💻", "📱", "🛠️", "📣", "🔔", "🔒", "🔑",
+    "📝", "📚", "🎵", "🎮", "⚽", "🏆", "🌍", "🐱",
+    "🐶", "🌲", "🌸", "🍀", "❄️", "☀️", "🌧️", "⚡",
+    "🕐", "➡️", "⬅️", "⬆️", "⬇️", "ℹ️", "❗", "❓",
+)
+
+@Composable
+fun EmojiPickerDialog(onPick: (String) -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.emoji_title)) },
+        text = {
+            LazyVerticalGrid(columns = GridCells.Fixed(8), modifier = Modifier.height(280.dp)) {
+                items(EMOJIS) { emoji ->
+                    TextButton(onClick = { onPick(emoji) }) {
+                        Text(emoji, style = MaterialTheme.typography.titleLarge)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.close)) }
+        },
+    )
 }

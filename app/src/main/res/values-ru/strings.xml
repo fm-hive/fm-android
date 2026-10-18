@@ -57,4 +57,11 @@
     <string name="protocols_title">Протоколы</string>
     <string name="protocols_empty">Нет протокольных сообщений</string>
     <string name="vote_retract">Отозвать</string>
+    <string name="scan_qr">Сканировать QR</string>
+    <string name="scan_hint">Наведите камеру на QR-приглашение</string>
+    <string name="camera_permission_required">Для сканирования QR нужен доступ к камере</string>
+    <string name="show_invite_qr">Показать QR-приглашение</string>
+    <string name="invite_qr_title">QR-приглашение</string>
+    <string name="close">Закрыть</string>
+    <string name="emoji_title">Эмодзи</string>
 </resources>

@@ -37,6 +37,7 @@ enum class AppScreen {
     Echoes, Echo, Compose,
     Netmail, NetmailDetail, NetmailCompose,
     Search, Protocols,
+    QrScanner,
     Settings,
 }
 
@@ -612,6 +613,27 @@ class AppViewModel(
         viewModelScope.launch {
             runCatching { opened.postVote(protocol.echoName, protocol.title, variant) }
             syncOnce(opened)
+        }
+    }
+
+    // ------------------------------------------------------------------- QR
+
+    fun openScanner() {
+        if (_state.value.screen == AppScreen.AddNetwork) {
+            _state.update { it.copy(screen = AppScreen.QrScanner) }
+        }
+    }
+
+    fun closeScanner() {
+        _state.update { it.copy(screen = AppScreen.AddNetwork) }
+    }
+
+    fun onQrScanned(value: String) {
+        _state.update {
+            it.copy(
+                screen = AppScreen.AddNetwork,
+                add = it.add.copy(url = value.trim(), error = null, step = AddStep.Url),
+            )
         }
     }
 
