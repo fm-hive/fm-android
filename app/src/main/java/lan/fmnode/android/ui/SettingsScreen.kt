@@ -43,7 +43,6 @@ import lan.fmnode.android.storage.ProfileEntity
 @Composable
 fun SettingsScreen(
     profile: ProfileEntity?,
-    onLock: () -> Unit,
     onDeleteNetwork: () -> Unit,
     onEchoes: () -> Unit,
     onNetmail: () -> Unit,
@@ -56,6 +55,8 @@ fun SettingsScreen(
     onDismissVoucher: () -> Unit,
     onOpenOutbox: () -> Unit,
     onOpenPolicyViewer: () -> Unit,
+    onLock: () -> Unit,
+    onLogout: () -> Unit,
 ) {
     var showExportDialog by remember { mutableStateOf(false) }
     var showInviteDialog by remember { mutableStateOf(false) }
@@ -78,7 +79,12 @@ fun SettingsScreen(
         )
     }
     Scaffold(
-        topBar = { CenterAlignedTopAppBar(title = { Text(stringResource(R.string.settings_tab)) }) },
+        topBar = {
+            CenterAlignedTopAppBar(
+                title = { Text(stringResource(R.string.settings_tab)) },
+                actions = { AppMenu(onLock = onLock, onLogout = onLogout) },
+            )
+        },
         bottomBar = {
             MainBottomBar(AppScreen.Settings, onEchoes = onEchoes, onNetmail = onNetmail, onSettings = {})
         },
@@ -133,6 +139,9 @@ fun SettingsScreen(
 
             OutlinedButton(onClick = onLock, modifier = Modifier.fillMaxWidth()) {
                 Text(stringResource(R.string.lock))
+            }
+            OutlinedButton(onClick = onLogout, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.logout))
             }
             OutlinedButton(onClick = { showExportDialog = true }, modifier = Modifier.fillMaxWidth()) {
                 Text(stringResource(R.string.export_keys))

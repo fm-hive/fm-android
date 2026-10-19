@@ -13,6 +13,7 @@ import lan.fmnode.android.crypto.CryptoService
 import lan.fmnode.android.crypto.Encoding
 import lan.fmnode.android.storage.AppDatabase
 import lan.fmnode.android.storage.KeyVault
+import lan.fmnode.android.storage.Vault
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -53,7 +54,12 @@ class NetworkManagerTest {
         db = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
             .allowMainThreadQueries()
             .build()
-        manager = NetworkManager(db)
+        val vault = Vault(
+            context,
+            appDbFactory = { _, _ -> db },
+            profileDbFactory = { _, _, _ -> error("profile database is not used in this test") },
+        ).apply { attachForTests(db) }
+        manager = NetworkManager(vault)
         server = MockWebServer()
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse {

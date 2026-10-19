@@ -91,11 +91,18 @@ fun NetmailScreen(
     onCompose: () -> Unit,
     onEchoes: () -> Unit,
     onSettings: () -> Unit,
+    onLock: () -> Unit,
+    onLogout: () -> Unit,
 ) {
     val visible = messages.filter { if (folder == NetmailFolder.Inbox) !it.own else it.own }
         .sortedByDescending { it.timestamp }
     Scaffold(
-        topBar = { CenterAlignedTopAppBar(title = { Text(stringResource(R.string.netmail_tab)) }) },
+        topBar = {
+            CenterAlignedTopAppBar(
+                title = { Text(stringResource(R.string.netmail_tab)) },
+                actions = { AppMenu(onLock = onLock, onLogout = onLogout) },
+            )
+        },
         bottomBar = {
             MainBottomBar(AppScreen.Netmail, onEchoes = onEchoes, onNetmail = {}, onSettings = onSettings)
         },

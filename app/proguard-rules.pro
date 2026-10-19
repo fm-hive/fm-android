@@ -5,3 +5,7 @@
 -keepclasseswithmembers class ** {
     kotlinx.serialization.KSerializer serializer(...);
 }
+
+# SQLCipher loads its classes/native bridge reflectively (#3).
+-keep class net.zetetic.database.sqlcipher.** { *; }
+-keep class net.zetetic.database.** { *; }

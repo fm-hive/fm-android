@@ -34,7 +34,7 @@ import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.EmojiEmotions
 import androidx.compose.material.icons.filled.HowToVote
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Badge
@@ -43,6 +43,8 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Card
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
@@ -80,6 +82,9 @@ fun FmRoot(
     state: UiState,
     onUnlock: (String) -> Unit = {},
     onLock: () -> Unit = {},
+    onRequestLogout: () -> Unit = {},
+    onConfirmLogout: () -> Unit = {},
+    onCancelLogout: () -> Unit = {},
     onOpenAddNetwork: () -> Unit = {},
     onCloseAddNetwork: () -> Unit = {},
     onUrlChange: (String) -> Unit = {},
@@ -192,6 +197,19 @@ fun FmRoot(
     onToggleMessageSelection: (String) -> Unit = {},
     onForwardSelected: () -> Unit = {},
 ) {
+    if (state.logoutDialog) {
+        AlertDialog(
+            onDismissRequest = onCancelLogout,
+            title = { Text(stringResource(R.string.logout)) },
+            text = { Text(stringResource(R.string.logout_confirm)) },
+            confirmButton = {
+                TextButton(onClick = onConfirmLogout) { Text(stringResource(R.string.logout)) }
+            },
+            dismissButton = {
+                TextButton(onClick = onCancelLogout) { Text(stringResource(R.string.cancel)) }
+            },
+        )
+    }
     if (state.contactsDialog) {
         ContactsDialog(
             contacts = state.contacts,
@@ -311,6 +329,7 @@ fun FmRoot(
             onRefresh = onRefresh,
             onNetworks = onOpenNetworks,
             onLock = onLock,
+            onLogout = onRequestLogout,
             onSelectEcho = onSelectEcho,
             onNetmail = onOpenNetmail,
             onSettings = onOpenSettings,
@@ -373,6 +392,8 @@ fun FmRoot(
             onCompose = onOpenNetmailCompose,
             onEchoes = onSelectEchoTab,
             onSettings = onOpenSettings,
+            onLock = onLock,
+            onLogout = onRequestLogout,
         )
         AppScreen.NetmailDetail -> NetmailDetailScreen(
             message = state.selectedNetmail,
@@ -425,7 +446,6 @@ fun FmRoot(
         )
         AppScreen.Settings -> SettingsScreen(
             profile = state.activeProfile,
-            onLock = onLock,
             onDeleteNetwork = onDeleteActiveNetwork,
             onEchoes = onSelectEchoTab,
             onNetmail = onOpenNetmail,
@@ -438,6 +458,8 @@ fun FmRoot(
             onDismissVoucher = onDismissVoucher,
             onOpenOutbox = onOpenOutbox,
             onOpenPolicyViewer = onOpenPolicyViewer,
+            onLock = onLock,
+            onLogout = onRequestLogout,
         )
     }
 }
@@ -746,6 +768,7 @@ fun EchoesListScreen(
     onRefresh: () -> Unit,
     onNetworks: () -> Unit,
     onLock: () -> Unit,
+    onLogout: () -> Unit,
     onSelectEcho: (String) -> Unit,
     onNetmail: () -> Unit,
     onSettings: () -> Unit,
@@ -780,9 +803,7 @@ fun EchoesListScreen(
                     IconButton(onClick = onNetworks) {
                         Icon(Icons.Default.Edit, contentDescription = stringResource(R.string.networks_title))
                     }
-                    IconButton(onClick = onLock) {
-                        Icon(Icons.Default.Lock, contentDescription = stringResource(R.string.lock))
-                    }
+                    AppMenu(onLock = onLock, onLogout = onLogout)
                 },
             )
         },
@@ -816,6 +837,33 @@ fun EchoesListScreen(
                     EchoCard(echo = echo, onClick = { onSelectEcho(echo.name) })
                 }
             }
+        }
+    }
+}
+
+/** Toolbar overflow with the exit actions (#3). */
+@Composable
+fun AppMenu(onLock: () -> Unit, onLogout: () -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { expanded = true }) {
+            Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.more))
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.lock)) },
+                onClick = {
+                    expanded = false
+                    onLock()
+                },
+            )
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.logout)) },
+                onClick = {
+                    expanded = false
+                    onLogout()
+                },
+            )
         }
     }
 }

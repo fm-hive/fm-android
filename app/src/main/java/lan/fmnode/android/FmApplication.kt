@@ -1,30 +1,22 @@
 package lan.fmnode.android
 
 import android.app.Application
-import androidx.room.Room
-import java.util.concurrent.ConcurrentHashMap
 import lan.fmnode.android.network.NetworkManager
 import lan.fmnode.android.session.Session
-import lan.fmnode.android.storage.AppDatabase
-import lan.fmnode.android.storage.ProfileDatabase
-import lan.fmnode.android.storage.ProfileDatabases
+import lan.fmnode.android.storage.Vault
 
-/** Application services: the app-wide database, network profiles and session. */
+/**
+ * Application services: the encrypted vault (#3), network profiles and the
+ * in-memory session. No database is opened here: the vault requires the app
+ * password, so databases are opened on unlock.
+ */
 class AppContainer(application: Application) {
-    val database: AppDatabase = Room.databaseBuilder(
-        application,
-        AppDatabase::class.java,
-        "fm_app.db",
-    ).build()
+    val vault: Vault = Vault(application).also {
+        // Databases from older versions were plaintext; they are wiped once.
+        it.wipeLegacyDatabases()
+    }
 
-    private val profileDatabases = ConcurrentHashMap<String, ProfileDatabase>()
-
-    val networkManager: NetworkManager = NetworkManager(
-        db = database,
-        profileDatabases = { id ->
-            profileDatabases.getOrPut(id) { ProfileDatabases.open(application, id) }
-        },
-    )
+    val networkManager: NetworkManager = NetworkManager(vault)
 
     val session: Session = Session()
 }

@@ -8,12 +8,14 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.yield
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -248,6 +250,7 @@ data class UiState(
     val unlockError: UiError? = null,
     val syncError: UiError? = null,
     val syncing: Boolean = false,
+    val logoutDialog: Boolean = false,
 )
 
 /**
@@ -270,18 +273,22 @@ class AppViewModel(
     private var syncJob: Job? = null
 
     init {
+        // A vault exists but is locked: the password is required before any
+        // profile or message data can be read (#3).
+        _state.update { it.copy(screen = if (manager.vaultExists()) AppScreen.Unlock else AppScreen.Networks) }
         viewModelScope.launch {
             manager.profiles.collect { profiles ->
                 _state.update { it.copy(profiles = profiles) }
-                if (profiles.isEmpty()) {
+                if (profiles.isEmpty() && !manager.vaultExists()) {
                     closeSession()
                     _state.update { it.copy(screen = AppScreen.Networks, echoes = emptyList()) }
                 }
             }
         }
         viewModelScope.launch {
+            if (!session.isUnlocked) return@launch
             val id = manager.activeProfileId()
-            val profile = id?.let { db -> manager.activeProfile() }
+            val profile = id?.let { manager.activeProfile() }
             _state.update { it.copy(activeId = id, activeProfile = profile) }
         }
     }
@@ -290,30 +297,92 @@ class AppViewModel(
 
     fun unlock(password: String) {
         viewModelScope.launch {
-            val profile = _state.value.profiles.firstOrNull() ?: return@launch
-            if (!session.unlock(password, profile)) {
+            if (!manager.openVault(password)) {
                 _state.update { it.copy(unlockError = UiError.WrongPassword) }
                 return@launch
             }
-            _state.update { it.copy(unlocked = true, unlockError = null) }
+            session.setPassword(password)
+            val profile = manager.activeProfile() ?: manager.firstProfile()
+            if (profile == null) {
+                _state.update {
+                    it.copy(unlocked = true, unlockError = null, screen = AppScreen.Networks, activeProfile = null)
+                }
+                return@launch
+            }
+            _state.update {
+                it.copy(unlocked = true, unlockError = null, activeId = profile.id, activeProfile = profile)
+            }
             openActiveSession()
         }
     }
 
-    fun lock() {
+    fun lock() = lockVault()
+
+    /** Shows the logout confirmation (the app always requires the password on entry). */
+    fun requestLogout() = _state.update { it.copy(logoutDialog = true) }
+
+    fun cancelLogout() = _state.update { it.copy(logoutDialog = false) }
+
+    /** Logout: same as fm-app — drop decrypted data and require the password. */
+    fun confirmLogout() {
+        _state.update { it.copy(logoutDialog = false) }
+        lockVault()
+    }
+
+    private fun lockVault() {
         closeSession()
+        manager.closeVault()
         session.lock()
         _state.update {
-            it.copy(
-                unlocked = false,
-                screen = AppScreen.Unlock,
-                echoes = emptyList(),
-                messages = emptyList(),
-                selectedEcho = null,
-                unlockError = null,
+            clearDecryptedState(
+                it.copy(
+                    unlocked = false,
+                    screen = if (manager.vaultExists()) AppScreen.Unlock else AppScreen.Networks,
+                    unlockError = null,
+                    activeId = null,
+                ),
             )
         }
     }
+
+    /** Drops every decrypted value from the UI state. */
+    private fun clearDecryptedState(state: UiState): UiState = state.copy(
+        activeProfile = if (state.unlocked) state.activeProfile else null,
+        echoes = emptyList(),
+        selectedEcho = null,
+        messages = emptyList(),
+        compose = ComposeState(),
+        netmail = emptyList(),
+        selectedNetmail = null,
+        netmailCompose = NetmailComposeState(),
+        protocols = emptyList(),
+        searchQuery = "",
+        searchResults = emptyList(),
+        searchLoading = false,
+        allEchoes = emptyList(),
+        contacts = emptyList(),
+        contactsDialog = false,
+        selectionMode = false,
+        selectedMessages = emptySet(),
+        outbox = emptyList(),
+        refillDialog = false,
+        showPolicyResign = false,
+        adminNodes = emptyList(),
+        adminMergeStatus = null,
+        adminMergeError = null,
+        excommTarget = "",
+        excommReason = "",
+        excommStatus = null,
+        excommError = null,
+        moderationTarget = null,
+        createEchoDialog = false,
+        policyViewer = false,
+        policyEditDialog = false,
+        removeEchoDialog = false,
+        syncing = false,
+        syncError = null,
+        logoutDialog = false,
+    )
 
     /** Opens the message database/API session of the active profile. */
     private suspend fun openActiveSession() {
@@ -369,7 +438,7 @@ class AppViewModel(
                             unread = counts[echo.name] ?: 0,
                         )
                     }
-                }.collect { list ->
+                }.catch { }.collect { list ->
                     _state.update { s ->
                         val selected = s.selectedEcho?.let { current ->
                             list.firstOrNull { it.name == current.name }
@@ -392,17 +461,17 @@ class AppViewModel(
                             subscribed = echo.subscribed,
                         )
                     }
-                }.collect { list -> _state.update { it.copy(allEchoes = list) } }
+                }.catch { }.collect { list -> _state.update { it.copy(allEchoes = list) } }
             }
             launch {
-                opened.database.contactDao().observeAll().collect { rows ->
+                opened.database.contactDao().observeAll().catch { }.collect { rows ->
                     _state.update {
                         it.copy(contacts = rows.map { contact -> ContactUi(contact.address, contact.name) })
                     }
                 }
             }
             launch {
-                opened.database.outboxDao().observeAll().collect { rows ->
+                opened.database.outboxDao().observeAll().catch { }.collect { rows ->
                     _state.update {
                         it.copy(
                             outbox = rows.map { entry ->
@@ -420,12 +489,12 @@ class AppViewModel(
                 }
             }
             launch {
-                opened.database.messageDao().observeProtocols().collect { rows ->
+                opened.database.messageDao().observeProtocols().catch { }.collect { rows ->
                     _state.update { it.copy(protocols = rows.mapNotNull { row -> row.toProtocolUi() }) }
                 }
             }
             launch {
-                opened.database.messageDao().observeEchoRows(NetworkSession.NETMAIL_ECHO).collect { rows ->
+                opened.database.messageDao().observeEchoRows(NetworkSession.NETMAIL_ECHO).catch { }.collect { rows ->
                     val me = opened.profile.address
                     val myName = opened.profile.displayName
                     _state.update { it.copy(netmail = rows.map { row -> row.toUi(me, myName) }) }
@@ -440,7 +509,7 @@ class AppViewModel(
                             _state.update { it.copy(messages = emptyList()) }
                             return@collectLatest
                         }
-                        opened.database.messageDao().observeEchoRows(echoName).collect { rows ->
+                        opened.database.messageDao().observeEchoRows(echoName).catch { }.collect { rows ->
                             _state.update { it.copy(messages = mapMessages(rows, opened)) }
                         }
                     }
@@ -555,13 +624,31 @@ class AppViewModel(
 
     fun deleteProfile(id: String) {
         viewModelScope.launch {
+            val deletingCurrent = id == _state.value.activeProfile?.id || networkSession?.profile?.id == id
+            if (deletingCurrent) {
+                closeSession()
+                yield()
+            }
             manager.deleteProfile(id)
+            if (manager.profileCount() == 0) {
+                manager.clearVault()
+                session.lock()
+                _state.update {
+                    clearDecryptedState(
+                        it.copy(
+                            unlocked = false,
+                            activeId = null,
+                            activeProfile = null,
+                            screen = AppScreen.Networks,
+                            unlockError = null,
+                        ),
+                    )
+                }
+                return@launch
+            }
             val active = manager.activeProfileId()
             _state.update { it.copy(activeId = active) }
-            if (active == null) {
-                closeSession()
-                _state.update { it.copy(screen = AppScreen.Networks, echoes = emptyList()) }
-            } else if (id == _state.value.activeProfile?.id || networkSession?.profile?.id == id) {
+            if (deletingCurrent && active != null) {
                 openActiveSession()
             }
         }

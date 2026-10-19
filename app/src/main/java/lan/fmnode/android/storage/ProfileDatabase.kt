@@ -8,7 +8,6 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.PrimaryKey
 import androidx.room.Query
-import androidx.room.Room
 import androidx.room.RoomDatabase
 import kotlinx.coroutines.flow.Flow
 
@@ -350,10 +349,4 @@ abstract class ProfileDatabase : RoomDatabase() {
     }
 }
 
-object ProfileDatabases {
-    /** Opens (or creates) the message database of one network profile. */
-    fun open(context: Context, profileId: String): ProfileDatabase =
-        Room.databaseBuilder(context, ProfileDatabase::class.java, "fm_profile_$profileId.db")
-            .addMigrations(ProfileDatabase.MIGRATION_1_2)
-            .build()
-}
+
