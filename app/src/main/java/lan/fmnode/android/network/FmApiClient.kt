@@ -39,7 +39,7 @@ class FmApiException(
  */
 class FmApiClient(
     baseUrl: String,
-    private val http: OkHttpClient = OkHttpClient(),
+    private val http: OkHttpClient = FmHttp.client,
 ) {
     private val json = Json { ignoreUnknownKeys = true }
     private val requestMediaType = "application/json".toMediaType()
