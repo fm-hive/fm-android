@@ -22,6 +22,9 @@ Work in progress. Implemented so far:
   keys import/export in the fm-app format;
 - per-network Room store and send_receive sync (echomail, netmail, key
   exchange, outbox, delivered-packet acks);
+- Security: all local data (profiles, messages, drafts, outbox) lives in a
+  password-encrypted SQLCipher vault; logout drops the decrypted state and
+  requires the password again.
 - UI: networks/unlock/add-network (paste or QR scan), echo conferences with
   subscribe switches, conversation with markdown + emoji + attachments,
   reactions, netmail folders/detail/composer, search, protocols screen

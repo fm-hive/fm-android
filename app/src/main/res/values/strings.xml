@@ -120,4 +120,7 @@
     <string name="forward">Forward</string>
     <string name="select_messages">Select messages</string>
     <string name="versions_title">Edit history</string>
+    <string name="logout">Logout</string>
+    <string name="logout_confirm">Do you really want to log out?</string>
+    <string name="more">More</string>
 </resources>

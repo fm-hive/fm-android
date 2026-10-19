@@ -120,4 +120,7 @@
     <string name="forward">Переслать</string>
     <string name="select_messages">Выбрать сообщения</string>
     <string name="versions_title">История изменений</string>
+    <string name="logout">Выход</string>
+    <string name="logout_confirm">Вы действительно хотите выйти?</string>
+    <string name="more">Ещё</string>
 </resources>
