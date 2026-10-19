@@ -1,6 +1,8 @@
 package lan.fmnode.android.network
 
 import java.io.IOException
+import java.security.Provider
+import java.security.Security
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -20,9 +22,15 @@ import org.junit.Test
  */
 class TlsTrustTest {
     private lateinit var server: MockWebServer
+    private var conscrypt: Provider? = null
 
     @Before
     fun setUp() {
+        // Robolectric installs the Android Conscrypt provider globally in the
+        // test JVM; its EC support fails on this JDK. The JDK's SunJSSE is
+        // enough for this JVM-only TLS test.
+        conscrypt = Security.getProvider("Conscrypt")
+        if (conscrypt != null) Security.removeProvider("Conscrypt")
         val certificate = HeldCertificate.Builder()
             .commonName("localhost")
             .addSubjectAlternativeName("localhost")
@@ -41,6 +49,7 @@ class TlsTrustTest {
     @After
     fun tearDown() {
         server.shutdown()
+        conscrypt?.let { Security.addProvider(it) }
     }
 
     @Test
