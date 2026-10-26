@@ -51,6 +51,24 @@ Work in progress. Implemented so far:
   then import the full backup. The export of the active profile is accepted by
   `fm-app`.
 
+## CI/CD
+
+Forgejo Actions workflow `.forgejo/workflows/android.yml` runs on pull requests
+to `main`, pushes to `main` and `v*` tags:
+
+- runs unit tests before any APK build;
+- builds debug and release APKs with `minSdk 26` (Android 8+) and checks the
+  manifest with `aapt`;
+- uploads `fm-android-api26-debug.apk`, `fm-android-api26-release.apk` and
+  checksums as a workflow artifact;
+- attaches the artifacts to the Forgejo release when a `v*` tag is pushed.
+
+`minSdk` is API 26; `targetSdk`/`compileSdk` stay current at 36. Release builds
+are signed with the debug key when release signing secrets are absent. Configure
+these repository secrets for a production keystore:
+`ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`,
+`ANDROID_KEY_PASSWORD` and `FORGEJO_TOKEN`.
+
 ## Build
 
 Requirements: JDK 21 and the Android SDK platform 36.

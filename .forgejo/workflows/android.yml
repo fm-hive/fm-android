@@ -1,0 +1,180 @@
+name: android-ci
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: mag
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check JDK
+        run: |
+          java -version
+          test "$(java -version 2>&1 | awk -F '"' '/version/ {print $2}' | cut -d. -f1)" -ge 21
+
+      - name: Prepare Android SDK
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          if [ -n "${ANDROID_HOME:-}" ] && [ -d "$ANDROID_HOME/platforms/android-36" ]; then
+            SDK="$ANDROID_HOME"
+          elif [ -d "$HOME/Android/Sdk/platforms/android-36" ]; then
+            SDK="$HOME/Android/Sdk"
+          elif [ -d /opt/android-sdk/platforms/android-36 ]; then
+            SDK=/opt/android-sdk
+          else
+            echo "Android SDK with platform 36 not found" >&2
+            exit 1
+          fi
+          echo "sdk.dir=$SDK" > local.properties
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: android-gradle-${{ hashFiles('gradle/wrapper/gradle-wrapper.properties', 'gradle/libs.versions.toml', '**/*.gradle*') }}
+          restore-keys: |
+            android-gradle-
+
+      - name: Unit tests
+        run: ./gradlew --no-daemon --stacktrace :app:testDebugUnitTest
+
+  build:
+    needs: test
+    runs-on: mag
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check JDK
+        run: |
+          java -version
+          test "$(java -version 2>&1 | awk -F '"' '/version/ {print $2}' | cut -d. -f1)" -ge 21
+
+      - name: Prepare Android SDK
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          if [ -n "${ANDROID_HOME:-}" ] && [ -d "$ANDROID_HOME/platforms/android-36" ]; then
+            SDK="$ANDROID_HOME"
+          elif [ -d "$HOME/Android/Sdk/platforms/android-36" ]; then
+            SDK="$HOME/Android/Sdk"
+          elif [ -d /opt/android-sdk/platforms/android-36 ]; then
+            SDK=/opt/android-sdk
+          else
+            echo "Android SDK with platform 36 not found" >&2
+            exit 1
+          fi
+          echo "sdk.dir=$SDK" > local.properties
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: android-gradle-${{ hashFiles('gradle/wrapper/gradle-wrapper.properties', 'gradle/libs.versions.toml', '**/*.gradle*') }}
+          restore-keys: |
+            android-gradle-
+
+      - name: Configure release signing
+        env:
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KS_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "${KS_B64:-}" ]; then
+            echo "Release signing secrets are not configured; using debug signing for the CI release APK."
+            exit 0
+          fi
+          KS_FILE="${RUNNER_TEMP:-/tmp}/fm-release.jks"
+          printf '%s' "$KS_B64" | base64 -d > "$KS_FILE"
+          {
+            printf 'ANDROID_KEYSTORE_FILE=%s\n' "$KS_FILE"
+            printf 'ANDROID_KEYSTORE_PASSWORD=%s\n' "$KS_PASSWORD"
+            printf 'ANDROID_KEY_ALIAS=%s\n' "$KEY_ALIAS"
+            printf 'ANDROID_KEY_PASSWORD=%s\n' "$KEY_PASSWORD"
+          } >> "$GITHUB_ENV"
+
+      - name: Build APKs (Android 8+, API 26)
+        run: |
+          set -euo pipefail
+          ./gradlew --no-daemon --stacktrace :app:assembleDebug :app:assembleRelease
+          AAPT="$(find "$ANDROID_HOME/build-tools" -maxdepth 2 -type f -name aapt | sort -V | tail -1)"
+          test -n "$AAPT"
+          mkdir -p dist
+          cp app/build/outputs/apk/debug/app-debug.apk dist/fm-android-api26-debug.apk
+          cp app/build/outputs/apk/release/app-release.apk dist/fm-android-api26-release.apk
+          for apk in dist/*.apk; do
+            echo "Checking $apk"
+            "$AAPT" dump badging "$apk" | grep -q "sdkVersion:'26'"
+            "$AAPT" dump badging "$apk" | grep -q "targetSdkVersion:'36'"
+          done
+          sha256sum dist/*.apk > dist/SHA256SUMS
+
+      - name: Upload APKs
+        uses: actions/upload-artifact@v3
+        with:
+          name: fm-android-apks
+          path: dist/
+
+  publish:
+    if: startsWith(forgejo.ref, 'refs/tags/v')
+    needs: build
+    runs-on: mag
+    steps:
+      - name: Download APKs
+        uses: actions/download-artifact@v3
+        with:
+          name: fm-android-apks
+          path: dist
+
+      - name: Attach APKs to Forgejo release
+        env:
+          TOKEN: ${{ secrets.FORGEJO_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "$TOKEN" ]; then
+            echo "FORGEJO_TOKEN is not configured; APK is available as a workflow artifact"
+            exit 0
+          fi
+          API="${{ github.server_url }}/api/v1/repos/${{ github.repository }}"
+          TAG="${{ github.ref_name }}"
+          RELEASE_ID=$(curl -sSf -H "Authorization: token $TOKEN" "$API/releases/tags/$TAG" | jq -r '.id')
+          if [ -z "$RELEASE_ID" ] || [ "$RELEASE_ID" = "null" ]; then
+            RELEASE_ID=$(curl -sSf -X POST -H "Authorization: token $TOKEN" \
+              -H "Content-Type: application/json" \
+              -d "{\"tag_name\":\"$TAG\",\"name\":\"$TAG\"}" \
+              "$API/releases" | jq -r '.id')
+          fi
+          for FILE in dist/*.apk dist/SHA256SUMS; do
+            NAME=$(basename "$FILE")
+            curl -sSf -X POST -H "Authorization: token $TOKEN" \
+              -H "Content-Type: application/octet-stream" \
+              --data-binary @"$FILE" \
+              "$API/releases/$RELEASE_ID/assets?name=$NAME"
+          done
