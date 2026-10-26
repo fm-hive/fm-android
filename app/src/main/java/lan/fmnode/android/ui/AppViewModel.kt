@@ -20,9 +20,11 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import lan.fmnode.android.network.FmApiException
 import lan.fmnode.android.network.Invite
@@ -31,15 +33,20 @@ import lan.fmnode.android.network.NetworkManager
 import lan.fmnode.android.network.NetworkSession
 import lan.fmnode.android.network.PolicyInfo
 import lan.fmnode.android.session.Session
+import lan.fmnode.android.storage.BackupService
+import lan.fmnode.android.storage.BlogEntity
+import lan.fmnode.android.storage.BlogPostEntity
 import lan.fmnode.android.storage.KeyVault
 import lan.fmnode.android.storage.KeystoreExportCodec
 import lan.fmnode.android.storage.MessageRow
+import lan.fmnode.android.storage.NetmailFolderEntity
 import lan.fmnode.android.storage.ProfileEntity
 import lan.fmnode.android.crypto.CryptoService
 
 enum class AppScreen {
     Unlock, Networks, AddNetwork,
     Echoes, Echo, Compose,
+    Blog, BlogCompose,
     Netmail, NetmailDetail, NetmailCompose,
     Search, Protocols,
     QrScanner,
@@ -49,7 +56,18 @@ enum class AppScreen {
     Settings,
 }
 
-enum class NetmailFolder { Inbox, Sent }
+const val NETMAIL_INBOX = "inbox"
+const val NETMAIL_SENT = "sent"
+const val NETMAIL_ECHO = "__netmail__"
+
+data class NetmailFolderUi(
+    val slug: String,
+    val label: String,
+    val custom: Boolean = false,
+    val count: Int = 0,
+)
+
+enum class CreateEchoType { LocalEcho, Blog }
 
 enum class ScanPurpose { AddNetwork, Merge }
 
@@ -68,6 +86,34 @@ data class EchoUi(
     val description: String,
     val unread: Int,
     val subscribed: Boolean = true,
+    val isBlog: Boolean = false,
+    val blogId: String? = null,
+)
+
+data class BlogUi(
+    val id: String,
+    val name: String,
+    val description: String,
+    val createdAt: Long,
+    val updatedAt: Long,
+)
+
+data class BlogPostUi(
+    val id: String,
+    val blogId: String,
+    val title: String,
+    val body: String,
+    val attachments: List<AttachmentUi>,
+    val timestamp: Long,
+)
+
+data class BlogComposeState(
+    val postId: String? = null,
+    val title: String = "",
+    val body: String = "",
+    val attachments: List<AttachmentUi> = emptyList(),
+    val saving: Boolean = false,
+    val error: UiError? = null,
 )
 
 data class MessageVersionUi(
@@ -85,6 +131,7 @@ data class MessageUi(
     val subject: String,
     val body: String,
     val own: Boolean,
+    val folderSlug: String? = null,
     val attachments: List<AttachmentUi> = emptyList(),
     val reactions: Map<String, Int> = emptyMap(),
     val myReaction: String? = null,
@@ -182,11 +229,20 @@ data class UiState(
     val activeProfile: ProfileEntity? = null,
     val unlocked: Boolean = false,
     val echoes: List<EchoUi> = emptyList(),
+    val blogs: List<BlogUi> = emptyList(),
     val selectedEcho: EchoUi? = null,
+    val selectedBlog: BlogUi? = null,
+    val blogPosts: List<BlogPostUi> = emptyList(),
+    val blogCompose: BlogComposeState = BlogComposeState(),
     val messages: List<MessageUi> = emptyList(),
     val compose: ComposeState = ComposeState(),
     val netmail: List<MessageUi> = emptyList(),
-    val netmailFolder: NetmailFolder = NetmailFolder.Inbox,
+    val netmailFolders: List<NetmailFolderUi> = emptyList(),
+    val netmailFolder: String = NETMAIL_INBOX,
+    val netmailFolderDialog: Boolean = false,
+    val netmailFolderName: String = "",
+    val netmailFolderError: UiError? = null,
+    val netmailMoveMessageId: String? = null,
     val selectedNetmail: MessageUi? = null,
     val netmailCompose: NetmailComposeState = NetmailComposeState(),
     val protocols: List<ProtocolUi> = emptyList(),
@@ -222,6 +278,7 @@ data class UiState(
     val excommStatus: String? = null,
     val excommError: UiError? = null,
     val createEchoDialog: Boolean = false,
+    val createEchoType: CreateEchoType = CreateEchoType.LocalEcho,
     val createEchoName: String = "",
     val createEchoDescription: String = "",
     val createEchoError: UiError? = null,
@@ -251,7 +308,15 @@ data class UiState(
     val syncError: UiError? = null,
     val syncing: Boolean = false,
     val logoutDialog: Boolean = false,
+    val backupStatus: String? = null,
+    val backupError: UiError? = null,
 )
+
+private fun slugifyNetmailFolder(name: String): String =
+    name.trim().lowercase()
+        .replace(Regex("[^a-z0-9а-яё]+"), "_")
+        .trim('_')
+        .ifEmpty { "folder_${System.currentTimeMillis()}" }
 
 /**
  * Multi-network application state: unlock the vault, add/switch networks and
@@ -349,10 +414,20 @@ class AppViewModel(
     private fun clearDecryptedState(state: UiState): UiState = state.copy(
         activeProfile = if (state.unlocked) state.activeProfile else null,
         echoes = emptyList(),
+        blogs = emptyList(),
         selectedEcho = null,
+        selectedBlog = null,
+        blogPosts = emptyList(),
+        blogCompose = BlogComposeState(),
         messages = emptyList(),
         compose = ComposeState(),
         netmail = emptyList(),
+        netmailFolders = emptyList(),
+        netmailFolder = NETMAIL_INBOX,
+        netmailFolderDialog = false,
+        netmailFolderName = "",
+        netmailFolderError = null,
+        netmailMoveMessageId = null,
         selectedNetmail = null,
         netmailCompose = NetmailComposeState(),
         protocols = emptyList(),
@@ -376,12 +451,15 @@ class AppViewModel(
         excommError = null,
         moderationTarget = null,
         createEchoDialog = false,
+        createEchoType = CreateEchoType.LocalEcho,
         policyViewer = false,
         policyEditDialog = false,
         removeEchoDialog = false,
         syncing = false,
         syncError = null,
         logoutDialog = false,
+        backupStatus = null,
+        backupError = null,
     )
 
     /** Opens the message database/API session of the active profile. */
@@ -428,32 +506,54 @@ class AppViewModel(
             launch {
                 combine(
                     opened.database.echoDao().observeSubscribed(),
+                    opened.database.blogDao().observeAll(),
                     opened.database.messageDao().observeUnreadSummary(opened.profile.address),
-                ) { echoes, unread ->
+                ) { echoes, blogs, unread ->
                     val counts = unread.associate { it.echoName to it.count }
-                    echoes.map { echo ->
+                    val blogRows = blogs.map { blog ->
+                        BlogUi(blog.id, blog.name, blog.description, blog.createdAt, blog.updatedAt)
+                    }
+                    val rows = blogRows.map { blog ->
+                        EchoUi(
+                            name = blog.name,
+                            description = blog.description,
+                            unread = 0,
+                            isBlog = true,
+                            blogId = blog.id,
+                        )
+                    } + echoes.map { echo ->
                         EchoUi(
                             name = echo.name,
                             description = echo.description,
                             unread = counts[echo.name] ?: 0,
                         )
                     }
-                }.catch { }.collect { list ->
+                    rows to blogRows
+                }.catch { }.collect { (list, blogRows) ->
                     _state.update { s ->
                         val selected = s.selectedEcho?.let { current ->
                             list.firstOrNull { it.name == current.name }
                         }
-                        s.copy(echoes = list, selectedEcho = selected)
+                        s.copy(echoes = list, blogs = blogRows, selectedEcho = selected)
                     }
                 }
             }
             launch {
                 combine(
                     opened.database.echoDao().observeAll(),
+                    opened.database.blogDao().observeAll(),
                     opened.database.messageDao().observeUnreadSummary(opened.profile.address),
-                ) { echoes, unread ->
+                ) { echoes, blogs, unread ->
                     val counts = unread.associate { it.echoName to it.count }
-                    echoes.map { echo ->
+                    blogs.map { blog ->
+                        EchoUi(
+                            name = blog.name,
+                            description = blog.description,
+                            unread = 0,
+                            isBlog = true,
+                            blogId = blog.id,
+                        )
+                    } + echoes.map { echo ->
                         EchoUi(
                             name = echo.name,
                             description = echo.description,
@@ -462,6 +562,26 @@ class AppViewModel(
                         )
                     }
                 }.catch { }.collect { list -> _state.update { it.copy(allEchoes = list) } }
+            }
+            launch {
+                opened.database.netmailFolderDao().observeAll().catch { }.collect { folders ->
+                    _state.update {
+                        it.copy(netmailFolders = folders.map { folder ->
+                            NetmailFolderUi(folder.slug, folder.name, custom = true)
+                        })
+                    }
+                }
+            }
+            launch {
+                _state.map { it.selectedBlog?.id }.distinctUntilChanged().collectLatest { blogId ->
+                    if (blogId == null) {
+                        _state.update { it.copy(blogPosts = emptyList()) }
+                        return@collectLatest
+                    }
+                    opened.database.blogPostDao().observeByBlog(blogId).catch { }.collect { posts ->
+                        _state.update { it.copy(blogPosts = posts.map { it.toUi() }) }
+                    }
+                }
             }
             launch {
                 opened.database.contactDao().observeAll().catch { }.collect { rows ->
@@ -655,16 +775,25 @@ class AppViewModel(
     }
 
     fun selectEcho(name: String) {
+        val blog = _state.value.blogs.firstOrNull { it.name == name }
+        if (blog != null) {
+            _state.update { it.copy(screen = AppScreen.Blog, selectedBlog = blog, selectedEcho = null) }
+            return
+        }
         viewModelScope.launch {
             val opened = networkSession ?: return@launch
             val echo = _state.value.echoes.firstOrNull { it.name == name } ?: return@launch
             runCatching { opened.markRead(name, System.currentTimeMillis() / 1000) }
-            _state.update { it.copy(screen = AppScreen.Echo, selectedEcho = echo) }
+            _state.update { it.copy(screen = AppScreen.Echo, selectedEcho = echo, selectedBlog = null) }
         }
     }
 
     fun backFromEcho() {
-        _state.update { it.copy(screen = AppScreen.Echoes, selectedEcho = null, messages = emptyList()) }
+        _state.update { it.copy(screen = AppScreen.Echoes, selectedEcho = null, selectedBlog = null, messages = emptyList()) }
+    }
+
+    fun backFromBlog() {
+        _state.update { it.copy(screen = AppScreen.Echoes, selectedBlog = null, blogPosts = emptyList()) }
     }
 
     fun openCompose() {
@@ -1526,9 +1655,18 @@ class AppViewModel(
 
     fun openCreateEchoDialog() {
         _state.update {
-            it.copy(createEchoDialog = true, createEchoName = "", createEchoDescription = "", createEchoError = null)
+            it.copy(
+                createEchoDialog = true,
+                createEchoType = CreateEchoType.LocalEcho,
+                createEchoName = "",
+                createEchoDescription = "",
+                createEchoError = null,
+            )
         }
     }
+
+    fun setCreateEchoType(type: CreateEchoType) =
+        _state.update { it.copy(createEchoType = type, createEchoError = null) }
 
     fun closeCreateEchoDialog() {
         _state.update { it.copy(createEchoDialog = false) }
@@ -1542,19 +1680,168 @@ class AppViewModel(
 
     fun createLocalEcho() {
         val opened = networkSession ?: return
-        val name = _state.value.createEchoName.trim()
+        val state = _state.value
+        val name = state.createEchoName.trim()
         if (name.isEmpty()) {
             _state.update { it.copy(createEchoError = UiError.Failed("Name is required")) }
             return
         }
+        if (state.createEchoType == CreateEchoType.Blog) {
+            if (state.blogs.any { it.name.equals(name, ignoreCase = true) } ||
+                state.allEchoes.any { it.name.equals(name, ignoreCase = true) && !it.isBlog }
+            ) {
+                _state.update { it.copy(createEchoError = UiError.Failed("Name is already in use")) }
+                return
+            }
+            viewModelScope.launch {
+                val id = "blog_${System.currentTimeMillis()}_${java.util.UUID.randomUUID().toString().take(6)}"
+                val blog = BlogEntity(id, name, state.createEchoDescription.trim(), System.currentTimeMillis(), System.currentTimeMillis())
+                opened.database.blogDao().upsert(blog)
+                opened.broadcastBlogOp(buildJsonObject {
+                    put("op", "blog")
+                    put("blog", buildJsonObject {
+                        put("id", blog.id); put("name", blog.name); put("description", blog.description); put("createdAt", blog.createdAt)
+                    })
+                })
+                _state.update {
+                    it.copy(
+                        createEchoDialog = false,
+                        screen = AppScreen.Blog,
+                        selectedBlog = BlogUi(id, name, blog.description, blog.createdAt, blog.updatedAt),
+                    )
+                }
+            }
+            return
+        }
         viewModelScope.launch {
             try {
-                opened.createLocalEcho(name, _state.value.createEchoDescription.trim())
+                opened.createLocalEcho(name, state.createEchoDescription.trim())
                 runCatching { opened.refreshEchoes() }
                 _state.update { it.copy(createEchoDialog = false) }
             } catch (e: Exception) {
                 _state.update { it.copy(createEchoError = UiError.Failed(e.message ?: "Failed")) }
             }
+        }
+    }
+
+    // -------------------------------------------------------------------- blogs
+
+    fun openBlogPostEditor(post: BlogPostUi? = null) {
+        _state.update {
+            it.copy(
+                screen = AppScreen.BlogCompose,
+                blogCompose = BlogComposeState(
+                    postId = post?.id,
+                    title = post?.title.orEmpty(),
+                    body = post?.body.orEmpty(),
+                    attachments = post?.attachments.orEmpty(),
+                ),
+            )
+        }
+    }
+
+    fun backFromBlogCompose() {
+        _state.update { it.copy(screen = AppScreen.Blog, blogCompose = BlogComposeState()) }
+    }
+
+    fun setBlogPostTitle(value: String) =
+        _state.update { it.copy(blogCompose = it.blogCompose.copy(title = value, error = null)) }
+
+    fun setBlogPostBody(value: String) =
+        _state.update { it.copy(blogCompose = it.blogCompose.copy(body = value, error = null)) }
+
+    fun addBlogAttachments(files: List<Triple<String, String, ByteArray>>) {
+        val existing = _state.value.blogCompose.attachments
+        val result = existing.toMutableList()
+        var total = existing.sumOf { it.size }
+        for ((name, type, bytes) in files) {
+            if (bytes.size > MAX_ATTACHMENT_BYTES) {
+                _state.update { it.copy(blogCompose = it.blogCompose.copy(error = UiError.Failed("Attachment is too large (max 2 MiB)"))) }
+                return
+            }
+            total += bytes.size
+            if (total > MAX_ATTACHMENTS_TOTAL) {
+                _state.update { it.copy(blogCompose = it.blogCompose.copy(error = UiError.Failed("Attachments are too large (max 6 MiB)"))) }
+                return
+            }
+            result += AttachmentUi(name, type, bytes.size, "data:$type;base64," + android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP))
+        }
+        _state.update { it.copy(blogCompose = it.blogCompose.copy(attachments = result, error = null)) }
+    }
+
+    fun removeBlogAttachment(index: Int) {
+        val list = _state.value.blogCompose.attachments.toMutableList()
+        if (index in list.indices) list.removeAt(index)
+        _state.update { it.copy(blogCompose = it.blogCompose.copy(attachments = list)) }
+    }
+
+    fun saveBlogPost() {
+        val opened = networkSession ?: return
+        val blog = _state.value.selectedBlog ?: return
+        val compose = _state.value.blogCompose
+        val title = compose.title.trim()
+        val body = compose.body.trim()
+        if (title.isEmpty() && body.isEmpty()) {
+            _state.update { it.copy(blogCompose = compose.copy(error = UiError.Failed("Post is empty"))) }
+            return
+        }
+        viewModelScope.launch {
+            _state.update { it.copy(blogCompose = compose.copy(saving = true, error = null)) }
+            try {
+                val id = compose.postId ?: "blog_${System.currentTimeMillis()}_${java.util.UUID.randomUUID().toString().take(6)}"
+                val attachments = buildJsonArray {
+                    compose.attachments.forEach { attachment ->
+                        add(buildJsonObject {
+                            put("name", attachment.name)
+                            put("type", attachment.type)
+                            put("size", attachment.size)
+                            put("data", attachment.dataUrl)
+                        })
+                    }
+                }.toString()
+                val post = BlogPostEntity(
+                    id = id,
+                    blogId = blog.id,
+                    title = title,
+                    body = body,
+                    attachmentsJson = attachments,
+                    timestamp = compose.postId?.let { old ->
+                        _state.value.blogPosts.firstOrNull { it.id == old }?.timestamp
+                    } ?: System.currentTimeMillis(),
+                    updatedAt = System.currentTimeMillis(),
+                )
+                opened.database.blogPostDao().upsert(post)
+                opened.broadcastBlogOp(buildJsonObject {
+                    put("op", "blogPost")
+                    put("post", buildJsonObject {
+                        put("id", post.id); put("blogId", post.blogId); put("title", post.title); put("body", post.body)
+                        put("attachments", kotlinx.serialization.json.Json.parseToJsonElement(post.attachmentsJson))
+                        put("timestamp", post.timestamp)
+                    })
+                })
+                _state.update { it.copy(screen = AppScreen.Blog, blogCompose = BlogComposeState()) }
+            } catch (e: Exception) {
+                _state.update { it.copy(blogCompose = compose.copy(saving = false, error = UiError.Failed(e.message ?: "Failed"))) }
+            }
+        }
+    }
+
+    fun deleteBlogPost(id: String) {
+        val opened = networkSession ?: return
+        viewModelScope.launch {
+            opened.database.blogPostDao().delete(id)
+            opened.broadcastBlogOp(buildJsonObject { put("op", "blogPostDelete"); put("id", id) })
+        }
+    }
+
+    fun deleteSelectedBlog() {
+        val opened = networkSession ?: return
+        val blog = _state.value.selectedBlog ?: return
+        viewModelScope.launch {
+            opened.database.blogPostDao().deleteByBlog(blog.id)
+            opened.database.blogDao().delete(blog.id)
+            opened.broadcastBlogOp(buildJsonObject { put("op", "blogDelete"); put("id", blog.id) })
+            _state.update { it.copy(screen = AppScreen.Echoes, selectedBlog = null, blogPosts = emptyList()) }
         }
     }
 
@@ -1583,8 +1870,72 @@ class AppViewModel(
         _state.update { it.copy(screen = AppScreen.Netmail) }
     }
 
-    fun selectNetmailFolder(folder: NetmailFolder) {
+    fun selectNetmailFolder(folder: String) {
         _state.update { it.copy(netmailFolder = folder) }
+    }
+
+    fun openNetmailFolderDialog() {
+        _state.update {
+            it.copy(netmailFolderDialog = true, netmailFolderName = "", netmailFolderError = null)
+        }
+    }
+
+    fun closeNetmailFolderDialog() {
+        _state.update { it.copy(netmailFolderDialog = false, netmailFolderName = "", netmailFolderError = null) }
+    }
+
+    fun setNetmailFolderName(value: String) =
+        _state.update { it.copy(netmailFolderName = value, netmailFolderError = null) }
+
+    fun createNetmailFolder() {
+        val opened = networkSession ?: return
+        val name = _state.value.netmailFolderName.trim()
+        if (name.isEmpty()) {
+            _state.update { it.copy(netmailFolderError = UiError.Failed("Folder name is required")) }
+            return
+        }
+        viewModelScope.launch {
+            val slug = slugifyNetmailFolder(name)
+            if (slug.isEmpty() || opened.database.netmailFolderDao().getBySlug(slug) != null) {
+                _state.update { it.copy(netmailFolderError = UiError.Failed("A folder with this name already exists")) }
+                return@launch
+            }
+            opened.database.netmailFolderDao().upsert(NetmailFolderEntity(slug, name, System.currentTimeMillis()))
+            _state.update {
+                it.copy(
+                    netmailFolderDialog = false,
+                    netmailFolderName = "",
+                    netmailFolderError = null,
+                    netmailFolder = slug,
+                )
+            }
+        }
+    }
+
+    fun deleteNetmailFolder(slug: String) {
+        val opened = networkSession ?: return
+        viewModelScope.launch {
+            opened.database.messageDao().deleteByFolder(slug)
+            opened.database.netmailFolderDao().delete(slug)
+            _state.update {
+                it.copy(netmailFolder = if (it.netmailFolder == slug) NETMAIL_INBOX else it.netmailFolder)
+            }
+        }
+    }
+
+    fun openNetmailMove(messageId: String) {
+        _state.update { it.copy(netmailMoveMessageId = messageId) }
+    }
+
+    fun closeNetmailMove() = _state.update { it.copy(netmailMoveMessageId = null) }
+
+    fun moveNetmailToFolder(folderSlug: String?) {
+        val opened = networkSession ?: return
+        val messageId = _state.value.netmailMoveMessageId ?: return
+        viewModelScope.launch {
+            opened.database.messageDao().setFolder(messageId, folderSlug)
+            _state.update { it.copy(netmailMoveMessageId = null) }
+        }
     }
 
     fun openNetmailMessage(messageId: String) {
@@ -1670,12 +2021,74 @@ class AppViewModel(
 
     // ------------------------------------------------------------ keys import
 
-    /** Called with the text of a selected keys export file. */
+    /** Called with the text of a selected backup/export file. */
     fun onImportFile(text: String?) {
         if (text.isNullOrBlank()) return
+        val root = runCatching { messageJson.parseToJsonElement(text).jsonObject }.getOrNull()
+        when {
+            root?.get("version")?.jsonPrimitive?.contentOrNull == "2.0" -> {
+                importFullBackup(text)
+                return
+            }
+            root?.get("type")?.jsonPrimitive?.contentOrNull == "fm_settings" -> {
+                importSettingsBackup(text)
+                return
+            }
+        }
+        // A keys export keeps the existing add-network flow.
         importJsonText = text
         _state.update {
             it.copy(add = it.add.copy(awaitingImportPassword = true, importError = null))
+        }
+    }
+
+    fun clearBackupMessage() = _state.update { it.copy(backupStatus = null, backupError = null) }
+
+    fun exportSettingsJson(): String? {
+        val profile = _state.value.activeProfile ?: return null
+        val opened = networkSession ?: return null
+        return kotlinx.coroutines.runBlocking { BackupService.exportSettings(opened.database, profile) }
+    }
+
+    fun exportFullJson(): String? {
+        val profile = _state.value.activeProfile ?: return null
+        val opened = networkSession ?: return null
+        return kotlinx.coroutines.runBlocking { BackupService.exportFull(opened.database, profile) }
+    }
+
+    private fun importSettingsBackup(text: String) {
+        val profile = _state.value.activeProfile ?: return
+        val opened = networkSession ?: return
+        viewModelScope.launch {
+            try {
+                val result = BackupService.importSettings(opened.database, profile, text)
+                _state.update {
+                    it.copy(
+                        backupStatus = result.warning ?: "Settings imported",
+                        backupError = null,
+                    )
+                }
+            } catch (e: Exception) {
+                _state.update { it.copy(backupError = UiError.Failed(e.message ?: "Import failed"), backupStatus = null) }
+            }
+        }
+    }
+
+    private fun importFullBackup(text: String) {
+        val profile = _state.value.activeProfile ?: return
+        val opened = networkSession ?: return
+        viewModelScope.launch {
+            try {
+                val result = BackupService.importFull(opened.database, profile, text)
+                _state.update {
+                    it.copy(
+                        backupStatus = "Imported: ${result.messages} messages, ${result.blogs} blogs, ${result.posts} posts, ${result.folders} folders",
+                        backupError = null,
+                    )
+                }
+            } catch (e: Exception) {
+                _state.update { it.copy(backupError = UiError.Failed(e.message ?: "Import failed"), backupStatus = null) }
+            }
         }
     }
 
@@ -1843,9 +2256,25 @@ class AppViewModel(
             subject = subject,
             body = body,
             own = own,
+            folderSlug = folderSlug,
             attachments = attachments,
             versions = versions,
         )
+    }
+
+    private fun BlogPostEntity.toUi(): BlogPostUi {
+        val attachments = runCatching {
+            (messageJson.parseToJsonElement(attachmentsJson) as kotlinx.serialization.json.JsonArray).mapNotNull { element ->
+                val item = element as? JsonObject ?: return@mapNotNull null
+                AttachmentUi(
+                    name = (item["name"] as? JsonPrimitive)?.contentOrNull.orEmpty(),
+                    type = (item["type"] as? JsonPrimitive)?.contentOrNull.orEmpty(),
+                    size = (item["size"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull() ?: 0,
+                    dataUrl = (item["data"] as? JsonPrimitive)?.contentOrNull.orEmpty(),
+                )
+            }
+        }.getOrDefault(emptyList())
+        return BlogPostUi(id, blogId, title, body, attachments, timestamp)
     }
 
     private fun formatPolicy(payload: JsonElement): String {

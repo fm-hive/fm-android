@@ -123,4 +123,7 @@
     <string name="logout">Logout</string>
     <string name="logout_confirm">Do you really want to log out?</string>
     <string name="more">More</string>
+    <string name="create_folder">New folder</string>
+    <string name="folder_name">Folder name</string>
+    <string name="move_to_folder">Move to folder</string>
 </resources>

@@ -47,6 +47,12 @@ fun SettingsScreen(
     onEchoes: () -> Unit,
     onNetmail: () -> Unit,
     onExportKeys: (String) -> Unit,
+    onExportSettings: () -> Unit,
+    onExportFull: () -> Unit,
+    onImportBackup: () -> Unit,
+    backupStatus: String?,
+    backupError: UiError?,
+    onClearBackup: () -> Unit,
     onOpenAdmin: () -> Unit,
     onCreateVoucher: () -> Unit,
     voucherCode: String?,
@@ -146,6 +152,20 @@ fun SettingsScreen(
             OutlinedButton(onClick = { showExportDialog = true }, modifier = Modifier.fillMaxWidth()) {
                 Text(stringResource(R.string.export_keys))
             }
+            OutlinedButton(onClick = onExportSettings, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.fm_settings_exportsettings))
+            }
+            OutlinedButton(onClick = onExportFull, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.fm_settings_fullexport))
+            }
+            OutlinedButton(onClick = onImportBackup, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.fm_settings_importsettings))
+            }
+            backupStatus?.let {
+                Text(it, color = MaterialTheme.colorScheme.primary)
+                TextButton(onClick = onClearBackup) { Text(stringResource(R.string.close)) }
+            }
+            backupError?.let { Text(errorText(it), color = MaterialTheme.colorScheme.error) }
             OutlinedButton(onClick = { showInviteDialog = true }, modifier = Modifier.fillMaxWidth()) {
                 Text(stringResource(R.string.show_invite_qr))
             }

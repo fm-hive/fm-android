@@ -600,6 +600,8 @@
     <string name="fm_qr_nonodekey">This QR code has no node public key — ask the peer to update the app</string>
     <string name="fm_qr_notaninvite">This is not an invite QR code</string>
     <string name="fm_qr_invalidcode">Unrecognized QR code</string>
+    <string name="fm_specialmessages_voteaddedtooutbox">Vote &quot;{variant}&quot; added to the outbox.</string>
+    <string name="fm_specialmessages_retractionaddedtooutbox">Vote retraction added to the outbox.</string>
     <string name="fm_specialmessages_createvote">Create Vote</string>
     <string name="fm_specialmessages_election">Election</string>
     <string name="fm_specialmessages_excommunicate">Excommunicate</string>
@@ -646,6 +648,13 @@
     <string name="fm_protocol_chunkof">Chunk {index}/{total}</string>
     <string name="fm_protocol_chunkvote">Vote on this chunk</string>
     <string name="fm_protocol_yourvote">Your vote: {variant}</string>
+    <string name="fm_protocol_proposalvote">Proposal vote</string>
+    <string name="fm_protocol_phaselabel">Phase {phase}</string>
+    <string name="fm_protocol_mergechunkshint">Chunks: {count}. Hover a badge for details, click to vote.</string>
+    <string name="fm_protocol_mergepolicies">Merge policies (A and B)</string>
+    <string name="fm_protocol_mergepolicya">A — initiator policy</string>
+    <string name="fm_protocol_mergepolicyb">B — acceptor policy</string>
+    <string name="fm_protocol_mergepolicyparameters">Parameters</string>
     <string name="fm_search_title">Search Messages</string>
     <string name="fm_search_placeholder">Search messages...</string>
     <string name="fm_search_allfolders">All folders</string>
@@ -784,6 +793,8 @@
     <string name="fm_policyedit_title">Edit Network Policy</string>
     <string name="fm_policyedit_hint">Propose changes to the network policy. Changes will be voted on by the Admin Council.</string>
     <string name="fm_policyedit_policytext">Policy Text</string>
+    <string name="fm_policyedit_durationhint">Use days or a duration: 0.5d, 12h, 30m, 1d12h.</string>
+    <string name="fm_policyedit_durationplaceholder">e.g. 3, 12h, 0.5d</string>
     <string name="fm_policyedit_policyparams">Policy Parameters</string>
     <string name="fm_policyedit_allchunksonly">Accept all chunks at once</string>
     <string name="fm_policyedit_allchunksonlyhint">All chunks must be accepted together; if any chunk fails to gather enough votes, the whole vote fails.</string>
@@ -799,8 +810,10 @@
     <string name="fm_policyedit_proposaladded">Policy change proposal added to outbox</string>
     <string name="fm_policyedit_senderror">Failed to send proposal</string>
     <string name="fm_policyedit_invalidjson">Invalid JSON format</string>
-    <string name="fm_policyedit_params_voting_days">Duration of voting phase (days)</string>
-    <string name="fm_policyedit_params_candidate_collection_days">Duration for collecting candidate applications (days)</string>
+    <string name="fm_policyedit_params_voting_period">Duration of voting phase (days or 12h)</string>
+    <string name="fm_policyedit_params_appeal_vote_period">Appeal vote duration (days or 12h, 0=immediate)</string>
+    <string name="fm_policyedit_params_merge_connect_timeout">Merge connection retry window (days or 12h)</string>
+    <string name="fm_policyedit_params_candidate_collection_period">Duration for collecting candidate applications (days or 12h)</string>
     <string name="fm_policyedit_params_min_candidates">Minimum candidates required for election</string>
     <string name="fm_policyedit_params_min_moderators">Minimum number of moderators per echo</string>
     <string name="fm_policyedit_params_max_moderators">Maximum number of moderators per echo</string>
@@ -811,10 +824,10 @@
     <string name="fm_policyedit_params_max_announcements_per_address">Max announcements per network address</string>
     <string name="fm_policyedit_params_time_since_last_vote">Min interval between votes (days, 0=disabled)</string>
     <string name="fm_policyedit_params_min_percent_for_network_decisions">Min percent of admin votes for network decisions</string>
-    <string name="fm_policyedit_params_change_policy_vote_days">Policy change vote duration (days)</string>
-    <string name="fm_policyedit_params_merge_phase0_vote_period">Merge proposal vote duration (days, 0=immediate)</string>
-    <string name="fm_policyedit_params_merge_phase1_vote_period">Merge chunk vote duration (days, 0=immediate)</string>
-    <string name="fm_policyedit_params_merge_phase2_vote_period">Final merge vote duration (days, 0=immediate)</string>
+    <string name="fm_policyedit_params_change_policy_vote_period">Policy change vote duration (days or 12h)</string>
+    <string name="fm_policyedit_params_merge_phase0_vote_period">Merge proposal vote duration (days or 12h, 0=immediate)</string>
+    <string name="fm_policyedit_params_merge_phase1_vote_period">Merge chunk vote duration (days or 12h, 0=immediate)</string>
+    <string name="fm_policyedit_params_merge_phase2_vote_period">Final merge vote duration (days or 12h, 0=immediate)</string>
     <string name="fm_policyedit_params_fast_network_votes">Decide network votes as soon as every node voted</string>
     <string name="fm_policyedit_params_excommunicate_cooldown_days">Cooldown between excommunicate proposals (days)</string>
     <string name="fm_policyedit_params_warnings_per_punishment">Warnings before an automatic punishment</string>
@@ -826,7 +839,7 @@
     <string name="fm_policyedit_params_message_id_depth_days">Message ID dedup retention (days)</string>
     <string name="fm_policyedit_params_create_echo_with_rules">Who can create echos with rules</string>
     <string name="fm_policyedit_params_create_echo_with_rules_council_votes">Votes required for echo creation (number or %)</string>
-    <string name="fm_policyedit_params_create_echo_with_rules_council_vote_period">Echo creation vote duration (days)</string>
+    <string name="fm_policyedit_params_create_echo_with_rules_council_vote_period">Echo creation vote duration (days or 12h)</string>
     <string name="fm_policyedit_params_voucher_enable">Vouchers (invite codes) are required for new users</string>
     <string name="fm_policyedit_params_voucher_autologin">Auto-approve users who registered with a voucher</string>
     <string name="fm_policyedit_params_encrypted_policy_flow">Closed policy flow (API answers 502 without the node key)</string>
@@ -997,5 +1010,7 @@
     <string name="fm_selected_managehint">Mark the entries to attach them from the message composer.</string>
     <string name="fm_selected_raw">Source</string>
     <string name="fm_selected_echo">Echo</string>
+    <string name="fm_merge_initiator">node that started the merge (initiator)</string>
+    <string name="fm_merge_acceptor">other node (acceptor)</string>
     <string name="fm_policyedit_params_merge_vote_days">Длительность голосования по блокам слияния (дней, 0=сразу)</string>
 </resources>

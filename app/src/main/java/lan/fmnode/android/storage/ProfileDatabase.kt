@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Dao
 import androidx.room.Database
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.PrimaryKey
@@ -41,6 +42,37 @@ data class MessageEntity(
     val jwe: String?,
     val receivedAt: Long,
     val versionsJson: String? = null,
+    val folderSlug: String? = null,
+)
+
+/** A local blog: stored only in this network profile, never sent to the node. */
+@Entity(tableName = "blogs")
+data class BlogEntity(
+    @PrimaryKey val id: String,
+    val name: String,
+    val description: String,
+    val createdAt: Long,
+    val updatedAt: Long,
+)
+
+/** A local blog post. [timestamp] is milliseconds, matching fm-app. */
+@Entity(tableName = "blog_posts", indices = [Index("blogId")])
+data class BlogPostEntity(
+    @PrimaryKey val id: String,
+    val blogId: String,
+    val title: String,
+    val body: String,
+    val attachmentsJson: String,
+    val timestamp: Long,
+    val updatedAt: Long,
+)
+
+/** A user-created netmail folder. Messages point at it by [MessageEntity.folderSlug]. */
+@Entity(tableName = "netmail_folders")
+data class NetmailFolderEntity(
+    @PrimaryKey val slug: String,
+    val name: String,
+    val createdAt: Long,
 )
 
 /** Public key cache of other network participants. */
@@ -110,6 +142,7 @@ data class MessageRow(
     val jwe: String?,
     val versionsJson: String?,
     val senderName: String?,
+    val folderSlug: String?,
 )
 
 /** Unread counter of one echo. */
@@ -158,7 +191,7 @@ interface MessageDao {
         SELECT m.messageId AS messageId, m.echoName AS echoName, m.type AS type,
                m.senderAddress AS senderAddress, m.recipientAddress AS recipientAddress,
                m.timestamp AS timestamp, m.dataJson AS dataJson, m.jws AS jws, m.jwe AS jwe,
-               m.versionsJson AS versionsJson, n.name AS senderName
+               m.versionsJson AS versionsJson, m.folderSlug AS folderSlug, n.name AS senderName
         FROM messages m
         LEFT JOIN names n ON n.address = m.senderAddress
         WHERE m.echoName = :echo
@@ -172,7 +205,7 @@ interface MessageDao {
         SELECT m.messageId AS messageId, m.echoName AS echoName, m.type AS type,
                m.senderAddress AS senderAddress, m.recipientAddress AS recipientAddress,
                m.timestamp AS timestamp, m.dataJson AS dataJson, m.jws AS jws, m.jwe AS jwe,
-               m.versionsJson AS versionsJson, n.name AS senderName
+               m.versionsJson AS versionsJson, m.folderSlug AS folderSlug, n.name AS senderName
         FROM messages m
         LEFT JOIN names n ON n.address = m.senderAddress
         WHERE LOWER(m.dataJson) LIKE '%' || LOWER(:query) || '%'
@@ -189,7 +222,7 @@ interface MessageDao {
         SELECT m.messageId AS messageId, m.echoName AS echoName, m.type AS type,
                m.senderAddress AS senderAddress, m.recipientAddress AS recipientAddress,
                m.timestamp AS timestamp, m.dataJson AS dataJson, m.jws AS jws, m.jwe AS jwe,
-               m.versionsJson AS versionsJson, n.name AS senderName
+               m.versionsJson AS versionsJson, m.folderSlug AS folderSlug, n.name AS senderName
         FROM messages m
         LEFT JOIN names n ON n.address = m.senderAddress
         WHERE m.type IN ('vote', 'election', 'excommunicate', 'change_policy',
@@ -228,6 +261,15 @@ interface MessageDao {
 
     @Query("UPDATE messages SET dataJson = :dataJson, versionsJson = :versionsJson, receivedAt = :receivedAt WHERE messageId = :messageId")
     suspend fun updateContent(messageId: String, dataJson: String, versionsJson: String?, receivedAt: Long)
+
+    @Query("SELECT * FROM messages ORDER BY timestamp ASC, messageId ASC")
+    suspend fun getAll(): List<MessageEntity>
+
+    @Query("UPDATE messages SET folderSlug = :folderSlug WHERE messageId = :messageId")
+    suspend fun setFolder(messageId: String, folderSlug: String?)
+
+    @Query("DELETE FROM messages WHERE folderSlug = :folderSlug")
+    suspend fun deleteByFolder(folderSlug: String)
 }
 
 @Dao
@@ -294,6 +336,69 @@ interface ContactDao {
 }
 
 @Dao
+interface BlogDao {
+    @Query("SELECT * FROM blogs ORDER BY createdAt ASC")
+    fun observeAll(): Flow<List<BlogEntity>>
+
+    @Query("SELECT * FROM blogs ORDER BY createdAt ASC")
+    suspend fun getAll(): List<BlogEntity>
+
+    @Query("SELECT * FROM blogs WHERE id = :id")
+    suspend fun getById(id: String): BlogEntity?
+
+    @Query("SELECT * FROM blogs WHERE LOWER(name) = LOWER(:name)")
+    suspend fun getByName(name: String): BlogEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(blog: BlogEntity)
+
+    @Query("DELETE FROM blogs WHERE id = :id")
+    suspend fun delete(id: String)
+}
+
+@Dao
+interface BlogPostDao {
+    @Query("SELECT * FROM blog_posts WHERE blogId = :blogId ORDER BY timestamp DESC, id DESC")
+    fun observeByBlog(blogId: String): Flow<List<BlogPostEntity>>
+
+    @Query("SELECT * FROM blog_posts WHERE blogId = :blogId ORDER BY timestamp DESC, id DESC")
+    suspend fun getByBlog(blogId: String): List<BlogPostEntity>
+
+    @Query("SELECT * FROM blog_posts ORDER BY timestamp ASC")
+    suspend fun getAll(): List<BlogPostEntity>
+
+    @Query("SELECT * FROM blog_posts WHERE id = :id")
+    suspend fun getById(id: String): BlogPostEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(post: BlogPostEntity)
+
+    @Query("DELETE FROM blog_posts WHERE id = :id")
+    suspend fun delete(id: String)
+
+    @Query("DELETE FROM blog_posts WHERE blogId = :blogId")
+    suspend fun deleteByBlog(blogId: String)
+}
+
+@Dao
+interface NetmailFolderDao {
+    @Query("SELECT * FROM netmail_folders ORDER BY createdAt ASC")
+    fun observeAll(): Flow<List<NetmailFolderEntity>>
+
+    @Query("SELECT * FROM netmail_folders ORDER BY createdAt ASC")
+    suspend fun getAll(): List<NetmailFolderEntity>
+
+    @Query("SELECT * FROM netmail_folders WHERE slug = :slug")
+    suspend fun getBySlug(slug: String): NetmailFolderEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(folder: NetmailFolderEntity)
+
+    @Query("DELETE FROM netmail_folders WHERE slug = :slug")
+    suspend fun delete(slug: String)
+}
+
+@Dao
 interface MetaDao {
     @Query("SELECT value FROM meta WHERE `key` = :key")
     suspend fun get(key: String): String?
@@ -315,8 +420,11 @@ interface MetaDao {
         MetaEntity::class,
         DraftEntity::class,
         ContactEntity::class,
+        BlogEntity::class,
+        BlogPostEntity::class,
+        NetmailFolderEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = true,
 )
 abstract class ProfileDatabase : RoomDatabase() {
@@ -328,6 +436,9 @@ abstract class ProfileDatabase : RoomDatabase() {
     abstract fun metaDao(): MetaDao
     abstract fun draftDao(): DraftDao
     abstract fun contactDao(): ContactDao
+    abstract fun blogDao(): BlogDao
+    abstract fun blogPostDao(): BlogPostDao
+    abstract fun netmailFolderDao(): NetmailFolderDao
 
     companion object {
         /** Adds drafts, contacts and the message edit history (v1 -> v2). */
@@ -344,6 +455,29 @@ abstract class ProfileDatabase : RoomDatabase() {
                         "updatedAt INTEGER NOT NULL)",
                 )
                 db.execSQL("ALTER TABLE messages ADD COLUMN versionsJson TEXT")
+            }
+        }
+
+        /** Local blogs and custom netmail folders (#actualization). */
+        val MIGRATION_2_3 = object : androidx.room.migration.Migration(2, 3) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE messages ADD COLUMN folderSlug TEXT")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS netmail_folders (" +
+                        "slug TEXT NOT NULL PRIMARY KEY, name TEXT NOT NULL, createdAt INTEGER NOT NULL)",
+                )
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS blogs (" +
+                        "id TEXT NOT NULL PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL, " +
+                        "createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL)",
+                )
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS blog_posts (" +
+                        "id TEXT NOT NULL PRIMARY KEY, blogId TEXT NOT NULL, title TEXT NOT NULL, " +
+                        "body TEXT NOT NULL, attachmentsJson TEXT NOT NULL, timestamp INTEGER NOT NULL, " +
+                        "updatedAt INTEGER NOT NULL)",
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_blog_posts_blogId ON blog_posts(blogId)")
             }
         }
     }

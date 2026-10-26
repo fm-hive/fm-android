@@ -27,15 +27,29 @@ Work in progress. Implemented so far:
   requires the password again.
 - UI: networks/unlock/add-network (paste or QR scan), echo conferences with
   subscribe switches, conversation with markdown + emoji + attachments,
-  reactions, netmail folders/detail/composer, search, protocols screen
-  (vote/election voting, refill responses), outbox, settings (invite QR,
-  vouchers, keys import/export), admin (nodelist, merge initiation,
-  excommunicate proposals);
-- client_synchronize multi-device sync; automatic policy re-sign; composer
-  drafts; netmail contacts; forwarding (single and multi-select); message
-  edit history (plain updates are folded into the original);
-- all fm-app translations (997 keys, ru/en) generated into fm_strings.xml;
-- 54 unit tests (crypto vectors, policy, sync, DAO, markdown, i18n parity).
+  reactions, netmail with custom folders/detail/composer, local blogs with
+  posts/attachments/edit/delete, search, protocols screen (vote/election
+  voting, refill responses), outbox, settings (invite QR, vouchers, keys and
+  settings import/export, full fm-app v2 backups), admin (nodelist, merge
+  initiation, excommunicate proposals);
+- client_synchronize multi-device sync including local blog operations;
+  automatic policy re-sign; composer drafts; netmail contacts; forwarding
+  (single and multi-select); message edit history (plain updates are folded
+  into the original);
+- all fm-app translations generated into fm_strings.xml;
+- 65 unit tests (crypto vectors, policy, sync, DAO, backups, markdown, i18n
+  parity).
+
+## Backup compatibility
+
+- `fm-app` **keys** exports (encrypted and unencrypted) import into the
+  add-network flow.
+- `fm_settings` v1.0 export/import is supported.
+- Full `fm-app` v2.0 backups include settings, keys, subscriptions, echoes,
+  netmail folders/messages, blogs/posts and learned sender names. Import targets
+  the active network profile; for a new device add the network by invite first,
+  then import the full backup. The export of the active profile is accepted by
+  `fm-app`.
 
 ## Build
 
