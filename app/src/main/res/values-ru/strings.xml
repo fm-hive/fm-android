@@ -123,4 +123,7 @@
     <string name="logout">Выход</string>
     <string name="logout_confirm">Вы действительно хотите выйти?</string>
     <string name="more">Ещё</string>
+    <string name="create_folder">Новая папка</string>
+    <string name="folder_name">Название папки</string>
+    <string name="move_to_folder">Переместить в папку</string>
 </resources>

@@ -9,21 +9,23 @@ import lan.fmnode.android.crypto.Encoding
 data class KeystoreExport(
     val version: String = "1.0",
     val publicKey: String,
-    val metadata: KeystoreMetadata,
-    val timestamp: Long,
-    val encryptedPrivateKey: String,
-    val salt: List<Int>,
-    val iterations: Int,
-    val iv: List<Int>,
+    val metadata: KeystoreMetadata? = null,
+    val timestamp: Long = 0,
+    val encryptedPrivateKey: String? = null,
+    val salt: List<Int> = emptyList(),
+    val iterations: Int = 100_000,
+    val iv: List<Int> = emptyList(),
     val encrypted: Boolean = true,
+    /** fm-app unencrypted export writes this field instead of encryptedPrivateKey. */
+    val privateKey: String? = null,
 )
 
 @Serializable
 data class KeystoreMetadata(
-    val encrypted: Boolean,
-    val salt: List<Int>,
-    val iterations: Int,
-    val iv: List<Int>,
+    val encrypted: Boolean = false,
+    val salt: List<Int> = emptyList(),
+    val iterations: Int = 100_000,
+    val iv: List<Int> = emptyList(),
 )
 
 /** Decoded keys export (either an encrypted or a legacy plaintext private key). */
@@ -63,11 +65,12 @@ object KeystoreExportCodec {
     fun decode(text: String): ImportedKeystore {
         val payload = json.decodeFromString(KeystoreExport.serializer(), text)
         val publicKey = Encoding.base64Decode(payload.publicKey)
-        return if (payload.encrypted && payload.encryptedPrivateKey.isNotEmpty() && payload.salt.isNotEmpty()) {
+        val encrypted = payload.encryptedPrivateKey
+        return if (payload.encrypted && !encrypted.isNullOrEmpty() && payload.salt.isNotEmpty()) {
             ImportedKeystore(
                 publicKey = publicKey,
                 encryptedSeed = EncryptedSeed(
-                    encrypted = Encoding.base64Decode(payload.encryptedPrivateKey),
+                    encrypted = Encoding.base64Decode(encrypted),
                     salt = payload.salt.map { it.toByte() }.toByteArray(),
                     iv = payload.iv.map { it.toByte() }.toByteArray(),
                     iterations = payload.iterations,
@@ -75,10 +78,12 @@ object KeystoreExportCodec {
                 plainSeed = null,
             )
         } else {
+            val plain = payload.privateKey ?: encrypted
+                ?: error("no private key in the export")
             ImportedKeystore(
                 publicKey = publicKey,
                 encryptedSeed = null,
-                plainSeed = Encoding.base64Decode(payload.encryptedPrivateKey),
+                plainSeed = Encoding.base64Decode(plain),
             )
         }
     }

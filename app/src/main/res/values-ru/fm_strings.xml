@@ -600,6 +600,8 @@
     <string name="fm_qr_nonodekey">В QR-коде нет публичного ключа ноды — попросите обновить приложение</string>
     <string name="fm_qr_notaninvite">Это не QR-код приглашения</string>
     <string name="fm_qr_invalidcode">Нераспознанный QR-код</string>
+    <string name="fm_specialmessages_voteaddedtooutbox">Голос «{variant}» добавлен в исходящие.</string>
+    <string name="fm_specialmessages_retractionaddedtooutbox">Отзыв голоса добавлен в исходящие.</string>
     <string name="fm_specialmessages_createvote">Создать голосование</string>
     <string name="fm_specialmessages_election">Выборы</string>
     <string name="fm_specialmessages_excommunicate">Исключение</string>
@@ -646,6 +648,13 @@
     <string name="fm_protocol_chunkof">Чанк {index}/{total}</string>
     <string name="fm_protocol_chunkvote">Голосовать по чанку</string>
     <string name="fm_protocol_yourvote">Ваш голос: {variant}</string>
+    <string name="fm_protocol_proposalvote">Голосование по предложению</string>
+    <string name="fm_protocol_phaselabel">Фаза {phase}</string>
+    <string name="fm_protocol_mergechunkshint">Чанки: {count}. Наведите на значок для подробностей, нажмите для голосования.</string>
+    <string name="fm_protocol_mergepolicies">Политики слияния (A и B)</string>
+    <string name="fm_protocol_mergepolicya">A — политика инициатора</string>
+    <string name="fm_protocol_mergepolicyb">B — политика акцептора</string>
+    <string name="fm_protocol_mergepolicyparameters">Параметры</string>
     <string name="fm_search_title">Поиск сообщений</string>
     <string name="fm_search_placeholder">Поиск сообщений...</string>
     <string name="fm_search_allfolders">Все папки</string>
@@ -784,6 +793,8 @@
     <string name="fm_policyedit_title">Изменение политики сети</string>
     <string name="fm_policyedit_hint">Предложите изменения политики сети. Изменения будут вынесены на голосование в Совете администраторов.</string>
     <string name="fm_policyedit_policytext">Текст политики</string>
+    <string name="fm_policyedit_durationhint">Можно указать дни или длительность: 0.5d, 12h, 30m, 1d12h.</string>
+    <string name="fm_policyedit_durationplaceholder">например, 3, 12h, 0.5d</string>
     <string name="fm_policyedit_policyparams">Параметры политики</string>
     <string name="fm_policyedit_allchunksonly">Принять все чанки разом</string>
     <string name="fm_policyedit_allchunksonlyhint">Все чанки должны быть приняты вместе; если любой чанк не наберёт голосов — всё голосование провалится.</string>
@@ -799,8 +810,10 @@
     <string name="fm_policyedit_proposaladded">Предложение добавлено в исходящие</string>
     <string name="fm_policyedit_senderror">Ошибка отправки предложения</string>
     <string name="fm_policyedit_invalidjson">Неверный формат JSON</string>
-    <string name="fm_policyedit_params_voting_days">Длительность фазы голосования (дней)</string>
-    <string name="fm_policyedit_params_candidate_collection_days">Длительность сбора заявок кандидатов (дней)</string>
+    <string name="fm_policyedit_params_voting_period">Длительность голосования (дни или 12h)</string>
+    <string name="fm_policyedit_params_appeal_vote_period">Длительность голосования по апелляции (дни или 12h, 0=сразу)</string>
+    <string name="fm_policyedit_params_merge_connect_timeout">Окно повторных попыток подключения к пиру (дни или 12h)</string>
+    <string name="fm_policyedit_params_candidate_collection_period">Длительность сбора заявок (дни или 12h)</string>
     <string name="fm_policyedit_params_min_candidates">Минимальное число кандидатов для выборов</string>
     <string name="fm_policyedit_params_min_moderators">Минимальное количество модераторов в эхе</string>
     <string name="fm_policyedit_params_max_moderators">Максимальное количество модераторов в эхе</string>
@@ -811,10 +824,10 @@
     <string name="fm_policyedit_params_max_announcements_per_address">Максимум объявлений на один адрес</string>
     <string name="fm_policyedit_params_time_since_last_vote">Минимальный интервал между голосованиями (дней, 0=нет)</string>
     <string name="fm_policyedit_params_min_percent_for_network_decisions">Минимальный процент голосов администраторов для сетевых решений</string>
-    <string name="fm_policyedit_params_change_policy_vote_days">Длительность голосования по изменению политики (дней)</string>
-    <string name="fm_policyedit_params_merge_phase0_vote_period">Длительность голосования по предложению слияния (дней, 0=сразу)</string>
-    <string name="fm_policyedit_params_merge_phase1_vote_period">Длительность голосования по блокам слияния (дней, 0=сразу)</string>
-    <string name="fm_policyedit_params_merge_phase2_vote_period">Длительность финального голосования по слиянию (дней, 0=сразу)</string>
+    <string name="fm_policyedit_params_change_policy_vote_period">Длительность голосования по изменению политики (дни или 12h)</string>
+    <string name="fm_policyedit_params_merge_phase0_vote_period">Длительность голосования по предложению слияния (дни или 12h, 0=сразу)</string>
+    <string name="fm_policyedit_params_merge_phase1_vote_period">Длительность голосования по блокам слияния (дни или 12h, 0=сразу)</string>
+    <string name="fm_policyedit_params_merge_phase2_vote_period">Длительность финального голосования по слиянию (дни или 12h, 0=сразу)</string>
     <string name="fm_policyedit_params_fast_network_votes">Решать сетевые голосования, как только проголосовали все узлы</string>
     <string name="fm_policyedit_params_excommunicate_cooldown_days">Пауза между предложениями об исключении (дней)</string>
     <string name="fm_policyedit_params_warnings_per_punishment">Предупреждений до автоматического наказания</string>
@@ -826,7 +839,7 @@
     <string name="fm_policyedit_params_message_id_depth_days">Глубина хранения ID сообщений (дней)</string>
     <string name="fm_policyedit_params_create_echo_with_rules">Кто может создавать эхи с правилами</string>
     <string name="fm_policyedit_params_create_echo_with_rules_council_votes">Голосов для создания эхи (число или %)</string>
-    <string name="fm_policyedit_params_create_echo_with_rules_council_vote_period">Длительность голосования по созданию эхи (дней)</string>
+    <string name="fm_policyedit_params_create_echo_with_rules_council_vote_period">Длительность голосования по созданию эхи (дни или 12h)</string>
     <string name="fm_policyedit_params_voucher_enable">Ваучеры (коды-приглашения) обязательны для новых пользователей</string>
     <string name="fm_policyedit_params_voucher_autologin">Автоаппрув пользователей, пришедших по ваучеру</string>
     <string name="fm_policyedit_params_encrypted_policy_flow">Закрытый policy flow (API отвечает 502 без ключа ноды)</string>
@@ -997,5 +1010,7 @@
     <string name="fm_selected_managehint">Отметьте записи, чтобы прикрепить их из композера сообщения.</string>
     <string name="fm_selected_raw">Исходник</string>
     <string name="fm_selected_echo">Эхо</string>
+    <string name="fm_merge_initiator">нода, начавшая слияние (инициатор)</string>
+    <string name="fm_merge_acceptor">другая нода (акцептор)</string>
     <string name="fm_policyedit_params_merge_vote_days">Длительность голосования по блокам слияния (дней, 0=сразу)</string>
 </resources>

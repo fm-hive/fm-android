@@ -53,7 +53,11 @@ class MainActivity : ComponentActivity() {
                                 Triple(name, type, bytes)
                             }.getOrNull()
                         }
-                        viewModel.addAttachments(files)
+                        if (state.screen == lan.fmnode.android.ui.AppScreen.BlogCompose) {
+                            viewModel.addBlogAttachments(files)
+                        } else {
+                            viewModel.addAttachments(files)
+                        }
                     }
                 }
                 var pendingExport by remember { mutableStateOf<String?>(null) }
@@ -91,6 +95,15 @@ class MainActivity : ComponentActivity() {
                     onOpenNetworks = viewModel::openNetworks,
                     onSelectEcho = viewModel::selectEcho,
                     onBackFromEcho = viewModel::backFromEcho,
+                    onBackFromBlog = viewModel::backFromBlog,
+                    onNewBlogPost = { viewModel.openBlogPostEditor() },
+                    onEditBlogPost = viewModel::openBlogPostEditor,
+                    onDeleteBlogPost = viewModel::deleteBlogPost,
+                    onDeleteBlog = viewModel::deleteSelectedBlog,
+                    onBlogTitle = viewModel::setBlogPostTitle,
+                    onBlogBody = viewModel::setBlogPostBody,
+                    onSaveBlogPost = viewModel::saveBlogPost,
+                    onBackFromBlogCompose = viewModel::backFromBlogCompose,
                     onOpenCompose = viewModel::openCompose,
                     onBackFromCompose = viewModel::backFromCompose,
                     onComposeSubject = viewModel::setComposeSubject,
@@ -99,6 +112,14 @@ class MainActivity : ComponentActivity() {
                     onOpenNetmail = viewModel::openNetmail,
                     onOpenSettings = viewModel::openSettings,
                     onNetmailFolder = viewModel::selectNetmailFolder,
+                    onOpenNetmailFolderDialog = viewModel::openNetmailFolderDialog,
+                    onCloseNetmailFolderDialog = viewModel::closeNetmailFolderDialog,
+                    onNetmailFolderName = viewModel::setNetmailFolderName,
+                    onCreateNetmailFolder = viewModel::createNetmailFolder,
+                    onDeleteNetmailFolder = viewModel::deleteNetmailFolder,
+                    onOpenNetmailMove = viewModel::openNetmailMove,
+                    onCloseNetmailMove = viewModel::closeNetmailMove,
+                    onMoveNetmail = viewModel::moveNetmailToFolder,
                     onOpenNetmailMessage = viewModel::openNetmailMessage,
                     onBackFromNetmailDetail = viewModel::backFromNetmailDetail,
                     onOpenNetmailCompose = { viewModel.openNetmailCompose() },
@@ -124,6 +145,7 @@ class MainActivity : ComponentActivity() {
                     onQrScanned = viewModel::onQrScanned,
                     onAttachFiles = { attachLauncher.launch(arrayOf("*/*")) },
                     onRemoveAttachment = viewModel::removeAttachment,
+                    onRemoveBlogAttachment = viewModel::removeBlogAttachment,
                     onOpenAdmin = viewModel::openAdmin,
                     onCloseAdmin = viewModel::closeAdmin,
                     onAdminRefresh = viewModel::loadNodes,
@@ -177,6 +199,7 @@ class MainActivity : ComponentActivity() {
                     onCloseCreateEchoDialog = viewModel::closeCreateEchoDialog,
                     onCreateEchoName = viewModel::setCreateEchoName,
                     onCreateEchoDescription = viewModel::setCreateEchoDescription,
+                    onCreateEchoType = viewModel::setCreateEchoType,
                     onCreateLocalEcho = viewModel::createLocalEcho,
                     onExcommTarget = viewModel::setExcommTarget,
                     onExcommReason = viewModel::setExcommReason,
@@ -192,6 +215,20 @@ class MainActivity : ComponentActivity() {
                             exportLauncher.launch("fm-keys.json")
                         }
                     },
+                    onExportSettings = {
+                        viewModel.exportSettingsJson()?.let { json ->
+                            pendingExport = json
+                            exportLauncher.launch("fm-settings.json")
+                        }
+                    },
+                    onExportFull = {
+                        viewModel.exportFullJson()?.let { json ->
+                            pendingExport = json
+                            exportLauncher.launch("fm-full-export.json")
+                        }
+                    },
+                    onImportBackup = { importLauncher.launch(arrayOf("application/json", "text/plain")) },
+                    onClearBackup = viewModel::clearBackupMessage,
                 )
             }
         }

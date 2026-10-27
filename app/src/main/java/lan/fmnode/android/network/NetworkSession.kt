@@ -14,6 +14,8 @@ import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import lan.fmnode.android.crypto.CryptoService
 import lan.fmnode.android.crypto.Encoding
+import lan.fmnode.android.storage.BlogEntity
+import lan.fmnode.android.storage.BlogPostEntity
 import lan.fmnode.android.storage.EchoEntity
 import lan.fmnode.android.storage.MessageEntity
 import lan.fmnode.android.storage.MetaEntity
@@ -38,6 +40,7 @@ class NetworkSession(
     private val x25519Public: ByteArray = CryptoService.x25519PublicKeyFromEd25519(publicKey)
     private var registeredThisSession = false
     private var clientSyncEnabled = false
+    private var knownClients: Set<String> = emptySet()
     private val auth = ApiKeys(seed, publicKey)
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -444,6 +447,16 @@ class NetworkSession(
         api.post("client_synchronize", data.toString(), auth)
     }
 
+    /** Shares a local blog operation with the other devices of this identity. */
+    suspend fun broadcastBlogOp(op: JsonObject) {
+        if (!clientSyncEnabled || knownClients.isEmpty()) return
+        val me = clientId()
+        for (other in knownClients) {
+            if (other == me) continue
+            appendContainer(CLIENT_CONTAINER_PREFIX + other, op)
+        }
+    }
+
     /**
      * Applies the client-sync containers returned by send_receive: rebuilds the
      * client list, consumes this client's own queue and forwards freshly
@@ -473,16 +486,46 @@ class NetworkSession(
             if (op.string("op") == "remove") clients.remove(client) else clients.add(client)
         }
 
+        knownClients = clients
         val ackIds = mutableListOf<JsonElement>()
         for (entry in ownEntries) {
             val op = entry.string("payload")?.let { decryptClientPayload(it) } ?: continue
-            if (op.string("op") == "message") {
-                (op["message"] as? JsonObject)?.let { message ->
-                    when (val result = processIncoming(message)) {
+            when (op.string("op")) {
+                "message" -> (op["message"] as? JsonObject)?.let { message ->
+                    when (processIncoming(message)) {
                         is Incoming.Stored, is Incoming.Error -> {}
                         else -> {}
                     }
                 }
+                "blog" -> (op["blog"] as? JsonObject)?.let { blog ->
+                    val id = blog.string("id") ?: return@let
+                    database.blogDao().upsert(
+                        BlogEntity(
+                            id = id,
+                            name = blog.string("name").orEmpty(),
+                            description = blog.string("description").orEmpty(),
+                            createdAt = blog.long("createdAt") ?: System.currentTimeMillis(),
+                            updatedAt = System.currentTimeMillis(),
+                        ),
+                    )
+                }
+                "blogPost" -> (op["post"] as? JsonObject)?.let { post ->
+                    val id = post.string("id") ?: return@let
+                    val blogId = post.string("blogId") ?: return@let
+                    database.blogPostDao().upsert(
+                        BlogPostEntity(
+                            id = id,
+                            blogId = blogId,
+                            title = post.string("title").orEmpty(),
+                            body = post.string("body").orEmpty(),
+                            attachmentsJson = post["attachments"]?.toString() ?: "[]",
+                            timestamp = post.long("timestamp") ?: System.currentTimeMillis(),
+                            updatedAt = System.currentTimeMillis(),
+                        ),
+                    )
+                }
+                "blogDelete" -> op.string("id")?.let { database.blogPostDao().deleteByBlog(it); database.blogDao().delete(it) }
+                "blogPostDelete" -> op.string("id")?.let { database.blogPostDao().delete(it) }
             }
             (entry["id"] as? JsonPrimitive)?.let(ackIds::add)
         }
@@ -607,6 +650,9 @@ class NetworkSession(
             "netmail" -> NETMAIL_ECHO
             else -> msg.string("echo_name") ?: msg.string("echo") ?: return Incoming.Ignored
         }
+        // A message moved to a custom netmail folder must stay there when the
+        // node delivers the same id again (for example after a re-sync).
+        val existing = database.messageDao().getById(messageId)
         database.messageDao().upsert(
             MessageEntity(
                 messageId = messageId,
@@ -619,6 +665,8 @@ class NetworkSession(
                 jws = jws,
                 jwe = jwe,
                 receivedAt = System.currentTimeMillis(),
+                versionsJson = existing?.versionsJson,
+                folderSlug = if (type == "netmail") existing?.folderSlug else null,
             ),
         )
         return Incoming.Stored
@@ -655,10 +703,12 @@ class NetworkSession(
         }
         val response = api.post("send_receive", body.toString(), auth)
         if (response is JsonObject) {
-            storeDeliveredIds(response["local_packet_ids"] as? JsonArray)
+            // Persist protocol/message data before acknowledging packet ids (#350):
+            // an ACK must never outrun the local database write.
             (response["messages"] as? JsonArray)?.forEach { element ->
                 (element as? JsonObject)?.let { processIncoming(it) }
             }
+            storeDeliveredIds(response["local_packet_ids"] as? JsonArray)
         }
         return response
     }
@@ -780,6 +830,9 @@ class NetworkSession(
 
     private fun JsonObject.boolean(name: String): Boolean =
         (this[name] as? JsonPrimitive)?.booleanOrNull ?: false
+
+    private fun JsonObject.long(name: String): Long? =
+        (this[name] as? JsonPrimitive)?.longOrNull
 
     companion object {
         const val NETMAIL_ECHO = "__netmail__"

@@ -100,6 +100,15 @@ fun FmRoot(
     onOpenNetworks: () -> Unit = {},
     onSelectEcho: (String) -> Unit = {},
     onBackFromEcho: () -> Unit = {},
+    onBackFromBlog: () -> Unit = {},
+    onNewBlogPost: () -> Unit = {},
+    onEditBlogPost: (BlogPostUi) -> Unit = {},
+    onDeleteBlogPost: (String) -> Unit = {},
+    onDeleteBlog: () -> Unit = {},
+    onBlogTitle: (String) -> Unit = {},
+    onBlogBody: (String) -> Unit = {},
+    onSaveBlogPost: () -> Unit = {},
+    onBackFromBlogCompose: () -> Unit = {},
     onOpenCompose: () -> Unit = {},
     onBackFromCompose: () -> Unit = {},
     onComposeSubject: (String) -> Unit = {},
@@ -107,7 +116,15 @@ fun FmRoot(
     onSendCompose: () -> Unit = {},
     onOpenNetmail: () -> Unit = {},
     onOpenSettings: () -> Unit = {},
-    onNetmailFolder: (NetmailFolder) -> Unit = {},
+    onNetmailFolder: (String) -> Unit = {},
+    onOpenNetmailFolderDialog: () -> Unit = {},
+    onCloseNetmailFolderDialog: () -> Unit = {},
+    onNetmailFolderName: (String) -> Unit = {},
+    onCreateNetmailFolder: () -> Unit = {},
+    onDeleteNetmailFolder: (String) -> Unit = {},
+    onOpenNetmailMove: (String) -> Unit = {},
+    onCloseNetmailMove: () -> Unit = {},
+    onMoveNetmail: (String?) -> Unit = {},
     onOpenNetmailMessage: (String) -> Unit = {},
     onBackFromNetmailDetail: () -> Unit = {},
     onOpenNetmailCompose: () -> Unit = {},
@@ -122,6 +139,10 @@ fun FmRoot(
     onImportPassword: (String) -> Unit = {},
     onCancelImport: () -> Unit = {},
     onExportKeys: (String) -> Unit = {},
+    onExportSettings: () -> Unit = {},
+    onExportFull: () -> Unit = {},
+    onImportBackup: () -> Unit = {},
+    onClearBackup: () -> Unit = {},
     onOpenSearch: () -> Unit = {},
     onCloseSearch: () -> Unit = {},
     onSearchQuery: (String) -> Unit = {},
@@ -134,6 +155,7 @@ fun FmRoot(
     onQrScanned: (String) -> Unit = {},
     onAttachFiles: () -> Unit = {},
     onRemoveAttachment: (Int) -> Unit = {},
+    onRemoveBlogAttachment: (Int) -> Unit = {},
     onOpenAdmin: () -> Unit = {},
     onCloseAdmin: () -> Unit = {},
     onAdminRefresh: () -> Unit = {},
@@ -160,6 +182,7 @@ fun FmRoot(
     onCloseCreateEchoDialog: () -> Unit = {},
     onCreateEchoName: (String) -> Unit = {},
     onCreateEchoDescription: (String) -> Unit = {},
+    onCreateEchoType: (CreateEchoType) -> Unit = {},
     onCreateLocalEcho: () -> Unit = {},
     onExcommTarget: (String) -> Unit = {},
     onExcommReason: (String) -> Unit = {},
@@ -272,9 +295,11 @@ fun FmRoot(
         CreateEchoDialog(
             name = state.createEchoName,
             description = state.createEchoDescription,
+            type = state.createEchoType,
             error = state.createEchoError,
             onName = onCreateEchoName,
             onDescription = onCreateEchoDescription,
+            onType = onCreateEchoType,
             onCreate = onCreateLocalEcho,
             onDismiss = onCloseCreateEchoDialog,
         )
@@ -355,6 +380,26 @@ fun FmRoot(
             onModerate = onOpenModeration,
             onForward = onForwardMessage,
         )
+        AppScreen.Blog -> state.selectedBlog?.let { blog ->
+            BlogScreen(
+                blog = blog,
+                posts = state.blogPosts,
+                onBack = onBackFromBlog,
+                onNewPost = onNewBlogPost,
+                onEditPost = onEditBlogPost,
+                onDeletePost = onDeleteBlogPost,
+                onDeleteBlog = onDeleteBlog,
+            )
+        }
+        AppScreen.BlogCompose -> BlogComposeScreen(
+            state = state.blogCompose,
+            onBack = onBackFromBlogCompose,
+            onTitle = onBlogTitle,
+            onBody = onBlogBody,
+            onAttachFiles = onAttachFiles,
+            onRemoveAttachment = onRemoveBlogAttachment,
+            onSave = onSaveBlogPost,
+        )
         AppScreen.Compose -> EchoComposeScreen(
             echoName = state.selectedEcho?.name ?: "",
             state = state.compose,
@@ -386,10 +431,23 @@ fun FmRoot(
         )
         AppScreen.Netmail -> NetmailScreen(
             messages = state.netmail,
+            customFolders = state.netmailFolders,
             folder = state.netmailFolder,
+            folderDialog = state.netmailFolderDialog,
+            folderName = state.netmailFolderName,
+            folderError = state.netmailFolderError,
+            moveMessageId = state.netmailMoveMessageId,
             onFolder = onNetmailFolder,
             onOpen = onOpenNetmailMessage,
             onCompose = onOpenNetmailCompose,
+            onOpenFolderDialog = onOpenNetmailFolderDialog,
+            onCloseFolderDialog = onCloseNetmailFolderDialog,
+            onFolderName = onNetmailFolderName,
+            onCreateFolder = onCreateNetmailFolder,
+            onDeleteFolder = onDeleteNetmailFolder,
+            onOpenMove = onOpenNetmailMove,
+            onCloseMove = onCloseNetmailMove,
+            onMove = onMoveNetmail,
             onEchoes = onSelectEchoTab,
             onSettings = onOpenSettings,
             onLock = onLock,
@@ -416,7 +474,7 @@ fun FmRoot(
             onDelete = onDeleteOutbox,
         )
         AppScreen.EchoBrowser -> EchoBrowserScreen(
-            echoes = state.allEchoes,
+            echoes = state.allEchoes.filter { !it.isBlog },
             onBack = onCloseEchoBrowser,
             onToggle = onToggleSubscription,
             onCreateLocal = onCreateEchoDialog,
@@ -450,6 +508,12 @@ fun FmRoot(
             onEchoes = onSelectEchoTab,
             onNetmail = onOpenNetmail,
             onExportKeys = onExportKeys,
+            onExportSettings = onExportSettings,
+            onExportFull = onExportFull,
+            onImportBackup = onImportBackup,
+            backupStatus = state.backupStatus,
+            backupError = state.backupError,
+            onClearBackup = onClearBackup,
             onOpenAdmin = onOpenAdmin,
             onCreateVoucher = onCreateVoucher,
             voucherCode = state.voucherCode,
@@ -876,7 +940,13 @@ private fun EchoCard(echo: EchoUi, onClick: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f)) {
-                Text(echo.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(echo.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    if (echo.isBlog) {
+                        Spacer(Modifier.width(6.dp))
+                        AssistChip(onClick = {}, label = { Text("B") })
+                    }
+                }
                 if (echo.description.isNotBlank()) {
                     Text(
                         text = echo.description,

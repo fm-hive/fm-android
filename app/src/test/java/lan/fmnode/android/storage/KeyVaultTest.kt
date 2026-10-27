@@ -58,6 +58,16 @@ class KeyVaultTest {
     }
 
     @Test
+    fun `imports an unencrypted fm-app keys export`() {
+        val seed = CryptoService.generateSeed()
+        val publicKey = CryptoService.publicKeyFromSeed(seed)
+        val json = """{"version":"1.0","publicKey":"${Encoding.base64Encode(publicKey)}","metadata":{"encrypted":false,"timestamp":1},"timestamp":1,"privateKey":"${Encoding.base64Encode(seed)}","encrypted":false}"""
+        val imported = KeystoreExportCodec.decode(json)
+        assertArrayEquals(seed, imported.plainSeed)
+        assertNull(imported.encryptedSeed)
+    }
+
+    @Test
     fun `keystore export survives an encode-decode round trip`() {
         val seed = CryptoService.generateSeed()
         val publicKey = CryptoService.publicKeyFromSeed(seed)

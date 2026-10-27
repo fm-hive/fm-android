@@ -1,6 +1,8 @@
 package lan.fmnode.android.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,12 +20,17 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.EmojiEmotions
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Forward
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Mail
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.CircularProgressIndicator
@@ -85,17 +92,57 @@ fun MainBottomBar(
 @Composable
 fun NetmailScreen(
     messages: List<MessageUi>,
-    folder: NetmailFolder,
-    onFolder: (NetmailFolder) -> Unit,
+    customFolders: List<NetmailFolderUi>,
+    folder: String,
+    folderDialog: Boolean,
+    folderName: String,
+    folderError: UiError?,
+    moveMessageId: String?,
+    onFolder: (String) -> Unit,
     onOpen: (String) -> Unit,
     onCompose: () -> Unit,
+    onOpenFolderDialog: () -> Unit,
+    onCloseFolderDialog: () -> Unit,
+    onFolderName: (String) -> Unit,
+    onCreateFolder: () -> Unit,
+    onDeleteFolder: (String) -> Unit,
+    onOpenMove: (String) -> Unit,
+    onCloseMove: () -> Unit,
+    onMove: (String?) -> Unit,
     onEchoes: () -> Unit,
     onSettings: () -> Unit,
     onLock: () -> Unit,
     onLogout: () -> Unit,
 ) {
-    val visible = messages.filter { if (folder == NetmailFolder.Inbox) !it.own else it.own }
-        .sortedByDescending { it.timestamp }
+    val folders = listOf(
+        NetmailFolderUi(NETMAIL_INBOX, stringResource(R.string.inbox), count = messages.count { it.folderSlug == null && !it.own }),
+        NetmailFolderUi(NETMAIL_SENT, stringResource(R.string.sent), count = messages.count { it.folderSlug == null && it.own }),
+    ) + customFolders.map { f ->
+        f.copy(count = messages.count { it.folderSlug == f.slug })
+    }
+    val visible = messages.filter {
+        when (folder) {
+            NETMAIL_INBOX -> it.folderSlug == null && !it.own
+            NETMAIL_SENT -> it.folderSlug == null && it.own
+            else -> it.folderSlug == folder
+        }
+    }.sortedByDescending { it.timestamp }
+    if (folderDialog) {
+        NetmailFolderDialog(
+            name = folderName,
+            error = folderError,
+            onName = onFolderName,
+            onCreate = onCreateFolder,
+            onDismiss = onCloseFolderDialog,
+        )
+    }
+    if (moveMessageId != null) {
+        MoveToFolderDialog(
+            folders = customFolders,
+            onMove = onMove,
+            onDismiss = onCloseMove,
+        )
+    }
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
@@ -113,17 +160,25 @@ fun NetmailScreen(
         },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
-            TabRow(selectedTabIndex = if (folder == NetmailFolder.Inbox) 0 else 1) {
-                Tab(
-                    selected = folder == NetmailFolder.Inbox,
-                    onClick = { onFolder(NetmailFolder.Inbox) },
-                    text = { Text(stringResource(R.string.inbox)) },
-                )
-                Tab(
-                    selected = folder == NetmailFolder.Sent,
-                    onClick = { onFolder(NetmailFolder.Sent) },
-                    text = { Text(stringResource(R.string.sent)) },
-                )
+            Row(
+                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp),
+            ) {
+                folders.forEach { item ->
+                    AssistChip(
+                        onClick = { onFolder(item.slug) },
+                        label = {
+                            Text(if (item.count > 0) "${item.label} (${item.count})" else item.label)
+                        },
+                    )
+                    if (item.custom) {
+                        IconButton(onClick = { onDeleteFolder(item.slug) }) {
+                            Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.delete))
+                        }
+                    }
+                }
+                IconButton(onClick = onOpenFolderDialog) {
+                    Icon(Icons.Default.Add, contentDescription = stringResource(R.string.create_folder))
+                }
             }
             if (visible.isEmpty()) {
                 Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
@@ -144,6 +199,7 @@ fun NetmailScreen(
                         message = message,
                         folder = folder,
                         onClick = { onOpen(message.messageId) },
+                        onMove = { onOpenMove(message.messageId) },
                     )
                 }
             }
@@ -152,26 +208,84 @@ fun NetmailScreen(
 }
 
 @Composable
-private fun NetmailCard(message: MessageUi, folder: NetmailFolder, onClick: () -> Unit) {
+private fun NetmailCard(
+    message: MessageUi,
+    folder: String,
+    onClick: () -> Unit,
+    onMove: () -> Unit,
+) {
     Card(modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)) {
-        Column(Modifier.fillMaxWidth().padding(12.dp)) {
-            Text(
-                text = message.subject.ifBlank { stringResource(R.string.no_subject) },
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Spacer(Modifier.height(2.dp))
-            Text(
-                text = if (folder == NetmailFolder.Inbox) {
-                    "${message.senderName} (${message.senderAddress})"
-                } else {
-                    message.recipientAddress.orEmpty()
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+        Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = message.subject.ifBlank { stringResource(R.string.no_subject) },
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = if (folder == NETMAIL_SENT) {
+                        message.recipientAddress.orEmpty()
+                    } else {
+                        "${message.senderName} (${message.senderAddress})"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            IconButton(onClick = onMove) {
+                Icon(Icons.Default.Folder, contentDescription = stringResource(R.string.move_to_folder))
+            }
         }
     }
+}
+
+@Composable
+private fun NetmailFolderDialog(
+    name: String,
+    error: UiError?,
+    onName: (String) -> Unit,
+    onCreate: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.create_folder)) },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = onName,
+                    label = { Text(stringResource(R.string.folder_name)) },
+                    singleLine = true,
+                )
+                error?.let { Text(errorText(it), color = MaterialTheme.colorScheme.error) }
+            }
+        },
+        confirmButton = { TextButton(onClick = onCreate) { Text(stringResource(R.string.fm_createecho_create)) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
+    )
+}
+
+@Composable
+private fun MoveToFolderDialog(
+    folders: List<NetmailFolderUi>,
+    onMove: (String?) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.move_to_folder)) },
+        text = {
+            Column {
+                TextButton(onClick = { onMove(null) }) { Text(stringResource(R.string.inbox)) }
+                folders.forEach { folder ->
+                    TextButton(onClick = { onMove(folder.slug) }) { Text(folder.label) }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

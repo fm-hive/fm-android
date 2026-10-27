@@ -572,9 +572,11 @@ fun RefillDialog(
 fun CreateEchoDialog(
     name: String,
     description: String,
+    type: CreateEchoType,
     error: UiError?,
     onName: (String) -> Unit,
     onDescription: (String) -> Unit,
+    onType: (CreateEchoType) -> Unit,
     onCreate: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -583,6 +585,15 @@ fun CreateEchoDialog(
         title = { Text(stringResource(R.string.create_echo)) },
         text = {
             Column {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = { onType(CreateEchoType.LocalEcho) }) {
+                        Text(stringResource(R.string.fm_createecho_local))
+                    }
+                    OutlinedButton(onClick = { onType(CreateEchoType.Blog) }) {
+                        Text(stringResource(R.string.fm_createecho_blog))
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
                     value = name,
                     onValueChange = onName,
