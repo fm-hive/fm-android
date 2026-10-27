@@ -622,7 +622,11 @@ class NetworkSession(
             parsedData.string("reaction").isNullOrEmpty() &&
             parsedData.string("proto").isNullOrEmpty()
         ) {
-            val original = database.messageDao().getById(updateTarget)
+            val updateEcho = when (type) {
+                "netmail" -> NETMAIL_ECHO
+                else -> msg.string("echo_name") ?: msg.string("echo") ?: ""
+            }
+            val original = database.messageDao().getByEchoAndId(updateEcho, updateTarget)
             if (original != null && original.senderAddress == sender) {
                 val versions = runCatching {
                     (json.parseToJsonElement(original.versionsJson ?: "[]") as JsonArray).toMutableList()
@@ -632,6 +636,7 @@ class NetworkSession(
                     put("timestamp", original.timestamp)
                 }
                 database.messageDao().updateContent(
+                    original.echoName,
                     original.messageId,
                     dataJson.orEmpty(),
                     JsonArray(versions).toString(),
@@ -651,8 +656,9 @@ class NetworkSession(
             else -> msg.string("echo_name") ?: msg.string("echo") ?: return Incoming.Ignored
         }
         // A message moved to a custom netmail folder must stay there when the
-        // node delivers the same id again (for example after a re-sync).
-        val existing = database.messageDao().getById(messageId)
+        // node delivers the same id again (for example after a re-sync). ids are
+        // only unique inside an echo, so the row is looked up by both.
+        val existing = database.messageDao().getByEchoAndId(echoName, messageId)
         database.messageDao().upsert(
             MessageEntity(
                 messageId = messageId,

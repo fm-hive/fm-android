@@ -191,4 +191,51 @@ class NetworkManagerTest {
         assertNull(runBlocking { manager.activeProfileId() })
         assertTrue(runBlocking { db.profileDao().getAll() }.isEmpty())
     }
+
+    @Test
+    fun `an imported identity is adopted without contacting the node`() = runBlocking {
+        val seed = ByteArray(32) { (it + 41).toByte() }
+        val requestsBefore = server.requestCount
+
+        val profile = manager.adoptProfile(
+            password = "secret-pass",
+            seed = seed,
+            address = ":0:1",
+            displayName = "K",
+            nodePublicKeyB64 = node.sigPkeyB64(),
+            appUrl = "https://node.example/app",
+            apiUrl = "https://node.example/api",
+        )
+
+        assertEquals(requestsBefore, server.requestCount)
+        assertEquals(":0:1", profile.address)
+        assertEquals("K", profile.displayName)
+        assertEquals(node.sigPkeyB64(), profile.nodePublicKeyB64)
+        assertEquals(Encoding.base64Encode(CryptoService.publicKeyFromSeed(seed)), profile.publicKeyB64)
+        assertEquals("node.example (:0:1)", profile.title)
+        assertEquals(profile.id, manager.activeProfileId())
+        assertArrayEquals(seed, KeyVault.decrypt(db.profileDao().getById(profile.id)!!.encryptedSeed(), "secret-pass"))
+    }
+
+    @Test
+    fun `importing the same identity twice updates one profile`() = runBlocking {
+        val seed = ByteArray(32) { (it + 51).toByte() }
+        val adopt = suspend {
+            manager.adoptProfile(
+                password = "secret-pass",
+                seed = seed,
+                address = ":0:1",
+                displayName = "K",
+                nodePublicKeyB64 = node.sigPkeyB64(),
+                appUrl = "https://node.example/app",
+                apiUrl = "https://node.example/api",
+            )
+        }
+
+        val first = adopt()
+        val second = adopt()
+
+        assertEquals(first.id, second.id)
+        assertEquals(1, db.profileDao().getAll().size)
+    }
 }

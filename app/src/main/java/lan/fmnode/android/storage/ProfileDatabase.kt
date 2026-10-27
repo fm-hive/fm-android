@@ -28,10 +28,14 @@ data class EchoEntity(
  * Received message. The content lives in [dataJson] (echomail/netmail data,
  * recovered from the JWS payload or decrypted from the JWE); netmail keeps the
  * encrypted [jwe] as delivered by the node.
+ *
+ * A `message_id` is only unique inside its echo: the same id is reused by
+ * different conferences (an import of a real export lost 101 of 907 messages to
+ * a message_id-only key), so the key is the echo/message pair.
  */
-@Entity(tableName = "messages")
+@Entity(tableName = "messages", primaryKeys = ["echoName", "messageId"])
 data class MessageEntity(
-    @PrimaryKey val messageId: String,
+    val messageId: String,
     val echoName: String,
     val type: String,
     val senderAddress: String,
@@ -247,8 +251,12 @@ interface MessageDao {
     @Query("SELECT * FROM messages WHERE echoName = :echo ORDER BY timestamp ASC, messageId ASC")
     suspend fun getEcho(echo: String): List<MessageEntity>
 
-    @Query("SELECT * FROM messages WHERE messageId = :messageId")
+    @Query("SELECT * FROM messages WHERE messageId = :messageId LIMIT 1")
     suspend fun getById(messageId: String): MessageEntity?
+
+    /** Exact lookup: a message id is only unique inside its echo. */
+    @Query("SELECT * FROM messages WHERE echoName = :echo AND messageId = :messageId")
+    suspend fun getByEchoAndId(echo: String, messageId: String): MessageEntity?
 
     @Query(
         "SELECT COUNT(*) FROM messages WHERE echoName = :echo AND timestamp > :since " +
@@ -259,14 +267,27 @@ interface MessageDao {
     @Query("SELECT COUNT(*) FROM messages WHERE echoName = '__netmail__' AND timestamp > :since AND senderAddress != :me")
     fun observeUnreadNetmail(since: Long, me: String): Flow<Int>
 
-    @Query("UPDATE messages SET dataJson = :dataJson, versionsJson = :versionsJson, receivedAt = :receivedAt WHERE messageId = :messageId")
-    suspend fun updateContent(messageId: String, dataJson: String, versionsJson: String?, receivedAt: Long)
+    @Query(
+        "UPDATE messages SET dataJson = :dataJson, versionsJson = :versionsJson, " +
+            "receivedAt = :receivedAt WHERE echoName = :echo AND messageId = :messageId",
+    )
+    suspend fun updateContent(
+        echo: String,
+        messageId: String,
+        dataJson: String,
+        versionsJson: String?,
+        receivedAt: Long,
+    )
 
     @Query("SELECT * FROM messages ORDER BY timestamp ASC, messageId ASC")
     suspend fun getAll(): List<MessageEntity>
 
-    @Query("UPDATE messages SET folderSlug = :folderSlug WHERE messageId = :messageId")
-    suspend fun setFolder(messageId: String, folderSlug: String?)
+    @Query("UPDATE messages SET folderSlug = :folderSlug WHERE echoName = :echo AND messageId = :messageId")
+    suspend fun setFolder(echo: String, messageId: String, folderSlug: String?)
+
+    /** Removes one row of a given echo (used when a message is deleted upstream). */
+    @Query("DELETE FROM messages WHERE echoName = :echo AND messageId = :messageId")
+    suspend fun delete(echo: String, messageId: String)
 
     @Query("DELETE FROM messages WHERE folderSlug = :folderSlug")
     suspend fun deleteByFolder(folderSlug: String)
@@ -424,7 +445,7 @@ interface MetaDao {
         BlogPostEntity::class,
         NetmailFolderEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = true,
 )
 abstract class ProfileDatabase : RoomDatabase() {
@@ -478,6 +499,35 @@ abstract class ProfileDatabase : RoomDatabase() {
                         "updatedAt INTEGER NOT NULL)",
                 )
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_blog_posts_blogId ON blog_posts(blogId)")
+            }
+        }
+
+        /**
+         * Messages are keyed by echo + id (v3 -> v4): a `message_id` is only
+         * unique inside its conference, and a single-key table silently dropped
+         * every colliding message of an import.
+         *
+         * SQLite cannot change a primary key in place, so the table is rebuilt.
+         * Existing rows keep the one id they had; the old key made collisions
+         * impossible anyway.
+         */
+        val MIGRATION_3_4 = object : androidx.room.migration.Migration(3, 4) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS messages_new (" +
+                        "messageId TEXT NOT NULL, echoName TEXT NOT NULL, type TEXT NOT NULL, " +
+                        "senderAddress TEXT NOT NULL, recipientAddress TEXT, timestamp INTEGER NOT NULL, " +
+                        "dataJson TEXT NOT NULL, jws TEXT, jwe TEXT, receivedAt INTEGER NOT NULL, " +
+                        "versionsJson TEXT, folderSlug TEXT, PRIMARY KEY(echoName, messageId))",
+                )
+                db.execSQL(
+                    "INSERT OR REPLACE INTO messages_new (messageId, echoName, type, senderAddress, " +
+                        "recipientAddress, timestamp, dataJson, jws, jwe, receivedAt, versionsJson, folderSlug) " +
+                        "SELECT messageId, echoName, type, senderAddress, recipientAddress, timestamp, " +
+                        "dataJson, jws, jwe, receivedAt, versionsJson, folderSlug FROM messages",
+                )
+                db.execSQL("DROP TABLE messages")
+                db.execSQL("ALTER TABLE messages_new RENAME TO messages")
             }
         }
     }

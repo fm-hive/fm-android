@@ -194,6 +194,7 @@ fun NetmailScreen(
                 contentPadding = PaddingValues(12.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                // Netmail is one echo: the id alone is unique here.
                 items(visible, key = { it.messageId }) { message ->
                     NetmailCard(
                         message = message,

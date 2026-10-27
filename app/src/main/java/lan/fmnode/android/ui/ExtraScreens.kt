@@ -103,7 +103,8 @@ fun SearchScreen(
                 contentPadding = PaddingValues(12.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                items(results, key = { it.messageId }) { result ->
+                // Search results span echoes: a message id alone repeats.
+                items(results, key = { it.echoName + '\u0000' + it.messageId }) { result ->
                     Card(modifier = Modifier.fillMaxWidth().clickable { onOpenResult(result) }) {
                         Column(Modifier.fillMaxWidth().padding(12.dp)) {
                             Row {
@@ -184,7 +185,7 @@ fun ProtocolsScreen(
             ),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            items(protocols, key = { it.messageId }) { protocol ->
+            items(protocols, key = { it.echoName + '\u0000' + it.messageId }) { protocol ->
                 ProtocolCard(
                     protocol = protocol,
                     onVote = { variant -> onVote(protocol, variant) },

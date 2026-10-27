@@ -14,6 +14,23 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import lan.fmnode.android.crypto.Encoding
 
+/** A parsed full v2.0 export: the identity of the profile plus the raw payload. */
+data class ImportedFullBackup(
+    val payload: JsonObject,
+    val keystore: ImportedKeystore,
+    val publicKeyB64: String,
+    val nodePublicKeyB64: String?,
+    /**
+     * Endpoint of the network the export was taken from, when the export
+     * carries one (fm-app writes it in the settings, not next to the keys).
+     */
+    val nodeUrl: String?,
+    val address: String,
+    val displayName: String,
+    val exportedAt: String?,
+    val timestamp: Long,
+)
+
 /** fm-app keys / settings / full-backup formats. */
 object BackupService {
     const val SETTINGS_META = "settings_json"
@@ -36,10 +53,67 @@ object BackupService {
     private fun JsonObject.str(name: String): String? =
         (this[name] as? JsonPrimitive)?.contentOrNull
 
+    private fun JsonObject.obj(name: String): JsonObject? = this[name] as? JsonObject
+
+    /**
+     * Parses a full v2.0 export of fm-app.
+     *
+     * Returns null when [text] is not a full backup, so the caller can fall back
+     * to the other import formats. The profile of the export is resolved even
+     * without a network: [ImportedFullBackup.keystore] carries the public key and
+     * the encrypted seed, and [ImportedFullBackup.nodePublicKeyB64] the node key,
+     * which is all that is needed to adopt the identity of the export on a fresh
+     * installation.
+     */
+    fun parseFullBackup(text: String): ImportedFullBackup? {
+        val root = runCatching { json.parseToJsonElement(text).jsonObject }.getOrNull() ?: return null
+        if (root.str("version") != "2.0") return null
+        val keys = root.obj("keys") ?: return null
+        val publicKeyB64 = keys.str("publicKey")?.takeIf { it.isNotBlank() } ?: return null
+        val keystore = runCatching { KeystoreExportCodec.decode(root) }.getOrNull() ?: return null
+        val user = root.obj("user")
+        val meta = KeystoreExportCodec.metadataOf(keys)
+        return ImportedFullBackup(
+            payload = root,
+            keystore = keystore,
+            publicKeyB64 = publicKeyB64,
+            nodePublicKeyB64 = keys.str("nodePublicKey"),
+            nodeUrl = nodeUrlOf(root),
+            address = user?.str("address").orEmpty(),
+            displayName = user?.str("name").orEmpty(),
+            exportedAt = root.str("exportedAt"),
+            timestamp = (meta?.get("timestamp") as? JsonPrimitive)
+                ?.let { it.contentOrNull?.toLongOrNull() }
+                ?: System.currentTimeMillis(),
+        )
+    }
+
     private suspend fun settingsData(db: ProfileDatabase): JsonObject? =
         db.metaDao().get(SETTINGS_META)?.let {
             runCatching { json.parseToJsonElement(it).jsonObject }.getOrNull()
         }
+
+    /**
+     * Endpoint of the network the export was taken from. fm-app keeps it in the
+     * settings (`network`/`application`) and sometimes at the top level; a keys
+     * export does not carry it at all.
+     */
+    private fun nodeUrlOf(root: JsonObject): String? {
+        val settings = root.obj("settings")
+        val candidates = listOf(
+            root.str("appUrl"),
+            root.str("apiUrl"),
+            root.str("nodeUrl"),
+            settings?.str("appUrl"),
+            settings?.str("apiUrl"),
+            settings?.str("nodeUrl"),
+            settings?.obj("network")?.str("appUrl"),
+            settings?.obj("network")?.str("apiUrl"),
+            settings?.obj("application")?.str("appUrl"),
+            settings?.obj("application")?.str("apiUrl"),
+        )
+        return candidates.firstOrNull { !it.isNullOrBlank() }
+    }
 
     suspend fun exportSettings(db: ProfileDatabase, profile: ProfileEntity): String {
         val data = settingsData(db) ?: JsonObject(emptyMap())
@@ -153,8 +227,10 @@ object BackupService {
         )
     }
 
-    suspend fun importFull(db: ProfileDatabase, profile: ProfileEntity, text: String): Result {
-        val root = json.parseToJsonElement(text).jsonObject
+    suspend fun importFull(db: ProfileDatabase, profile: ProfileEntity, text: String): Result =
+        importFull(db, profile, json.parseToJsonElement(text).jsonObject)
+
+    suspend fun importFull(db: ProfileDatabase, profile: ProfileEntity, root: JsonObject): Result {
         require(root.str("version") == "2.0") { "unsupported full backup version" }
         var warning: String? = null
         val keys = root["keys"] as? JsonObject
@@ -183,7 +259,13 @@ object BackupService {
         }
 
         var messageCount = 0
-        (root["messages"] as? JsonObject)?.forEach { (store, rows) ->
+        // One netmail message can be exported twice: once in the inbox and once
+        // in the custom folder it was moved to. The folder copy wins, so the
+        // folder stores are applied last.
+        val stores = (root["messages"] as? JsonObject)?.entries
+            ?.sortedBy { (store, _) -> if (store.startsWith("netmail_")) 1 else 0 }
+            ?: emptyList()
+        stores.forEach { (store, rows) ->
             val array = rows as? JsonArray ?: return@forEach
             val echo = when {
                 store == "__netmail__" -> NetworkSessionConstants.NETMAIL_ECHO
@@ -197,7 +279,9 @@ object BackupService {
             }
             if (entities.isNotEmpty()) {
                 db.messageDao().upsertAll(entities)
-                messageCount += entities.size
+                // The same message may appear in the inbox and in a folder store:
+                // count the rows that really exist, not the ones written.
+                messageCount = db.messageDao().getAll().size
             }
         }
 

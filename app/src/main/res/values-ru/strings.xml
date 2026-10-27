@@ -46,6 +46,7 @@
     <string name="import_keys">Импортировать ключи</string>
     <string name="import_password_title">Пароль от ключей</string>
     <string name="keys_imported">Ключи импортированы</string>
+    <string name="import_in_progress">Импорт…</string>
     <string name="export_keys">Экспорт ключей</string>
     <string name="export_password_title">Пароль экспорта</string>
     <string name="export_password_hint">Пароль, которым будет защищён экспортированный файл</string>

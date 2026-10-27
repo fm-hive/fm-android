@@ -185,7 +185,11 @@ class Vault(
         ): ProfileDatabase {
             loadSqlCipher()
             return Room.databaseBuilder(context, ProfileDatabase::class.java, profileDbName(profileId))
-                .addMigrations(ProfileDatabase.MIGRATION_1_2, ProfileDatabase.MIGRATION_2_3)
+                .addMigrations(
+                    ProfileDatabase.MIGRATION_1_2,
+                    ProfileDatabase.MIGRATION_2_3,
+                    ProfileDatabase.MIGRATION_3_4,
+                )
                 .openHelperFactory(SupportOpenHelperFactory(password))
                 .build()
         }
