@@ -3,6 +3,7 @@ package lan.fmnode.android.ui
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -15,6 +16,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.yield
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -42,6 +44,7 @@ import lan.fmnode.android.storage.MessageRow
 import lan.fmnode.android.storage.NetmailFolderEntity
 import lan.fmnode.android.storage.ProfileEntity
 import lan.fmnode.android.crypto.CryptoService
+import lan.fmnode.android.crypto.Encoding
 
 enum class AppScreen {
     Unlock, Networks, AddNetwork,
@@ -333,6 +336,9 @@ class AppViewModel(
 
     private var importedSeed: ByteArray? = null
     private var importJsonText: String? = null
+
+    /** Parsed full export waiting for the password, if the selected file was one. */
+    private var importFull: lan.fmnode.android.storage.ImportedFullBackup? = null
     private var networkSession: NetworkSession? = null
     private var flowsJob: Job? = null
     private var syncJob: Job? = null
@@ -483,8 +489,13 @@ class AppViewModel(
         try {
             val opened = manager.openSession(profile, password)
             networkSession = opened
-            opened.refreshEchoes()
+            // Local work first: the echo list is stored on the device, so the
+            // network must never keep the user off the app. A node that is down,
+            // slow or unhappy about the policy only fills syncError later.
             collectSessionFlows(opened)
+            _state.update { it.copy(screen = AppScreen.Echoes, syncing = true, syncError = null) }
+            runCatching { opened.refreshEchoes() }
+                .onFailure { e -> _state.update { it.copy(syncError = UiError.Failed(e.message ?: "Failed")) } }
             syncOnce(opened)
             startSyncLoop(opened)
             _state.update { it.copy(screen = AppScreen.Echoes) }
@@ -1612,7 +1623,7 @@ class AppViewModel(
         viewModelScope.launch {
             _state.update { it.copy(moderationSending = true, moderationError = null) }
             try {
-                val original = opened.database.messageDao().getById(target.messageId)
+                val original = opened.database.messageDao().getByEchoAndId(echo.name, target.messageId)
                 val originalJson = buildJsonObject {
                     put("message_id", target.messageId)
                     put("sender_address", target.senderAddress)
@@ -1933,7 +1944,7 @@ class AppViewModel(
         val opened = networkSession ?: return
         val messageId = _state.value.netmailMoveMessageId ?: return
         viewModelScope.launch {
-            opened.database.messageDao().setFolder(messageId, folderSlug)
+            opened.database.messageDao().setFolder(NetworkSession.NETMAIL_ECHO, messageId, folderSlug)
             _state.update { it.copy(netmailMoveMessageId = null) }
         }
     }
@@ -2021,25 +2032,99 @@ class AppViewModel(
 
     // ------------------------------------------------------------ keys import
 
-    /** Called with the text of a selected backup/export file. */
+    /**
+     * Called with the text of a selected backup/export file.
+     *
+     * Three formats are recognised: a full v2.0 export (keys + everything),
+     * an fm_settings export and a standalone keys export. A full export and a
+     * keys export are both identities, so both are accepted while adding a
+     * network — the password prompt decrypts the seed and the profile is
+     * adopted without a network round-trip.
+     */
     fun onImportFile(text: String?) {
-        if (text.isNullOrBlank()) return
+        if (text.isNullOrBlank()) {
+            _state.update {
+                it.copy(add = it.add.copy(importError = UiError.Failed("The selected file is empty")))
+            }
+            return
+        }
         val root = runCatching { messageJson.parseToJsonElement(text).jsonObject }.getOrNull()
-        when {
-            root?.get("version")?.jsonPrimitive?.contentOrNull == "2.0" -> {
-                importFullBackup(text)
-                return
-            }
-            root?.get("type")?.jsonPrimitive?.contentOrNull == "fm_settings" -> {
+        val type = root?.get("type")?.jsonPrimitive?.contentOrNull
+        val version = root?.get("version")?.jsonPrimitive?.contentOrNull
+
+        // Settings-only export: a merge into the active network, never an identity.
+        if (type == "fm_settings") {
+            if (networkSession == null || _state.value.activeProfile == null) {
+                _state.update {
+                    it.copy(add = it.add.copy(importError = UiError.Failed("Open a network to import settings")))
+                }
+            } else {
                 importSettingsBackup(text)
+            }
+            return
+        }
+
+        // Full export of a network, imported while that network is already open:
+        // merge its messages/settings into the active profile.
+        val full = if (version == "2.0") BackupService.parseFullBackup(text) else null
+        if (full != null && canMergeIntoActive(full)) {
+            mergeFullBackup(full)
+            return
+        }
+
+        // An identity (keys export, or a full export on a fresh install/other key).
+        if (full != null || root != null) {
+            if (!canImportIdentity()) {
+                // The vault is locked: the password is the way back in, the
+                // import would otherwise be dropped silently.
+                _state.update {
+                    it.copy(add = it.add.copy(importError = UiError.Failed("Unlock the app before importing keys")))
+                }
                 return
             }
+            importJsonText = text
+            importFull = full
+            // Never fill the field from the export: fm-app stores no node URL in
+            // its export, so a filled-in value would only hide a missing one.
+            _state.update {
+                it.copy(
+                    add = it.add.copy(
+                        awaitingImportPassword = true,
+                        importError = null,
+                        error = null,
+                    ),
+                    backupStatus = null,
+                    backupError = null,
+                )
+            }
+            return
         }
-        // A keys export keeps the existing add-network flow.
-        importJsonText = text
+
         _state.update {
-            it.copy(add = it.add.copy(awaitingImportPassword = true, importError = null))
+            it.copy(add = it.add.copy(importError = UiError.Failed("This file is not an FM export")))
         }
+    }
+
+    /** An identity can be adopted when the vault is open or does not exist yet. */
+    private fun canImportIdentity(): Boolean {
+        val current = _state.value
+        return session.isUnlocked || !manager.vaultExists() || current.profiles.isEmpty()
+    }
+
+    /**
+     * Endpoint of the network being imported: the field wins because it is also
+     * how the node key gets pinned; a full export provides one on its own, so a
+     * keys export is the only format that really needs the field.
+     */
+    private fun parsedInviteFor(full: lan.fmnode.android.storage.ImportedFullBackup?): Invite? =
+        InviteParser.parse(_state.value.add.url)
+            ?: full?.nodeUrl?.let { InviteParser.parse(it) }
+
+    /** Whether a full export belongs to the network that is currently open. */
+    private fun canMergeIntoActive(full: lan.fmnode.android.storage.ImportedFullBackup): Boolean {
+        val profile = _state.value.activeProfile ?: return false
+        if (networkSession == null) return false
+        return profile.publicKeyB64 == full.publicKeyB64
     }
 
     fun clearBackupMessage() = _state.update { it.copy(backupStatus = null, backupError = null) }
@@ -2074,45 +2159,193 @@ class AppViewModel(
         }
     }
 
-    private fun importFullBackup(text: String) {
+    private fun mergeFullBackup(full: lan.fmnode.android.storage.ImportedFullBackup) {
         val profile = _state.value.activeProfile ?: return
         val opened = networkSession ?: return
         viewModelScope.launch {
             try {
-                val result = BackupService.importFull(opened.database, profile, text)
+                val result = BackupService.importFull(opened.database, profile, full.payload)
                 _state.update {
                     it.copy(
-                        backupStatus = "Imported: ${result.messages} messages, ${result.blogs} blogs, ${result.posts} posts, ${result.folders} folders",
+                        backupStatus = result.warning ?: importSummary(result),
                         backupError = null,
                     )
                 }
+                syncOnce(opened)
             } catch (e: Exception) {
                 _state.update { it.copy(backupError = UiError.Failed(e.message ?: "Import failed"), backupStatus = null) }
             }
         }
     }
 
+    private fun importSummary(result: BackupService.Result): String =
+        "Imported: ${result.messages} messages, ${result.blogs} blogs, ${result.posts} posts, ${result.folders} folders"
+
     fun cancelImport() {
         importJsonText = null
+        importFull = null
         _state.update { it.copy(add = it.add.copy(awaitingImportPassword = false, importError = null)) }
     }
 
-    /** Decrypts the imported keys with the export password. */
+    /**
+     * Decrypts the imported keys with the export password and adopts the
+     * identity of the file as a network profile.
+     *
+     * The profile is built from the export itself (address, display name, node
+     * key, encrypted seed), so no invite URL and no node request is involved:
+     * the node already knows this key pair. When a full export is imported, its
+     * messages are merged right after the session opens.
+     */
     fun confirmImportPassword(password: String) {
-        val text = importJsonText ?: return
-        try {
-            val imported = KeystoreExportCodec.decode(text)
-            val seed = imported.encryptedSeed?.let { KeyVault.decrypt(it, password) }
-                ?: imported.plainSeed
-                ?: error("no private key in the file")
-            require(seed.size == 32) { "invalid key length" }
-            importedSeed = seed
-            importJsonText = null
+        val text = importJsonText
+        if (text == null) {
             _state.update {
-                it.copy(add = it.add.copy(awaitingImportPassword = false, imported = true, importError = null))
+                it.copy(add = it.add.copy(awaitingImportPassword = false, importError = UiError.Failed("No file selected")))
             }
-        } catch (_: Exception) {
-            _state.update { it.copy(add = it.add.copy(importError = UiError.WrongPassword)) }
+            return
+        }
+        if (password.isEmpty()) {
+            _state.update { it.copy(add = it.add.copy(importError = UiError.Failed("Enter the export password"))) }
+            return
+        }
+
+        val full = importFull
+        // The endpoint comes from the field first, then from the export itself
+        // (fm-app writes `appUrl` into a full export). Only a keys export has
+        // neither and needs the field filled in.
+        val invite = parsedInviteFor(full)
+        if (invite == null) {
+            _state.update {
+                it.copy(
+                    add = it.add.copy(
+                        importError = UiError.Failed(
+                            if (_state.value.add.url.isBlank()) {
+                                "Enter the network URL first (for example https://node.example)"
+                            } else {
+                                "Invalid network URL: ${_state.value.add.url}"
+                            },
+                        ),
+                    ),
+                )
+            }
+            return
+        }
+        viewModelScope.launch {
+            val keystore = try {
+                withContext(Dispatchers.Default) { KeystoreExportCodec.decode(text) }
+            } catch (e: Exception) {
+                _state.update {
+                    it.copy(add = it.add.copy(awaitingImportPassword = false, importError = UiError.Failed(e.message ?: "Invalid keys file")))
+                }
+                return@launch
+            }
+
+            val seed = try {
+                // PBKDF2-HMAC-SHA256 with 100k iterations: never on the main thread.
+                withContext(Dispatchers.Default) {
+                    keystore.encryptedSeed?.let { KeyVault.decrypt(it, password) } ?: keystore.plainSeed
+                }
+            } catch (e: Exception) {
+                // AES-GCM: a wrong password fails the tag check, so any failure
+                // here is a wrong password.
+                _state.update { it.copy(add = it.add.copy(importError = UiError.WrongPassword)) }
+                return@launch
+            }
+
+            if (seed == null) {
+                _state.update {
+                    it.copy(add = it.add.copy(awaitingImportPassword = false, importError = UiError.Failed("No private key in the file")))
+                }
+                return@launch
+            }
+            if (seed.size != 32) {
+                _state.update {
+                    it.copy(add = it.add.copy(awaitingImportPassword = false, importError = UiError.Failed("Invalid private key length")))
+                }
+                return@launch
+            }
+            if (!CryptoService.publicKeyFromSeed(seed).contentEquals(keystore.publicKey)) {
+                _state.update {
+                    it.copy(add = it.add.copy(awaitingImportPassword = false, importError = UiError.Failed("The private key does not match the public key")))
+                }
+                return@launch
+            }
+
+            // The password of the whole installation: reuse the one that
+            // already protects the vault, create it that way for a first network.
+            val appPassword = session.passwordOrNull()
+                ?: _state.value.add.password.takeIf { it.isNotEmpty() }
+                ?: password
+
+            _state.update {
+                it.copy(
+                    add = it.add.copy(awaitingImportPassword = false, isLoading = true, importError = null, imported = true),
+                    backupStatus = null,
+                    backupError = null,
+                )
+            }
+
+            try {
+                // The invite URL is the endpoint of the network: the node key from
+                // it pins the node, the same way the add-network flow does.
+                val profile = manager.adoptProfile(
+                    password = appPassword,
+                    seed = seed,
+                    address = full?.address ?: invite?.address ?: "",
+                    displayName = full?.displayName ?: _state.value.add.displayName,
+                    nodePublicKeyB64 = invite?.nodePublicKey?.let { Encoding.base64Encode(it) }
+                        ?: full?.nodePublicKeyB64,
+                    appUrl = invite?.appUrl ?: _state.value.add.url,
+                    apiUrl = invite?.apiUrl ?: _state.value.add.url,
+                    title = null,
+                )
+                session.setPassword(appPassword)
+                importedSeed = seed
+                importJsonText = null
+                importFull = null
+                _state.update { it.copy(add = AddNetworkState(), unlocked = true) }
+                openActiveSession()
+
+                // The profile is stored at this point: never drop the imported
+                // payload because the node was unreachable. openActiveSession()
+                // reports its own error and stays on the networks screen.
+                val opened = networkSession
+                if (full != null && opened != null && opened.profile.id == profile.id) {
+                    mergeImportedFull(full)
+                } else if (full != null) {
+                    _state.update {
+                        it.copy(
+                            backupError = UiError.Failed(
+                                "Network keys were saved, but the messages could not be imported. " +
+                                    "Reconnect and import the same file again.",
+                            ),
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                _state.update {
+                    it.copy(add = it.add.copy(isLoading = false, importError = UiError.Failed(e.message ?: "Import failed")))
+                }
+            }
+        }
+    }
+
+    /** Imports the payload of a full export into the profile just adopted. */
+    private suspend fun mergeImportedFull(full: lan.fmnode.android.storage.ImportedFullBackup) {
+        val opened = networkSession ?: return
+        try {
+            val result = BackupService.importFull(opened.database, opened.profile, full.payload)
+            _state.update {
+                it.copy(
+                    backupStatus = result.warning ?: importSummary(result),
+                    backupError = null,
+                )
+            }
+            syncOnce(opened)
+        } catch (e: Exception) {
+            _state.update {
+                it.copy(backupError = UiError.Failed(e.message ?: "Messages were not imported"), backupStatus = null)
+            }
         }
     }
 

@@ -140,6 +140,65 @@ class NetworkManager(
         return profile
     }
 
+    /**
+     * Adopts an existing identity (keys export / full backup) as a profile
+     * without contacting the network: the node address, the display name, the
+     * node key and the encrypted seed already come from the file. Creates the
+     * vault when this is the first network.
+     *
+     * A profile with the same public key is updated in place, so importing the
+     * same export twice never duplicates the network.
+     */
+    suspend fun adoptProfile(
+        password: String,
+        seed: ByteArray,
+        address: String,
+        displayName: String,
+        nodePublicKeyB64: String?,
+        appUrl: String,
+        apiUrl: String,
+        title: String? = null,
+    ): ProfileEntity {
+        require(seed.size == 32) { "Ed25519 seed must be 32 bytes" }
+        // A profile without a usable endpoint can never sync: fail here, where
+        // the message names the field, instead of inside OkHttp later.
+        require(InviteParser.parse(apiUrl) != null) {
+            "The network URL is required and must start with http:// or https://"
+        }
+        if (vault.appDatabaseOrNull() == null) {
+            dbFlow.value = withContext(Dispatchers.IO) { vault.openOrCreate(password) }
+        }
+        val publicKey = CryptoService.publicKeyFromSeed(seed)
+        val publicKeyB64 = Encoding.base64Encode(publicKey)
+        val encryptedSeed = KeyVault.encrypt(seed, password)
+
+        val existing = db().profileDao().getAll().firstOrNull { it.publicKeyB64 == publicKeyB64 }
+        val profile = ProfileEntity(
+            id = existing?.id ?: UUID.randomUUID().toString(),
+            title = title?.takeIf { it.isNotBlank() }
+                ?: existing?.title
+                ?: defaultTitleFor(appUrl, address),
+            appUrl = appUrl,
+            apiUrl = apiUrl,
+            nodePublicKeyB64 = nodePublicKeyB64 ?: existing?.nodePublicKeyB64.orEmpty(),
+            address = address.ifBlank { existing?.address.orEmpty() },
+            displayName = displayName.ifBlank { existing?.displayName.orEmpty() },
+            isAdmin = existing?.isAdmin ?: false,
+            isModerator = existing?.isModerator ?: false,
+            publicKeyB64 = publicKeyB64,
+            encryptedSeedB64 = Encoding.base64Encode(encryptedSeed.encrypted),
+            seedSaltB64 = Encoding.base64Encode(encryptedSeed.salt),
+            seedIvB64 = Encoding.base64Encode(encryptedSeed.iv),
+            seedIterations = encryptedSeed.iterations,
+            policyJson = existing?.policyJson ?: "{}",
+            createdAt = existing?.createdAt ?: System.currentTimeMillis(),
+            lastSyncAt = existing?.lastSyncAt,
+        )
+        db().profileDao().upsert(profile)
+        setActive(profile.id)
+        return profile
+    }
+
     /** Stores the last accepted policy payload of a profile (after re-signing). */
     suspend fun updateProfilePolicy(id: String, policyJson: String) {
         val profile = db().profileDao().getById(id) ?: return
@@ -177,14 +236,24 @@ class NetworkManager(
     suspend fun openSession(profile: ProfileEntity, password: String): NetworkSession {
         val seed = seedOf(profile, password)
         val api = apiFactory(profile.apiUrl)
-        api.setNodeEd25519PublicKey(Encoding.base64Decode(profile.nodePublicKeyB64))
+        // A profile adopted from a keys export may have no node key yet (the
+        // export need not carry one): the policy response pins it instead.
+        // The key must be a real 32-byte Ed25519 key, not merely decodable.
+        val nodeKey = runCatching { Encoding.base64Decode(profile.nodePublicKeyB64) }.getOrNull()
+        if (nodeKey != null && nodeKey.size == 32) api.setNodeEd25519PublicKey(nodeKey)
         api.responseDecryptionKey = CryptoService.x25519PrivateKeyFromSeed(seed)
         val profileDb = withContext(Dispatchers.IO) { vault.profileDatabase(profile.id) }
         return NetworkSession(profile, profileDb, api, seed)
     }
 
-    private fun defaultTitle(invite: Invite, address: String): String {
-        val host = runCatching { java.net.URI(invite.appUrl).host }.getOrNull() ?: invite.appUrl
+    private fun defaultTitle(invite: Invite, address: String): String =
+        defaultTitleFor(invite.appUrl, address)
+
+    /** Network title from the node endpoint host and the address. */
+    private fun defaultTitleFor(appUrl: String, address: String): String {
+        val host = appUrl.takeIf { it.isNotBlank() }
+            ?.let { runCatching { java.net.URI(it).host }.getOrNull() ?: it }
+            ?: "Network"
         return if (address.isNotBlank()) "$host ($address)" else host
     }
 

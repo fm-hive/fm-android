@@ -701,6 +701,7 @@ fun AddNetworkScreen(
     if (state.awaitingImportPassword) {
         ImportPasswordDialog(
             error = state.importError,
+            busy = state.isLoading,
             onConfirm = onImportPassword,
             onDismiss = onCancelImport,
         )
@@ -815,6 +816,14 @@ fun AddNetworkScreen(
             state.error?.let {
                 Spacer(Modifier.height(12.dp))
                 Text(errorText(it), color = MaterialTheme.colorScheme.error)
+            }
+            // Import failures surface here too: a dialog-only message was
+            // invisible once the password dialog closed.
+            if (!state.awaitingImportPassword) {
+                state.importError?.let {
+                    Spacer(Modifier.height(12.dp))
+                    Text(errorText(it), color = MaterialTheme.colorScheme.error)
+                }
             }
         }
     }
@@ -1229,23 +1238,33 @@ fun EchoComposeScreen(
 @Composable
 private fun ImportPasswordDialog(
     error: UiError?,
+    busy: Boolean,
     onConfirm: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
     var password by remember { mutableStateOf("") }
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { if (!busy) onDismiss() },
         title = { Text(stringResource(R.string.import_password_title)) },
         text = {
             Column {
                 OutlinedTextField(
                     value = password,
                     onValueChange = { password = it },
+                    enabled = !busy,
                     label = { Text(stringResource(R.string.password)) },
                     singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                 )
+                if (busy) {
+                    Spacer(Modifier.height(12.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(modifier = Modifier.width(20.dp).height(20.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(stringResource(R.string.import_in_progress))
+                    }
+                }
                 if (error != null) {
                     Spacer(Modifier.height(8.dp))
                     Text(errorText(error), color = MaterialTheme.colorScheme.error)
@@ -1253,10 +1272,14 @@ private fun ImportPasswordDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = { onConfirm(password) }) { Text(stringResource(R.string.ok)) }
+            TextButton(onClick = { onConfirm(password) }, enabled = !busy) {
+                Text(stringResource(R.string.ok))
+            }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
+            TextButton(onClick = onDismiss, enabled = !busy) {
+                Text(stringResource(R.string.cancel))
+            }
         },
     )
 }
