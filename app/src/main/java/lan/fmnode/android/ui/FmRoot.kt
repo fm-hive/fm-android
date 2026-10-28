@@ -1,5 +1,6 @@
 package lan.fmnode.android.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -219,7 +220,35 @@ fun FmRoot(
     onToggleSelection: () -> Unit = {},
     onToggleMessageSelection: (String) -> Unit = {},
     onForwardSelected: () -> Unit = {},
+    onOpenMessage: (MessageUi) -> Unit = {},
+    onBackFromMessage: () -> Unit = {},
+    onChangeMessageView: (EchoMessageView) -> Unit = {},
+    onBackToRoot: () -> Unit = {},
 ) {
+    // System back walks the in-app screen history instead of closing the app (#8).
+    BackHandler {
+        if (state.logoutDialog) return@BackHandler
+        when (state.screen) {
+            AppScreen.Unlock, AppScreen.Networks -> onBackToRoot()
+            AppScreen.AddNetwork -> onCloseAddNetwork()
+            AppScreen.Echoes -> onBackToRoot()
+            AppScreen.Echo -> onBackFromEcho()
+            AppScreen.Compose -> onBackFromCompose()
+            AppScreen.MessageDetail -> onBackFromMessage()
+            AppScreen.Blog -> onBackFromBlog()
+            AppScreen.BlogCompose -> onBackFromBlogCompose()
+            AppScreen.Netmail -> onBackToRoot()
+            AppScreen.NetmailDetail -> onBackFromNetmailDetail()
+            AppScreen.NetmailCompose -> onBackFromNetmailCompose()
+            AppScreen.Search -> onCloseSearch()
+            AppScreen.Protocols -> onCloseProtocols()
+            AppScreen.QrScanner -> onCloseScanner()
+            AppScreen.Admin -> onCloseAdmin()
+            AppScreen.EchoBrowser -> onCloseEchoBrowser()
+            AppScreen.Outbox -> onCloseOutbox()
+            AppScreen.Settings -> onSelectEchoTab()
+        }
+    }
     if (state.logoutDialog) {
         AlertDialog(
             onDismissRequest = onCancelLogout,
@@ -379,6 +408,17 @@ fun FmRoot(
             onReact = onReactMessage,
             onModerate = onOpenModeration,
             onForward = onForwardMessage,
+            messageView = state.messageView,
+            onChangeMessageView = onChangeMessageView,
+            onOpenMessage = onOpenMessage,
+        )
+        AppScreen.MessageDetail -> MessageDetailScreen(
+            message = state.selectedMessage,
+            onBack = onBackFromMessage,
+            onReact = onReactMessage,
+            onForward = onForwardMessage,
+            onModerate = onOpenModeration,
+            canModerate = state.activeProfile?.let { it.isAdmin || it.isModerator } == true,
         )
         AppScreen.Blog -> state.selectedBlog?.let { blog ->
             BlogScreen(
@@ -990,8 +1030,19 @@ fun EchoConversationScreen(
     onReact: (MessageUi, String) -> Unit,
     onModerate: (MessageUi) -> Unit,
     onForward: (MessageUi) -> Unit,
+    messageView: EchoMessageView = EchoMessageView.All,
+    onChangeMessageView: (EchoMessageView) -> Unit = {},
+    onOpenMessage: (MessageUi) -> Unit = {},
 ) {
     var versionsMessage by remember { mutableStateOf<MessageUi?>(null) }
+    // Attachment-only uploads are listed separately as one entry per file bundle (#9).
+    val visibleMessages = remember(messages, messageView) {
+        if (messageView == EchoMessageView.Attachments) {
+            messages.filter { it.attachments.isNotEmpty() }
+        } else {
+            messages
+        }
+    }
     if (versionsMessage != null) {
         MessageVersionsDialog(message = versionsMessage!!, onDismiss = { versionsMessage = null })
     }
@@ -1009,6 +1060,7 @@ fun EchoConversationScreen(
                         CircularProgressIndicator(modifier = Modifier.width(20.dp).height(20.dp))
                         Spacer(Modifier.width(8.dp))
                     }
+                    MessageViewToggle(view = messageView, onChange = onChangeMessageView)
                     IconButton(onClick = onToggleSelection) {
                         Icon(Icons.Default.Checklist, contentDescription = stringResource(R.string.select_messages))
                     }
@@ -1032,13 +1084,19 @@ fun EchoConversationScreen(
             }
         },
     ) { padding ->
-        if (messages.isEmpty()) {
+        if (visibleMessages.isEmpty()) {
             Box(
                 modifier = Modifier.fillMaxSize().padding(padding).padding(24.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    text = stringResource(R.string.no_messages),
+                    text = stringResource(
+                        if (messageView == EchoMessageView.Attachments) {
+                            R.string.attachments_empty
+                        } else {
+                            R.string.no_messages
+                        },
+                    ),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
@@ -1054,7 +1112,7 @@ fun EchoConversationScreen(
             ),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            items(messages, key = { it.messageId }) { message ->
+            items(visibleMessages, key = { it.messageId }) { message ->
                 MessageCard(
                     message = message,
                     canModerate = canModerate,
@@ -1065,6 +1123,7 @@ fun EchoConversationScreen(
                     onModerate = onModerate,
                     onForward = onForward,
                     onVersions = { versionsMessage = it },
+                    onOpen = { onOpenMessage(message) },
                 )
             }
         }
@@ -1082,8 +1141,9 @@ private fun MessageCard(
     onModerate: (MessageUi) -> Unit,
     onForward: (MessageUi) -> Unit,
     onVersions: (MessageUi) -> Unit,
+    onOpen: (MessageUi) -> Unit = {},
 ) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    Card(modifier = Modifier.fillMaxWidth().clickable { onOpen(message) }) {
         Column(Modifier.fillMaxWidth().padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (selectionMode) {
@@ -1285,6 +1345,118 @@ private fun ImportPasswordDialog(
 }
 
 // -------------------------------------------------------------------- helpers
+
+/** All / attachments-only switch of the conversation toolbar (#9). */
+@Composable
+private fun MessageViewToggle(view: EchoMessageView, onChange: (EchoMessageView) -> Unit) {
+    IconButton(
+        onClick = {
+            onChange(
+                if (view == EchoMessageView.All) EchoMessageView.Attachments else EchoMessageView.All,
+            )
+        },
+    ) {
+        Icon(
+            imageVector = if (view == EchoMessageView.All) Icons.Default.AttachFile else Icons.Default.Checklist,
+            contentDescription = stringResource(
+                if (view == EchoMessageView.All) R.string.attachments_only else R.string.show_all_messages,
+            ),
+        )
+    }
+}
+
+/** Full-screen view of one message with attachments at full size (#9). */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun MessageDetailScreen(
+    message: MessageUi?,
+    onBack: () -> Unit,
+    onReact: (MessageUi, String) -> Unit,
+    onForward: (MessageUi) -> Unit,
+    onModerate: (MessageUi) -> Unit,
+    canModerate: Boolean,
+) {
+    Scaffold(
+        topBar = {
+            CenterAlignedTopAppBar(
+                title = { Text(stringResource(R.string.message_title), maxLines = 1) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
+                    }
+                },
+                actions = {
+                    if (message != null) {
+                        IconButton(onClick = { onForward(message) }) {
+                            Icon(Icons.Default.Forward, contentDescription = stringResource(R.string.forward))
+                        }
+                        if (canModerate && !message.own) {
+                            IconButton(onClick = { onModerate(message) }) {
+                                Icon(Icons.Default.Gavel, contentDescription = stringResource(R.string.moderate))
+                            }
+                        }
+                    }
+                },
+            )
+        },
+    ) { padding ->
+        if (message == null) return@Scaffold
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .verticalScroll(rememberScrollState())
+                .padding(16.dp),
+        ) {
+            if (message.subject.isNotBlank()) {
+                Text(
+                    text = message.subject,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Spacer(Modifier.height(8.dp))
+            }
+            Text(
+                text = "${message.senderName} (${message.senderAddress})",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = formatTimestamp(message.timestamp),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (message.body.isNotBlank()) {
+                Spacer(Modifier.height(12.dp))
+                Text(MarkdownRenderer.render(message.body), style = MaterialTheme.typography.bodyMedium)
+            }
+            if (message.attachments.isNotEmpty()) {
+                Spacer(Modifier.height(12.dp))
+                message.attachments.forEach { attachment ->
+                    AttachmentViewer(attachment)
+                    Spacer(Modifier.height(12.dp))
+                }
+            }
+            val quick = listOf("👍", "❤️", "😂")
+            Spacer(Modifier.height(4.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                quick.forEach { emoji ->
+                    val count = message.reactions[emoji] ?: 0
+                    TextButton(onClick = { onReact(message, emoji) }) {
+                        Text(
+                            text = if (count > 0) "$emoji $count" else emoji,
+                            color = if (message.myReaction == emoji) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
 
 @Composable
 internal fun errorText(error: UiError): String = when (error) {

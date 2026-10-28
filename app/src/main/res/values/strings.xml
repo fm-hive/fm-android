@@ -66,6 +66,11 @@
     <string name="close">Close</string>
     <string name="emoji_title">Emoji</string>
     <string name="attach_file">Attach file</string>
+    <string name="attachments_only">Attachments only</string>
+    <string name="show_all_messages">Show all messages</string>
+    <string name="attachments_empty">No attachments in this echo</string>
+    <string name="message_title">Message</string>
+    <string name="image_title">Image</string>
     <string name="admin_title">Admin</string>
     <string name="merge_title">Merge with another network</string>
     <string name="merge_peer_invite">Peer invite URL</string>

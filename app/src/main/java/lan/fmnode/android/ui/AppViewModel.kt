@@ -19,6 +19,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.yield
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -48,7 +49,7 @@ import lan.fmnode.android.crypto.Encoding
 
 enum class AppScreen {
     Unlock, Networks, AddNetwork,
-    Echoes, Echo, Compose,
+    Echoes, Echo, Compose, MessageDetail,
     Blog, BlogCompose,
     Netmail, NetmailDetail, NetmailCompose,
     Search, Protocols,
@@ -57,6 +58,12 @@ enum class AppScreen {
     EchoBrowser,
     Outbox,
     Settings,
+}
+
+/** How the conversation list is drawn: every message or one card per file bundle (#9). */
+enum class EchoMessageView {
+    All,
+    Attachments,
 }
 
 const val NETMAIL_INBOX = "inbox"
@@ -249,6 +256,8 @@ data class UiState(
     val selectedNetmail: MessageUi? = null,
     val netmailCompose: NetmailComposeState = NetmailComposeState(),
     val protocols: List<ProtocolUi> = emptyList(),
+    val messageView: EchoMessageView = EchoMessageView.All,
+    val selectedMessage: MessageUi? = null,
     val searchQuery: String = "",
     val searchResults: List<SearchResultUi> = emptyList(),
     val searchLoading: Boolean = false,
@@ -732,10 +741,19 @@ class AppViewModel(
 
     fun openNetworks() {
         closeSession()
-        _state.update { it.copy(screen = AppScreen.Networks, selectedEcho = null, messages = emptyList()) }
+        _state.update {
+            it.copy(
+                screen = AppScreen.Networks,
+                selectedEcho = null,
+                selectedMessage = null,
+                messages = emptyList(),
+            )
+        }
     }
 
     fun backFromNetworks() {
+        // Move through the screen history first (#8): with an open session the
+        // network list is not a root screen.
         if (networkSession != null) {
             _state.update { it.copy(screen = AppScreen.Echoes) }
             return
@@ -795,12 +813,43 @@ class AppViewModel(
             val opened = networkSession ?: return@launch
             val echo = _state.value.echoes.firstOrNull { it.name == name } ?: return@launch
             runCatching { opened.markRead(name, System.currentTimeMillis() / 1000) }
-            _state.update { it.copy(screen = AppScreen.Echo, selectedEcho = echo, selectedBlog = null) }
+            _state.update {
+                it.copy(
+                    screen = AppScreen.Echo,
+                    selectedEcho = echo,
+                    selectedBlog = null,
+                    selectedMessage = null,
+                    messageView = EchoMessageView.All,
+                )
+            }
         }
     }
 
     fun backFromEcho() {
-        _state.update { it.copy(screen = AppScreen.Echoes, selectedEcho = null, selectedBlog = null, messages = emptyList()) }
+        _state.update {
+            it.copy(
+                screen = AppScreen.Echoes,
+                selectedEcho = null,
+                selectedBlog = null,
+                selectedMessage = null,
+                messageView = EchoMessageView.All,
+                messages = emptyList(),
+            )
+        }
+    }
+
+    /** Switches the conversation list between all messages and file bundles (#9). */
+    fun setMessageView(view: EchoMessageView) = _state.update { it.copy(messageView = view) }
+
+    /** Dedicated read-only screen for one message, including full-size attachments (#9). */
+    fun openMessage(message: MessageUi) =
+        _state.update { it.copy(screen = AppScreen.MessageDetail, selectedMessage = message) }
+
+    fun backFromMessage() = _state.update {
+        it.copy(
+            screen = if (it.selectedEcho != null) AppScreen.Echo else AppScreen.Echoes,
+            selectedMessage = null,
+        )
     }
 
     fun backFromBlog() {
@@ -2384,6 +2433,9 @@ class AppViewModel(
                 }
                 continue
             }
+            // Attachment-only uploads without a body/echo context are not
+            // conversation messages: they are rendered as file bundles (#9).
+            if (row.isAttachmentOnly()) continue
             messageRows += row
         }
         val protocolTypes = setOf(
@@ -2442,12 +2494,22 @@ class AppViewModel(
         )
     }
 
+    /**
+     * Uploads that carry files and nothing else (the shape fm-node uses for
+     * "just files, no letter") are shown as their own entry instead of an empty card.
+     */
+    private fun MessageRow.isAttachmentOnly(): Boolean {
+        val data = runCatching {
+            messageJson.parseToJsonElement(dataJson).jsonObject
+        }.getOrNull() ?: return false
+        return MessageMapping.isAttachmentOnly(data)
+    }
+
     private fun MessageRow.toUi(me: String, myName: String): MessageUi {
         val data = runCatching {
             messageJson.parseToJsonElement(dataJson).jsonObject
         }.getOrNull()
         val subject = (data?.get("subject") as? JsonPrimitive)?.contentOrNull.orEmpty()
-        val body = (data?.get("body") as? JsonPrimitive)?.contentOrNull.orEmpty()
         val own = senderAddress == me
         val name = when {
             own && myName.isNotBlank() -> myName
@@ -2465,6 +2527,8 @@ class AppViewModel(
                 )
             }
             ?: emptyList()
+        // A file bundle without a letter still gets a readable title (#9).
+        val body = MessageMapping.renderBody(data)
         val versions = versionsJson?.let { raw ->
             runCatching {
                 (messageJson.parseToJsonElement(raw) as kotlinx.serialization.json.JsonArray).mapNotNull { element ->
