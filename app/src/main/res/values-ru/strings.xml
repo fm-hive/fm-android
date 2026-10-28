@@ -66,6 +66,11 @@
     <string name="close">Закрыть</string>
     <string name="emoji_title">Эмодзи</string>
     <string name="attach_file">Прикрепить файл</string>
+    <string name="attachments_only">Только аттачи</string>
+    <string name="show_all_messages">Показать все сообщения</string>
+    <string name="attachments_empty">В этой эхе нет аттачей</string>
+    <string name="message_title">Сообщение</string>
+    <string name="image_title">Изображение</string>
     <string name="admin_title">Админка</string>
     <string name="merge_title">Слияние с другой сетью</string>
     <string name="merge_peer_invite">Ссылка-приглашение пира</string>

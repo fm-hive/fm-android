@@ -229,6 +229,10 @@ class MainActivity : ComponentActivity() {
                     },
                     onImportBackup = { importLauncher.launch(arrayOf("application/json", "text/plain")) },
                     onClearBackup = viewModel::clearBackupMessage,
+                    onOpenMessage = viewModel::openMessage,
+                    onBackFromMessage = viewModel::backFromMessage,
+                    onChangeMessageView = viewModel::setMessageView,
+                    onBackToRoot = { finish() },
                 )
             }
         }

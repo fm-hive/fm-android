@@ -4,6 +4,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -40,20 +41,26 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.material3.IconButton
+import androidx.compose.ui.window.Dialog
+import java.util.Locale
 import lan.fmnode.android.R
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -295,10 +302,17 @@ fun EmojiPickerDialog(onPick: (String) -> Unit, onDismiss: () -> Unit) {
     )
 }
 
-/** Renders message attachments: image thumbnails or file chips. */
+/**
+ * Renders message attachments: image thumbnails (tap to open full size) or file chips (tap to preview).
+ * Files that cannot be rendered inline stay honest chips instead of silently doing nothing.
+ */
 @Composable
 fun AttachmentsRow(attachments: List<AttachmentUi>, modifier: Modifier = Modifier) {
     if (attachments.isEmpty()) return
+    var viewer by remember { mutableStateOf<AttachmentUi?>(null) }
+    viewer?.let { opened ->
+        AttachmentViewerDialog(attachment = opened, onDismiss = { viewer = null })
+    }
     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = modifier) {
         items(attachments) { attachment ->
             val bitmap = remember(attachment.dataUrl) { decodeDataUrl(attachment.dataUrl) }
@@ -306,14 +320,91 @@ fun AttachmentsRow(attachments: List<AttachmentUi>, modifier: Modifier = Modifie
                 Image(
                     bitmap = bitmap,
                     contentDescription = attachment.name,
-                    modifier = Modifier.size(72.dp),
+                    modifier = Modifier
+                        .size(72.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .clickable { viewer = attachment },
                     contentScale = ContentScale.Crop,
                 )
             } else {
-                AssistChip(onClick = {}, label = { Text(attachment.name) })
+                AssistChip(
+                    onClick = { viewer = attachment },
+                    label = { Text(attachment.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                )
             }
         }
     }
+}
+
+/** Full-size attachment rendered inside a message screen (#9). */
+@Composable
+fun AttachmentViewer(attachment: AttachmentUi, modifier: Modifier = Modifier) {
+    val bitmap = remember(attachment.dataUrl) { decodeDataUrl(attachment.dataUrl) }
+    Column(modifier = modifier.fillMaxWidth()) {
+        if (bitmap != null) {
+            Image(
+                bitmap = bitmap,
+                contentDescription = attachment.name,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 420.dp)
+                    .clip(RoundedCornerShape(8.dp)),
+                contentScale = ContentScale.Fit,
+            )
+        } else {
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(12.dp)) {
+                    Text(
+                        text = attachment.name.ifBlank { stringResource(R.string.attach_file) },
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        text = if (attachment.size > 0) {
+                            "${attachment.type.ifBlank { "file" }} · ${formatFileSize(attachment.size)}"
+                        } else {
+                            attachment.type.ifBlank { "file" }
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+        Text(
+            text = if (attachment.size > 0) {
+                "${attachment.name} · ${formatFileSize(attachment.size)}"
+            } else {
+                attachment.name
+            },
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/** Full-screen preview used by every attachment thumbnail (#9). */
+@Composable
+fun AttachmentViewerDialog(attachment: AttachmentUi, onDismiss: () -> Unit) {
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(shape = RoundedCornerShape(12.dp), tonalElevation = 6.dp) {
+            Column(Modifier.padding(12.dp)) {
+                AttachmentViewer(attachment)
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+                    TextButton(onClick = onDismiss) { Text(stringResource(R.string.close)) }
+                }
+            }
+        }
+    }
+}
+
+internal fun formatFileSize(bytes: Int): String = when {
+    bytes >= 1024 * 1024 -> String.format(Locale.getDefault(), "%.1f MiB", bytes / 1024f / 1024f)
+    bytes >= 1024 -> "${bytes / 1024} KiB"
+    else -> "$bytes B"
 }
 
 /** Composer attachments with a remove button. */
