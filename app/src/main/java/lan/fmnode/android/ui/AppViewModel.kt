@@ -99,6 +99,7 @@ data class EchoUi(
     val subscribed: Boolean = true,
     val isBlog: Boolean = false,
     val blogId: String? = null,
+    val serverId: Int? = null,
 )
 
 data class BlogUi(
@@ -547,13 +548,16 @@ class AppViewModel(
                             name = echo.name,
                             description = echo.description,
                             unread = counts[echo.name] ?: 0,
+                            serverId = echo.serverId,
                         )
                     }
                     rows to blogRows
                 }.catch { }.collect { (list, blogRows) ->
                     _state.update { s ->
                         val selected = s.selectedEcho?.let { current ->
-                            list.firstOrNull { it.name == current.name }
+                            list.firstOrNull {
+                                current.serverId != null && it.serverId == current.serverId
+                            } ?: list.firstOrNull { it.name == current.name }
                         }
                         s.copy(echoes = list, blogs = blogRows, selectedEcho = selected)
                     }
@@ -580,6 +584,7 @@ class AppViewModel(
                             description = echo.description,
                             unread = counts[echo.name] ?: 0,
                             subscribed = echo.subscribed,
+                            serverId = echo.serverId,
                         )
                     }
                 }.catch { }.collect { list -> _state.update { it.copy(allEchoes = list) } }

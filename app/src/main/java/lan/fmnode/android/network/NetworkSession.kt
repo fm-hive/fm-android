@@ -1,5 +1,6 @@
 package lan.fmnode.android.network
 
+import androidx.room.withTransaction
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -55,21 +56,44 @@ class NetworkSession(
         val response = api.post("echoes", null, auth)
         val array = response as? JsonArray
             ?: throw FmApiException(0, "invalid echoes response")
-        val existing = database.echoDao().getAll().associateBy { it.name }
+        val existing = database.echoDao().getAll()
+        val existingByName = existing.associateBy { it.name }
+        val existingByServerId = existing.mapNotNull { echo ->
+            echo.serverId?.let { it to echo }
+        }.toMap()
+        val renames = mutableListOf<Pair<EchoEntity, String>>()
+
         val echoes = array.mapNotNull { element ->
             val obj = element as? JsonObject ?: return@mapNotNull null
             val name = obj.string("name") ?: return@mapNotNull null
+            val serverId = (obj["id"] as? JsonPrimitive)?.intOrNull
+            val old = serverId?.let { existingByServerId[it] } ?: existingByName[name]
+            if (old != null && old.name != name) renames += old to name
             EchoEntity(
                 name = name,
-                serverId = (obj["id"] as? JsonPrimitive)?.intOrNull,
+                serverId = serverId,
                 description = obj.string("description").orEmpty(),
                 rulesJson = obj["rules"]?.let { rules ->
                     if (rules is JsonPrimitive) rules.content else rules.toString()
                 }.orEmpty(),
                 subscribed = obj.boolean("subscribed"),
                 isLocal = obj.boolean("is_local"),
-                lastReadTimestamp = existing[name]?.lastReadTimestamp ?: 0L,
+                lastReadTimestamp = old?.lastReadTimestamp ?: 0L,
             )
+        }
+
+        if (renames.isNotEmpty()) {
+            // A conference rename is identified by its stable server id. Move
+            // all local child rows before replacing the echo row so history,
+            // drafts and queued posts stay attached to the new name.
+            database.withTransaction {
+                for ((old, newName) in renames) {
+                    database.messageDao().renameEcho(old.name, newName)
+                    database.draftDao().renameEcho(old.name, newName)
+                    database.outboxDao().renameEcho(old.name, newName)
+                    database.echoDao().delete(old.name)
+                }
+            }
         }
         database.echoDao().upsertAll(echoes)
         return echoes
@@ -128,8 +152,10 @@ class NetworkSession(
         var received = 0
         val errors = mutableListOf<String>()
         val incoming = mutableListOf<JsonObject>()
+        var echoRefreshNeeded = false
         for (element in obj["messages"] as? JsonArray ?: JsonArray(emptyList())) {
             val message = element as? JsonObject ?: continue
+            if (message.string("type") == "change_rules") echoRefreshNeeded = true
             when (val result = processIncoming(message)) {
                 is Incoming.Stored -> {
                     received++
@@ -138,6 +164,11 @@ class NetworkSession(
                 is Incoming.Error -> errors += result.text
                 else -> {}
             }
+        }
+        // A successful change_rules result may have renamed a conference.
+        // Refreshing the echo list lets refreshEchoes migrate local rows by id.
+        if (echoRefreshNeeded) {
+            runCatching { refreshEchoes() }
         }
         val acknowledged = storeDeliveredIds(obj["local_packet_ids"] as? JsonArray)
         clientSyncEnabled = (obj["client_synchronize"] as? JsonPrimitive)?.content == "true"

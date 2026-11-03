@@ -18,6 +18,9 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import lan.fmnode.android.crypto.CryptoService
 import lan.fmnode.android.crypto.Encoding
+import lan.fmnode.android.storage.DraftEntity
+import lan.fmnode.android.storage.MessageEntity
+import lan.fmnode.android.storage.OutboxEntity
 import lan.fmnode.android.storage.ProfileDatabase
 import lan.fmnode.android.storage.ProfileEntity
 import lan.fmnode.android.storage.PubkeyEntity
@@ -238,6 +241,86 @@ class NetworkSessionTest {
         assertEquals(777, general.lastReadTimestamp)
         assertTrue(general.subscribed)
         assertEquals(false, runBlocking { db.echoDao().getByName("Tech") }!!.subscribed)
+    }
+
+    @Test
+    fun `refreshEchoes migrates local data when a conference is renamed`() = runBlocking {
+        echoList = buildJsonArray {
+            add(buildJsonObject { put("id", 1); put("name", "Old conference"); put("subscribed", true) })
+        }
+        session.refreshEchoes()
+        db.echoDao().setLastRead("Old conference", 777)
+        db.messageDao().upsert(
+            MessageEntity(
+                messageId = "m1",
+                echoName = "Old conference",
+                type = "echomail",
+                senderAddress = ":0:2",
+                recipientAddress = null,
+                timestamp = 100,
+                dataJson = """{"subject":"Hello"}""",
+                jws = null,
+                jwe = null,
+                receivedAt = 0,
+            ),
+        )
+        db.draftDao().upsert(DraftEntity("Old conference", "Subj", "Body", 1))
+        db.outboxDao().insert(
+            OutboxEntity(
+                type = "echomail",
+                echoName = "Old conference",
+                recipientAddress = null,
+                dataJson = "{}",
+                createdAt = 1,
+                attempts = 0,
+                lastError = null,
+            ),
+        )
+
+        echoList = buildJsonArray {
+            add(buildJsonObject { put("id", 1); put("name", "New conference"); put("subscribed", true) })
+        }
+        session.refreshEchoes()
+
+        assertNull(db.echoDao().getByName("Old conference"))
+        val renamed = db.echoDao().getByName("New conference")!!
+        assertEquals(777, renamed.lastReadTimestamp)
+        assertNotNull(db.messageDao().getByEchoAndId("New conference", "m1"))
+        assertNull(db.messageDao().getByEchoAndId("Old conference", "m1"))
+        assertNotNull(db.draftDao().get("New conference"))
+        assertNull(db.draftDao().get("Old conference"))
+        assertEquals("New conference", db.outboxDao().getAll().single().echoName)
+    }
+
+    @Test
+    fun `sync refreshes echoes after a change_rules message`() = runBlocking {
+        echoList = buildJsonArray {
+            add(buildJsonObject { put("id", 1); put("name", "Old conference"); put("subscribed", true) })
+        }
+        session.refreshEchoes()
+        echoList = buildJsonArray {
+            add(buildJsonObject { put("id", 1); put("name", "New conference"); put("subscribed", true) })
+        }
+        sendReceiveResponse = buildJsonObject {
+            put("messages", buildJsonArray {
+                add(
+                    buildJsonObject {
+                        put("type", "change_rules")
+                        put("message_id", "cr1")
+                        put("sender_address", ":0:1")
+                        put("timestamp", 1000)
+                        put("echo_name", "Old conference")
+                        put("data", data("type" to "result", "result" to "success"))
+                    },
+                )
+            })
+            put("local_packet_ids", buildJsonArray {})
+        }
+
+        session.sync()
+
+        assertNull(db.echoDao().getByName("Old conference"))
+        assertNotNull(db.echoDao().getByName("New conference"))
     }
 
     @Test
