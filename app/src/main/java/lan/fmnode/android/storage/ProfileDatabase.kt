@@ -177,6 +177,9 @@ interface EchoDao {
 
     @Query("UPDATE echoes SET lastReadTimestamp = :timestamp WHERE name = :name")
     suspend fun setLastRead(name: String, timestamp: Long)
+
+    @Query("DELETE FROM echoes WHERE name = :name")
+    suspend fun delete(name: String)
 }
 
 @Dao
@@ -289,6 +292,10 @@ interface MessageDao {
     @Query("DELETE FROM messages WHERE echoName = :echo AND messageId = :messageId")
     suspend fun delete(echo: String, messageId: String)
 
+    /** Moves locally stored messages when the node renames a conference. */
+    @Query("UPDATE messages SET echoName = :newName WHERE echoName = :oldName")
+    suspend fun renameEcho(oldName: String, newName: String)
+
     @Query("DELETE FROM messages WHERE folderSlug = :folderSlug")
     suspend fun deleteByFolder(folderSlug: String)
 }
@@ -318,6 +325,9 @@ interface OutboxDao {
 
     @Query("UPDATE outbox SET attempts = :attempts, lastError = :error WHERE id = :id")
     suspend fun updateAttempt(id: Long, attempts: Int, error: String?)
+
+    @Query("UPDATE outbox SET echoName = :newName WHERE echoName = :oldName")
+    suspend fun renameEcho(oldName: String, newName: String)
 }
 
 @Dao
@@ -342,6 +352,9 @@ interface DraftDao {
 
     @Query("DELETE FROM drafts WHERE echoName = :echoName")
     suspend fun delete(echoName: String)
+
+    @Query("UPDATE drafts SET echoName = :newName WHERE echoName = :oldName")
+    suspend fun renameEcho(oldName: String, newName: String)
 }
 
 @Dao
