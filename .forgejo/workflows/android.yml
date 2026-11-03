@@ -1,15 +1,9 @@
 name: android-ci
 
+# Temporarily manual-only: the `mag` runner has no Java/Android SDK, so
+# automatic PR/push runs fail. Re-enable the triggers below when a suitable
+# runner is available.
 on:
-  push:
-    branches:
-      - main
-    tags:
-      - 'v*'
-  pull_request:
-    branches:
-      - main
-    types: [opened, synchronize, reopened]
   workflow_dispatch:
 
 jobs:
