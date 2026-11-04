@@ -947,7 +947,9 @@ class AppViewModel(
         val current = _state.value
         val echo = current.selectedEcho ?: return
         val opened = networkSession ?: return
-        if (current.compose.body.isBlank()) {
+        // A file bundle without any text is a valid message (#9): the composer
+        // only rejects sends that would produce an empty card.
+        if (!MessageMapping.canSend(current.compose.body, current.compose.attachments.size)) {
             _state.update { it.copy(compose = it.compose.copy(error = UiError.Failed("Message is empty"))) }
             return
         }
@@ -972,7 +974,7 @@ class AppViewModel(
                 }
                 opened.postEcho(
                     echo.name,
-                    current.compose.subject.trim(),
+                    MessageMapping.subjectFor(current.compose.subject, current.compose.attachments.map { it.name }),
                     current.compose.body.trim(),
                     attachments = attachments,
                 )

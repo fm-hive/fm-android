@@ -14,6 +14,23 @@ import kotlinx.serialization.json.contentOrNull
 internal object MessageMapping {
     private const val PAPERCLIP = "\uD83D\uDCCE"
 
+    /**
+     * A message is sendable when it has text or at least one file: a bundle of
+     * files without a letter is a valid message (#9).
+     */
+    fun canSend(body: String, attachmentCount: Int): Boolean =
+        body.isNotBlank() || attachmentCount > 0
+
+    /**
+     * Echo mail the node accepts must carry a subject: for a file bundle without
+     * a typed subject the file names become the subject (#9).
+     */
+    fun subjectFor(subject: String, attachmentNames: List<String>): String {
+        val trimmed = subject.trim()
+        if (trimmed.isNotEmpty()) return trimmed
+        return if (attachmentNames.isEmpty()) "" else attachmentTitle(attachmentNames)
+    }
+
     /** True when a message consists of files and nothing else. */
     fun isAttachmentOnly(data: JsonObject?): Boolean {
         val attachments = data?.get("attachments") as? JsonArray ?: return false
@@ -27,10 +44,15 @@ internal object MessageMapping {
     fun attachmentTitle(names: List<String>): String =
         "$PAPERCLIP ${names.joinToString(", ")}"
 
-    /** Body to render: the letter text, or a file summary when there is none. */
+    /**
+     * Body to render: the letter text, or a file summary when there is none.
+     * A file bundle whose subject already lists the files gets no duplicate body.
+     */
     fun renderBody(data: JsonObject?): String {
         val body = (data?.get("body") as? JsonPrimitive)?.contentOrNull.orEmpty()
         if (body.isNotBlank()) return body
+        val subject = (data?.get("subject") as? JsonPrimitive)?.contentOrNull.orEmpty()
+        if (subject.isNotBlank()) return ""
         val names = attachmentNames(data)
         return if (names.isEmpty()) body else attachmentTitle(names)
     }
