@@ -19,6 +19,14 @@ import lan.fmnode.android.ui.ScanPurpose
 import lan.fmnode.android.ui.theme.FmTheme
 
 class MainActivity : ComponentActivity() {
+    /** Real file name from the document provider (content URIs end with "image:37"). */
+    private fun displayName(uri: Uri): String? = runCatching {
+        contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)
+            ?.use { cursor ->
+                if (cursor.moveToFirst()) cursor.getString(0) else null
+            }
+    }.getOrNull()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -46,7 +54,7 @@ class MainActivity : ComponentActivity() {
                     if (uris.isNotEmpty()) {
                         val files = uris.mapNotNull { uri ->
                             runCatching {
-                                val name = uri.lastPathSegment?.substringAfterLast('/') ?: "file"
+                                val name = displayName(uri) ?: uri.lastPathSegment?.substringAfterLast('/') ?: "file"
                                 val type = contentResolver.getType(uri) ?: "application/octet-stream"
                                 val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
                                     ?: return@runCatching null
