@@ -326,6 +326,10 @@ interface OutboxDao {
     @Query("UPDATE outbox SET attempts = :attempts, lastError = :error WHERE id = :id")
     suspend fun updateAttempt(id: Long, attempts: Int, error: String?)
 
+    /** Rewrites the signed payload after the user address changed (#11). */
+    @Query("UPDATE outbox SET dataJson = :data WHERE id = :id")
+    suspend fun updateData(id: Long, data: String)
+
     @Query("UPDATE outbox SET echoName = :newName WHERE echoName = :oldName")
     suspend fun renameEcho(oldName: String, newName: String)
 }

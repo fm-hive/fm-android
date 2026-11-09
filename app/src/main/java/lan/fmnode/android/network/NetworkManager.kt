@@ -79,6 +79,11 @@ class NetworkManager(
 
     suspend fun profileCount(): Int = db().profileDao().getAll().size
 
+    /** Profiles of the open vault, read on demand (#15 needs all of them). */
+    suspend fun profilesFirst(): List<ProfileEntity> = db().profileDao().getAll()
+
+    suspend fun profileById(id: String): ProfileEntity? = db().profileDao().getById(id)
+
     /** Phase 1 of the policy flow: fetches and verifies the node policy. */
     suspend fun fetchPolicy(invite: Invite): PolicyInfo {
         val api = apiFactory(invite.apiUrl)
@@ -207,6 +212,14 @@ class NetworkManager(
         db().profileDao().upsert(profile.copy(policyJson = policyJson))
     }
 
+    /**
+     * Stores the address the node reports for a profile (#11): a network merge
+     * renumbers users, so the address saved at registration becomes stale.
+     */
+    suspend fun updateProfileAddress(id: String, address: String) {
+        db().profileDao().updateAddress(id, address)
+    }
+
     suspend fun setActive(id: String) {
         db().appStateDao().put(AppStateEntity(KEY_ACTIVE_PROFILE, id))
     }
@@ -299,10 +312,21 @@ class NetworkManager(
     private fun defaultTitle(invite: Invite, address: String): String =
         defaultTitleFor(invite.appUrl, address)
 
-    /** Network title from the node endpoint host and the address. */
+    /**
+     * Network title from the node endpoint host and the address. The port is
+     * kept when it is not the scheme default, otherwise two networks on one
+     * host (a test stand, a node next to a front end) look identical (#15).
+     */
     private fun defaultTitleFor(appUrl: String, address: String): String {
         val host = appUrl.takeIf { it.isNotBlank() }
-            ?.let { runCatching { java.net.URI(it).host }.getOrNull() ?: it }
+            ?.let { url ->
+                runCatching { java.net.URI(url) }.getOrNull()?.let { uri ->
+                    val name = uri.host ?: url
+                    val port = uri.port
+                    val isDefault = port == -1 || (port == 80 && uri.scheme == "http") || (port == 443 && uri.scheme == "https")
+                    if (isDefault) name else "$name:$port"
+                } ?: url
+            }
             ?: "Network"
         return if (address.isNotBlank()) "$host ($address)" else host
     }

@@ -1,7 +1,9 @@
 package lan.fmnode.android.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,6 +28,7 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.Checklist
@@ -65,6 +68,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -229,6 +234,9 @@ fun FmRoot(
     onBackFromMessage: () -> Unit = {},
     onChangeMessageView: (EchoMessageView) -> Unit = {},
     onBackToRoot: () -> Unit = {},
+    onDismissSendErrors: () -> Unit = {},
+    onDismissAddressNotice: () -> Unit = {},
+    onSelectEchoInNetwork: (String, String) -> Unit = { _, _ -> },
 ) {
     // System back walks the in-app screen history instead of closing the app (#8).
     BackHandler {
@@ -395,6 +403,12 @@ fun FmRoot(
             onSearch = onOpenSearch,
             onProtocols = onOpenProtocols,
             onBrowseEchoes = onOpenEchoBrowser,
+            networks = state.networks,
+            sendErrors = state.sendErrors,
+            addressNotice = state.addressNotice,
+            onSelectEchoInNetwork = onSelectEchoInNetwork,
+            onDismissSendErrors = onDismissSendErrors,
+            onDismissAddressNotice = onDismissAddressNotice,
         )
         AppScreen.Echo -> EchoConversationScreen(
             echoName = state.selectedEcho?.name ?: "",
@@ -416,6 +430,8 @@ fun FmRoot(
             messageView = state.messageView,
             onChangeMessageView = onChangeMessageView,
             onOpenMessage = onOpenMessage,
+            sendErrors = state.sendErrors,
+            onDismissSendErrors = onDismissSendErrors,
         )
         AppScreen.MessageDetail -> MessageDetailScreen(
             message = state.selectedMessage,
@@ -948,6 +964,12 @@ fun EchoesListScreen(
     onSearch: () -> Unit,
     onProtocols: () -> Unit,
     onBrowseEchoes: () -> Unit,
+    networks: List<NetworkGroupUi> = emptyList(),
+    sendErrors: List<String> = emptyList(),
+    addressNotice: AddressNoticeUi? = null,
+    onSelectEchoInNetwork: (String, String) -> Unit = { _, _ -> },
+    onDismissSendErrors: () -> Unit = {},
+    onDismissAddressNotice: () -> Unit = {},
 ) {
     Scaffold(
         bottomBar = {
@@ -989,7 +1011,31 @@ fun EchoesListScreen(
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                 )
             }
-            if (echoes.isEmpty()) {
+            addressNotice?.let { notice ->
+                NoticeBanner(
+                    title = stringResource(R.string.address_changed, notice.network, notice.address),
+                    tone = MaterialTheme.colorScheme.primaryContainer,
+                    onDismiss = onDismissAddressNotice,
+                )
+            }
+            if (sendErrors.isNotEmpty()) {
+                NoticeBanner(
+                    title = stringResource(R.string.send_error_title),
+                    body = sendErrors.joinToString("\n") + "\n" + stringResource(R.string.send_error_hint),
+                    tone = MaterialTheme.colorScheme.errorContainer,
+                    onDismiss = onDismissSendErrors,
+                )
+            }
+            // Several networks of the vault are listed as separate groups (#15).
+            val groups = if (networks.size > 1) networks else emptyList()
+            // With one network the list stays flat; its group may be filled
+            // before the active-session flow emits, so use it as the source.
+            val flat = if (groups.isEmpty()) {
+                networks.firstOrNull()?.echoes ?: echoes
+            } else {
+                emptyList()
+            }
+            if (groups.isEmpty() && flat.isEmpty()) {
                 Box(
                     modifier = Modifier.fillMaxSize().padding(24.dp),
                     contentAlignment = Alignment.Center,
@@ -1006,10 +1052,88 @@ fun EchoesListScreen(
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                items(echoes, key = { it.name }) { echo ->
-                    EchoCard(echo = echo, onClick = { onSelectEcho(echo.name) })
+                if (groups.isEmpty()) {
+                    items(flat, key = { it.name }) { echo ->
+                        EchoCard(echo = echo, onClick = { onSelectEcho(echo.name) })
+                    }
+                } else {
+                    groups.forEach { group ->
+                        if (group.echoes.isEmpty()) return@forEach
+                        stickyHeader(key = "group-${group.profileId}") {
+                            NetworkGroupHeader(group)
+                        }
+                        items(group.echoes, key = { "${group.profileId}:${it.name}" }) { echo ->
+                            EchoCard(
+                                echo = echo,
+                                onClick = { onSelectEchoInNetwork(group.profileId, echo.name) },
+                            )
+                        }
+                    }
                 }
             }
+        }
+    }
+}
+
+/** Header of one network in the grouped echo list (#15). */
+@Composable
+private fun NetworkGroupHeader(group: NetworkGroupUi) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp, bottom = 4.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = group.title,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.weight(1f),
+            )
+            if (group.isActive) {
+                Text(
+                    text = stringResource(R.string.network_group_active),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+            if (group.unread > 0) {
+                Badge { Text(group.unread.toString()) }
+            }
+        }
+        Text(
+            text = "${group.address} · ${group.endpoint}",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/** Dismissible banner used for the address notice (#11) and send errors (#14). */
+@Composable
+private fun NoticeBanner(
+    title: String,
+    body: String? = null,
+    tone: Color,
+    onDismiss: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(tone)
+            .padding(start = 12.dp, top = 8.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(text = title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+            if (!body.isNullOrBlank()) {
+                Text(text = body, style = MaterialTheme.typography.bodySmall)
+            }
+        }
+        IconButton(onClick = onDismiss) {
+            Icon(Icons.Default.Close, contentDescription = stringResource(R.string.close))
         }
     }
 }
@@ -1093,6 +1217,8 @@ fun EchoConversationScreen(
     messageView: EchoMessageView = EchoMessageView.All,
     onChangeMessageView: (EchoMessageView) -> Unit = {},
     onOpenMessage: (MessageUi) -> Unit = {},
+    sendErrors: List<String> = emptyList(),
+    onDismissSendErrors: () -> Unit = {},
 ) {
     var versionsMessage by remember { mutableStateOf<MessageUi?>(null) }
     // Attachment-only uploads are listed separately as one entry per file bundle (#9).
@@ -1145,47 +1271,99 @@ fun EchoConversationScreen(
         },
     ) { padding ->
         if (visibleMessages.isEmpty()) {
-            Box(
-                modifier = Modifier.fillMaxSize().padding(padding).padding(24.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = stringResource(
-                        if (messageView == EchoMessageView.Attachments) {
-                            R.string.attachments_empty
-                        } else {
-                            R.string.no_messages
-                        },
-                    ),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+            Column(Modifier.fillMaxSize().padding(padding)) {
+                if (sendErrors.isNotEmpty()) {
+                    NoticeBanner(
+                        title = stringResource(R.string.send_error_title),
+                        body = sendErrors.joinToString("\n") + "\n" + stringResource(R.string.send_error_hint),
+                        tone = MaterialTheme.colorScheme.errorContainer,
+                        onDismiss = onDismissSendErrors,
+                    )
+                }
+                Box(
+                    modifier = Modifier.fillMaxSize().padding(24.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = stringResource(
+                            if (messageView == EchoMessageView.Attachments) {
+                                R.string.attachments_empty
+                            } else {
+                                R.string.no_messages
+                            },
+                        ),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
             return@Scaffold
         }
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(
-                start = 12.dp,
-                end = 12.dp,
-                top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 88.dp,
-            ),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            items(visibleMessages, key = { it.messageId }) { message ->
-                MessageCard(
-                    message = message,
-                    canModerate = canModerate,
-                    selectionMode = selectionMode,
-                    selected = message.messageId in selectedMessages,
-                    onToggleSelected = { onToggleMessageSelection(message.messageId) },
-                    onReact = onReact,
-                    onModerate = onModerate,
-                    onForward = onForward,
-                    onVersions = { versionsMessage = it },
-                    onOpen = { onOpenMessage(message) },
+        Column(Modifier.fillMaxSize()) {
+            if (sendErrors.isNotEmpty()) {
+                NoticeBanner(
+                    title = stringResource(R.string.send_error_title),
+                    body = sendErrors.joinToString("\n") + "\n" + stringResource(R.string.send_error_hint),
+                    tone = MaterialTheme.colorScheme.errorContainer,
+                    onDismiss = onDismissSendErrors,
                 )
             }
+            ConversationList(
+                messages = visibleMessages,
+                messageView = messageView,
+                padding = padding,
+                canModerate = canModerate,
+                selectionMode = selectionMode,
+                selectedMessages = selectedMessages,
+                onToggleMessageSelection = onToggleMessageSelection,
+                onReact = onReact,
+                onModerate = onModerate,
+                onForward = onForward,
+                onOpenMessage = onOpenMessage,
+                versionsMessage = { versionsMessage = it },
+            )
+        }
+    }
+}
+
+/** The message list of a conversation, below the optional notice banner. */
+@Composable
+private fun ConversationList(
+    messages: List<MessageUi>,
+    messageView: EchoMessageView,
+    padding: androidx.compose.foundation.layout.PaddingValues,
+    canModerate: Boolean,
+    selectionMode: Boolean,
+    selectedMessages: Set<String>,
+    onToggleMessageSelection: (String) -> Unit,
+    onReact: (MessageUi, String) -> Unit,
+    onModerate: (MessageUi) -> Unit,
+    onForward: (MessageUi) -> Unit,
+    onOpenMessage: (MessageUi) -> Unit,
+    versionsMessage: (MessageUi) -> Unit,
+) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(
+            start = 12.dp,
+            end = 12.dp,
+            top = padding.calculateTopPadding() + 8.dp,
+            bottom = padding.calculateBottomPadding() + 88.dp,
+        ),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        items(messages, key = { it.messageId }) { message ->
+            MessageCard(
+                message = message,
+                canModerate = canModerate,
+                selectionMode = selectionMode,
+                selected = message.messageId in selectedMessages,
+                onToggleSelected = { onToggleMessageSelection(message.messageId) },
+                onReact = onReact,
+                onModerate = onModerate,
+                onForward = onForward,
+                onVersions = { versionsMessage(message) },
+                onOpen = { onOpenMessage(message) },
+            )
         }
     }
 }

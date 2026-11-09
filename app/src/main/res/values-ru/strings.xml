@@ -140,4 +140,8 @@
     <string name="node_open">открытая</string>
     <string name="recovery_open_nodes">Открытые узлы</string>
     <string name="recovery_request_voucher">Запросить ваучер</string>
+    <string name="send_error_title">Сообщение не отправлено</string>
+    <string name="send_error_hint">Узел отклонил сообщение. Проверьте текст, тему и размер вложений.</string>
+    <string name="address_changed">Сеть объединена: адрес %1$s теперь %2$s</string>
+    <string name="network_group_active">активная</string>
 </resources>

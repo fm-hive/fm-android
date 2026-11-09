@@ -1,6 +1,5 @@
 package lan.fmnode.android.ui
 
-import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -155,6 +154,33 @@ data class ContactUi(
     val name: String,
 )
 
+/** One network of the vault with its echoes, shown as a group (#15). */
+data class NetworkGroupUi(
+    val profileId: String,
+    val title: String,
+    val address: String,
+    /** Host and port of the node, keeps same-host networks apart. */
+    val endpoint: String,
+    val isActive: Boolean,
+    val echoes: List<EchoUi>,
+) {
+    val unread: Int get() = echoes.sumOf { it.unread }
+}
+
+/** "host:port" of a node API URL, for telling networks apart on screen (#15). */
+internal fun endpointLabel(apiUrl: String): String =
+    runCatching {
+        val uri = java.net.URI(apiUrl)
+        val host = uri.host ?: return@runCatching apiUrl
+        if (uri.port == -1) host else "$host:${uri.port}"
+    }.getOrDefault(apiUrl)
+
+/** A network that was renumbered by a merge, shown once (#11). */
+data class AddressNoticeUi(
+    val network: String,
+    val address: String,
+)
+
 data class OutboxUi(
     val id: Long,
     val type: String,
@@ -242,6 +268,8 @@ data class UiState(
     val activeProfile: ProfileEntity? = null,
     val unlocked: Boolean = false,
     val echoes: List<EchoUi> = emptyList(),
+    /** Echoes of every unlocked network, grouped by network (#15). */
+    val networks: List<NetworkGroupUi> = emptyList(),
     val blogs: List<BlogUi> = emptyList(),
     val selectedEcho: EchoUi? = null,
     val selectedBlog: BlogUi? = null,
@@ -326,6 +354,10 @@ data class UiState(
     val unlockError: UiError? = null,
     val syncError: UiError? = null,
     val syncing: Boolean = false,
+    /** Reason the node rejected a message, shown until dismissed (#14). */
+    val sendErrors: List<String> = emptyList(),
+    /** New address after a merge, shown as a one-time notice (#11). */
+    val addressNotice: AddressNoticeUi? = null,
     val logoutDialog: Boolean = false,
     val backupStatus: String? = null,
     val backupError: UiError? = null,
@@ -359,13 +391,18 @@ class AppViewModel(
     private var flowsJob: Job? = null
     private var syncJob: Job? = null
 
+    /** Every unlocked network (#15): echo groups are read from all of them. */
+    private val sessions = linkedMapOf<String, NetworkSession>()
+    private val groupJobs = linkedMapOf<String, Job>()
+    private val groupEchoes = mutableMapOf<String, List<EchoUi>>()
+
     init {
         // A vault exists but is locked: the password is required before any
         // profile or message data can be read (#3).
         _state.update { it.copy(screen = if (manager.vaultExists()) AppScreen.Unlock else AppScreen.Networks) }
         viewModelScope.launch {
             manager.profiles.collect { profiles ->
-                _state.update { it.copy(profiles = profiles) }
+                _state.update { state -> rebuildNetworkGroups(state.copy(profiles = profiles)) }
                 if (profiles.isEmpty() && !manager.vaultExists()) {
                     closeSession()
                     _state.update { it.copy(screen = AppScreen.Networks, echoes = emptyList()) }
@@ -493,7 +530,6 @@ class AppViewModel(
             _state.update { it.copy(screen = AppScreen.Networks) }
             return
         }
-        closeSession()
         _state.update {
             it.copy(
                 activeProfile = profile,
@@ -503,13 +539,16 @@ class AppViewModel(
             )
         }
         try {
-            val opened = manager.openSession(profile, password)
+            val opened = sessionFor(profile, password)
             networkSession = opened
             // Local work first: the echo list is stored on the device, so the
             // network must never keep the user off the app. A node that is down,
             // slow or unhappy about the policy only fills syncError later.
             collectSessionFlows(opened)
             _state.update { it.copy(screen = AppScreen.Echoes, syncing = true, syncError = null) }
+            // The other networks of the vault are opened in the background so
+            // they never delay the active one (#15).
+            viewModelScope.launch { openOtherSessions(password, profile.id) }
             runCatching { opened.refreshEchoes() }
                 .onFailure { e -> _state.update { it.copy(syncError = UiError.Failed(e.message ?: "Failed")) } }
             syncOnce(opened)
@@ -525,6 +564,84 @@ class AppViewModel(
                 )
             }
         }
+    }
+
+    /**
+     * Opens the sessions of every other network of the vault (#15). Their echo
+     * lists feed the grouped echo screen and their unread counters stay fresh
+     * through a background sync; nothing of them is shown in the active screens.
+     */
+    private suspend fun openOtherSessions(password: String, activeProfileId: String) {
+        val profiles: List<ProfileEntity> = runCatching { manager.profilesFirst() }.getOrDefault(emptyList())
+        for (profile in profiles) {
+            if (profile.id == activeProfileId) continue
+            val other = runCatching { sessionFor(profile, password) }.getOrNull() ?: continue
+            // A network that was never opened on this device has an empty echo
+            // table; fill it in the background so its group is not blank (#15).
+            viewModelScope.launch {
+                runCatching { other.refreshEchoes() }
+                runCatching { other.sync() }
+            }
+        }
+    }
+
+    /** Returns the open session of [profile], opening and observing it once. */
+    private suspend fun sessionFor(profile: ProfileEntity, password: String): NetworkSession {
+        sessions[profile.id]?.let { return it }
+        val opened = manager.openSession(profile, password)
+        sessions[profile.id] = opened
+        startGroupCollector(opened)
+        return opened
+    }
+
+    /** Keeps the echo group of one network up to date (#15). */
+    private fun startGroupCollector(opened: NetworkSession) {
+        groupJobs[opened.profile.id]?.cancel()
+        groupJobs[opened.profile.id] = viewModelScope.launch {
+            combine(
+                opened.database.echoDao().observeSubscribed(),
+                opened.database.blogDao().observeAll(),
+                opened.database.messageDao().observeUnreadSummary(opened.profile.address),
+            ) { echoes, blogs, unread ->
+                val counts = unread.associate { it.echoName to it.count }
+                blogs.map { blog ->
+                    EchoUi(
+                        name = blog.name,
+                        description = blog.description,
+                        unread = 0,
+                        isBlog = true,
+                        blogId = blog.id,
+                    )
+                } + echoes.map { echo ->
+                    EchoUi(
+                        name = echo.name,
+                        description = echo.description,
+                        unread = counts[echo.name] ?: 0,
+                        subscribed = echo.subscribed,
+                        serverId = echo.serverId,
+                    )
+                }
+            }.catch { }.collect { list ->
+                groupEchoes[opened.profile.id] = list
+                _state.update { state -> rebuildNetworkGroups(state) }
+            }
+        }
+    }
+
+    /** Rebuilds the grouped echo list from the per-network echo cache (#15). */
+    private fun rebuildNetworkGroups(state: UiState): UiState {
+        val groups = state.profiles.mapNotNull { profile ->
+            val echoes = groupEchoes[profile.id] ?: return@mapNotNull null
+            NetworkGroupUi(
+                profileId = profile.id,
+                title = profile.title,
+                address = profile.address,
+                endpoint = endpointLabel(profile.apiUrl),
+                isActive = profile.id == state.activeId,
+                echoes = echoes,
+            )
+        }
+        return state.copy(networks = groups)
     }
 
     private fun collectSessionFlows(opened: NetworkSession) {
@@ -673,23 +790,69 @@ class AppViewModel(
         syncJob = null
         flowsJob?.cancel()
         flowsJob = null
+        groupJobs.values.forEach { it.cancel() }
+        groupJobs.clear()
+        sessions.clear()
+        groupEchoes.clear()
         networkSession = null
+        _state.update { it.copy(networks = emptyList()) }
     }
 
+    /**
+     * Keeps every network fresh: the active one drives the open screens, the
+     * others only refresh their echo groups and unread counters (#15).
+     */
     private fun startSyncLoop(opened: NetworkSession) {
         syncJob?.cancel()
         syncJob = viewModelScope.launch {
+            var tick = 0
             while (isActive) {
                 delay(30_000)
-                if (networkSession === opened) syncOnce(opened)
+                tick++
+                if (networkSession?.profile?.id == opened.profile.id || networkSession == opened) {
+                    syncOnce(opened)
+                }
+                if (tick % 2 == 0) syncOtherSessions()
             }
+        }
+    }
+
+    /**
+     * Background sync of the networks that are not on screen (#15). Their
+     * rejections and renumbering must reach the same indicators as the active
+     * one: a message written in another network is still a message here.
+     */
+    private suspend fun syncOtherSessions() {
+        val activeId = networkSession?.profile?.id
+        for ((id, opened) in sessions.toList()) {
+            if (id == activeId) continue
+            runCatching {
+                val outcome = opened.sync()
+                collectSendErrors(outcome.errors + opened.drainErrors())
+                runCatching { opened.refreshEchoes() }
+                // A merge can renumber users of any network (#11).
+                refreshIdentity(opened)
+            }
+        }
+    }
+
+    /** Shows the reasons the node rejected messages, newest first (#14). */
+    private fun collectSendErrors(errors: List<String>) {
+        if (errors.isEmpty()) return
+        _state.update { state ->
+            state.copy(sendErrors = (errors + state.sendErrors).distinct().take(MAX_SEND_ERRORS))
         }
     }
 
     private suspend fun syncOnce(opened: NetworkSession) {
         _state.update { it.copy(syncing = true) }
         try {
-            opened.sync()
+            val outcome = opened.sync()
+            // The node delivers server-side rejections and takes no other
+            // notice of them, so they become a visible indicator (#14).
+            collectSendErrors(outcome.errors + opened.drainErrors())
+            // A merge can renumber users while the app is running (#11).
+            refreshIdentity(opened)
             _state.update { it.copy(syncing = false, syncError = null) }
         } catch (e: Exception) {
             if (e is FmApiException && e.next == "policy") {
@@ -702,6 +865,35 @@ class AppViewModel(
             }
         }
     }
+
+    /**
+     * Adopts an address the node assigned after a merge (#11). The profile row,
+     * the live session and the UI state are updated, queued messages are
+     * re-signed on the next flush and the user gets a one-time notice.
+     */
+    private suspend fun refreshIdentity(opened: NetworkSession) {
+        val identity = runCatching { opened.identity() }.getOrNull() ?: return
+        val oldAddress = opened.profile.address
+        val newAddress = identity.address
+        if (newAddress.isEmpty() || newAddress == oldAddress) return
+        opened.applyAddressChange(newAddress)
+        manager.updateProfileAddress(opened.profile.id, newAddress)
+        _state.update { state ->
+            val updatedProfile = state.activeProfile?.let { current ->
+                if (current.id == opened.profile.id) current.copy(address = newAddress) else current
+            }
+            state.copy(
+                activeProfile = updatedProfile,
+                addressNotice = AddressNoticeUi(network = opened.profile.title, address = newAddress),
+                // Errors caused by the stale address are no longer relevant.
+                sendErrors = state.sendErrors.filterNot { it.contains(oldAddress) },
+            )
+        }
+    }
+
+    fun dismissAddressNotice() = _state.update { it.copy(addressNotice = null) }
+
+    fun dismissSendErrors() = _state.update { it.copy(sendErrors = emptyList()) }
 
     private var pendingPolicy: PolicyInfo? = null
 
@@ -782,12 +974,40 @@ class AppViewModel(
         }
     }
 
+    /**
+     * Opens an echo of any network from the grouped list (#15). A conference of
+     * another network first makes that network active, because echo ids, drafts
+     * and outbox entries are per-network.
+     */
+    fun selectEchoInNetwork(profileId: String, echoName: String) {
+        if (profileId == _state.value.activeId) {
+            selectEcho(echoName)
+            return
+        }
+        viewModelScope.launch {
+            manager.setActive(profileId)
+            _state.update {
+                it.copy(
+                    activeId = profileId,
+                    activeProfile = runCatching { manager.profileById(profileId) }.getOrNull(),
+                )
+            }
+            openActiveSession()
+            selectEcho(echoName)
+        }
+    }
+
     fun deleteProfile(id: String) {
         viewModelScope.launch {
             val deletingCurrent = id == _state.value.activeProfile?.id || networkSession?.profile?.id == id
             if (deletingCurrent) {
                 closeSession()
                 yield()
+            } else {
+                // A non-active network keeps its own session and echo group.
+                groupJobs.remove(id)?.cancel()
+                sessions.remove(id)
+                groupEchoes.remove(id)
             }
             manager.deleteProfile(id)
             if (manager.profileCount() == 0) {
@@ -983,6 +1203,9 @@ class AppViewModel(
                     current.compose.body.trim(),
                     attachments = attachments,
                 )
+                // The node can reject the message in the response to this very
+                // send; show why instead of leaving it as a silent no-op (#14).
+                collectSendErrors(opened.drainErrors())
                 runCatching { opened.database.draftDao().delete(echo.name) }
                 _state.update {
                     it.copy(screen = AppScreen.Echo, compose = ComposeState())
@@ -2654,6 +2877,7 @@ class AppViewModel(
     companion object {
         private const val MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024
         private const val MAX_ATTACHMENTS_TOTAL = 6 * 1024 * 1024
+        private const val MAX_SEND_ERRORS = 10
 
         fun factory(manager: NetworkManager, session: Session): ViewModelProvider.Factory =
             object : ViewModelProvider.Factory {

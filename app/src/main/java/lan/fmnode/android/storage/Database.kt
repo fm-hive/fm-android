@@ -57,6 +57,10 @@ interface ProfileDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(profile: ProfileEntity)
 
+    /** The node renumbers users after a merge (#11). */
+    @Query("UPDATE profiles SET address = :address WHERE id = :id")
+    suspend fun updateAddress(id: String, address: String)
+
     @Query("DELETE FROM profiles WHERE id = :id")
     suspend fun delete(id: String)
 }
