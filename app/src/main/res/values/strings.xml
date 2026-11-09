@@ -140,4 +140,8 @@
     <string name="node_open">open</string>
     <string name="recovery_open_nodes">Open nodes</string>
     <string name="recovery_request_voucher">Request voucher</string>
+    <string name="send_error_title">Message not sent</string>
+    <string name="send_error_hint">The node rejected the message. Check the text, the subject and the attachment size.</string>
+    <string name="address_changed">Network merged: %1$s address is now %2$s</string>
+    <string name="network_group_active">active</string>
 </resources>

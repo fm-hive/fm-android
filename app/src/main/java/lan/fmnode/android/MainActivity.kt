@@ -246,6 +246,9 @@ class MainActivity : ComponentActivity() {
                     onBackFromMessage = viewModel::backFromMessage,
                     onChangeMessageView = viewModel::setMessageView,
                     onBackToRoot = { finish() },
+                    onDismissSendErrors = viewModel::dismissSendErrors,
+                    onDismissAddressNotice = viewModel::dismissAddressNotice,
+                    onSelectEchoInNetwork = viewModel::selectEchoInNetwork,
                 )
             }
         }

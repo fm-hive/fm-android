@@ -31,23 +31,38 @@ import lan.fmnode.android.storage.PubkeyEntity
  * its per-network database and the send_receive sync engine.
  */
 class NetworkSession(
-    val profile: ProfileEntity,
+    profile: ProfileEntity,
     val database: ProfileDatabase,
     private val api: FmApiClient,
     val seed: ByteArray,
 ) {
+    /** Profile of this session; the address changes when networks merge (#11). */
+    var profile: ProfileEntity = profile
+        private set
+
     val publicKey: ByteArray = CryptoService.publicKeyFromSeed(seed)
     private val x25519Private: ByteArray = CryptoService.x25519PrivateKeyFromSeed(seed)
     private val x25519Public: ByteArray = CryptoService.x25519PublicKeyFromEd25519(publicKey)
     private var registeredThisSession = false
     private var clientSyncEnabled = false
     private var knownClients: Set<String> = emptySet()
+
+    /** Rejection reasons collected while sending, drained by the UI (#14). */
+    private val pendingErrors = mutableListOf<String>()
     private val auth = ApiKeys(seed, publicKey)
     private val json = Json { ignoreUnknownKeys = true }
 
     data class SyncOutcome(val received: Int, val acknowledged: Int, val errors: List<String>)
 
     data class SendResult(val queued: Boolean, val needsKey: Boolean = false)
+
+    /** What the node says about this profile: the address follows merges (#11). */
+    data class Identity(
+        val address: String,
+        val name: String,
+        val isAdmin: Boolean,
+        val isModerator: Boolean,
+    )
 
     // ------------------------------------------------------------------ echoes
 
@@ -123,6 +138,34 @@ class NetworkSession(
 
     suspend fun markRead(echoName: String, timestamp: Long) {
         database.echoDao().setLastRead(echoName, timestamp)
+    }
+
+    /** Identity of this profile as the node knows it right now. */
+    suspend fun identity(): Identity {
+        val response = api.post("identity", null, auth) as? JsonObject
+            ?: throw FmApiException(0, "invalid identity response")
+        return Identity(
+            address = response.string("address").orEmpty(),
+            name = response.string("name").orEmpty(),
+            isAdmin = response.boolean("is_admin"),
+            isModerator = response.boolean("is_moderator"),
+        )
+    }
+
+    /**
+     * Adopts the address the node reports (#11). A merge renumbers users, so the
+     * address stored at registration goes stale and every sender check fails
+     * until it is refreshed; queued payloads keep the old one and are rewritten
+     * here so they still go out after the renumbering.
+     */
+    suspend fun applyAddressChange(newAddress: String) {
+        val old = profile.address
+        if (newAddress.isEmpty() || newAddress == old) return
+        profile = profile.copy(address = newAddress)
+        for (entry in database.outboxDao().getAll()) {
+            val rewritten = OutboxAddress.rewrite(entry.dataJson, old, newAddress) ?: continue
+            database.outboxDao().updateData(entry.id, rewritten)
+        }
     }
 
     // -------------------------------------------------------------------- sync
@@ -756,11 +799,26 @@ class NetworkSession(
             // Persist protocol/message data before acknowledging packet ids (#350):
             // an ACK must never outrun the local database write.
             (response["messages"] as? JsonArray)?.forEach { element ->
-                (element as? JsonObject)?.let { processIncoming(it) }
+                val message = element as? JsonObject ?: return@forEach
+                // A rejected message comes back in the response to this very
+                // request, so its reason must not be dropped here (#14).
+                when (val result = processIncoming(message)) {
+                    is Incoming.Error -> pendingErrors += result.text
+                    else -> {}
+                }
             }
             storeDeliveredIds(response["local_packet_ids"] as? JsonArray)
         }
         return response
+    }
+
+    /** Reasons the node rejected messages, once per call (#14). */
+    fun drainErrors(): List<String> {
+        synchronized(pendingErrors) {
+            val drained = pendingErrors.toList()
+            pendingErrors.clear()
+            return drained
+        }
     }
 
     private fun signMessage(
