@@ -187,6 +187,9 @@ fun AdminScreen(
                                 if (node.isOpenNode) {
                                     AssistChip(onClick = {}, label = { Text(stringResource(R.string.node_open)) })
                                 }
+                                if (node.isEchomailRouter) {
+                                    AssistChip(onClick = {}, label = { Text(stringResource(R.string.node_router)) })
+                                }
                             }
                         }
                     }

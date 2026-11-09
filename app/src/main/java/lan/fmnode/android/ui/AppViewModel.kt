@@ -220,6 +220,7 @@ data class NodeUi(
     val url: String,
     val isRecoverNode: Boolean,
     val isOpenNode: Boolean = false,
+    val isEchomailRouter: Boolean = false,
 )
 
 data class ProtocolUi(
@@ -1707,6 +1708,7 @@ class AppViewModel(
                         url = (node["url"] as? JsonPrimitive)?.contentOrNull.orEmpty(),
                         isRecoverNode = (node["is_recover_node"] as? JsonPrimitive)?.content == "true",
                         isOpenNode = (node["is_open_node"] as? JsonPrimitive)?.content == "true",
+                        isEchomailRouter = (node["is_echomail_router"] as? JsonPrimitive)?.content == "true",
                     )
                 }
                 _state.update { it.copy(adminNodes = nodes, adminLoading = false) }
