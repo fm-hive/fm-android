@@ -184,6 +184,9 @@ fun AdminScreen(
                                 if (node.isRecoverNode) {
                                     AssistChip(onClick = {}, label = { Text(stringResource(R.string.node_recover)) })
                                 }
+                                if (node.isOpenNode) {
+                                    AssistChip(onClick = {}, label = { Text(stringResource(R.string.node_open)) })
+                                }
                             }
                         }
                     }

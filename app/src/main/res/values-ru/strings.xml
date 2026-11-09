@@ -132,4 +132,12 @@
     <string name="create_folder">Новая папка</string>
     <string name="folder_name">Название папки</string>
     <string name="move_to_folder">Переместить в папку</string>
+    <string name="recovery_title">Режим восстановления</string>
+    <string name="recovery_hint">Подключите этот ключ к recovery-узлу, пока ваш узел недоступен. Вставьте ссылку-приглашение.</string>
+    <string name="recovery_url">Ссылка recovery-узла</string>
+    <string name="recovery_start">Восстановить</string>
+    <string name="recovery_loading">Восстановление…</string>
+    <string name="node_open">открытая</string>
+    <string name="recovery_open_nodes">Открытые узлы</string>
+    <string name="recovery_request_voucher">Запросить ваучер</string>
 </resources>

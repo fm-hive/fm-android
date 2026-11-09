@@ -66,6 +66,25 @@ class NetworkManagerTest {
                 val opened = node.open(request.body.readUtf8())
                 val control = Json.parseToJsonElement(opened.control).jsonObject
                 val data = control["data"]?.jsonObject
+                val requestName = control["request"]?.jsonPrimitive?.content
+                if (requestName == "recover") {
+                    val userPub = Encoding.base64Decode(data!!["pubkey"]!!.jsonPrimitive.content)
+                    val jws = data["jws"]!!.jsonPrimitive.content
+                    check(CryptoService.verifyJws(jws, userPub))
+                    val payload = CryptoService.jwsPayload(jws)!!
+                    check(payload.contains(":0:1"))
+                    val response = buildJsonObject {
+                        put("request", "recover")
+                        put(
+                            "data",
+                            buildJsonObject {
+                                put("status", "ok")
+                                put("emergency_echo", "Emergency")
+                            },
+                        )
+                    }.toString()
+                    return MockResponse().setBody(node.encryptedResponse(response, userPub))
+                }
                 return if (data?.get("policy") != null) {
                     // Phase 2: verify the user's policy signature and reply with
                     // the assigned address, encrypted for that user key.
@@ -237,5 +256,21 @@ class NetworkManagerTest {
 
         assertEquals(first.id, second.id)
         assertEquals(1, db.profileDao().getAll().size)
+    }
+
+    @Test
+    fun `recover keeps the identity address and signs the recovery request`() {
+        val profile = addNetwork("secret-pass")
+        val recoveryInvite = InviteParser.parse(
+            "${server.url("/api")}?pubkey=${Encoding.base64UrlEncode(node.publicKey)}&address=:0:1:0"
+        )!!
+
+        val policy = runBlocking { manager.recover(recoveryInvite, profile, "secret-pass") }
+
+        assertNotNull(policy)
+        val stored = runBlocking { db.profileDao().getAll() }.single()
+        assertEquals(profile.address, stored.address)
+        assertEquals(server.url("/api").toString(), stored.apiUrl)
+        assertEquals(profile.id, runBlocking { manager.activeProfileId() })
     }
 }

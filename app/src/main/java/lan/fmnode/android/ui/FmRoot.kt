@@ -158,6 +158,11 @@ fun FmRoot(
     onRemoveAttachment: (Int) -> Unit = {},
     onRemoveBlogAttachment: (Int) -> Unit = {},
     onOpenAdmin: () -> Unit = {},
+    onOpenRecovery: () -> Unit = {},
+    onRequestVoucher: (NodeUi) -> Unit = {},
+    onCloseRecovery: () -> Unit = {},
+    onRecoveryUrl: (String) -> Unit = {},
+    onSubmitRecovery: () -> Unit = {},
     onCloseAdmin: () -> Unit = {},
     onAdminRefresh: () -> Unit = {},
     onAdminMergeUrl: (String) -> Unit = {},
@@ -555,6 +560,9 @@ fun FmRoot(
             backupError = state.backupError,
             onClearBackup = onClearBackup,
             onOpenAdmin = onOpenAdmin,
+            onOpenRecovery = onOpenRecovery,
+            openNodes = state.adminNodes.filter { it.isOpenNode },
+            onRequestVoucher = onRequestVoucher,
             onCreateVoucher = onCreateVoucher,
             voucherCode = state.voucherCode,
             voucherLoading = state.voucherLoading,
@@ -566,6 +574,58 @@ fun FmRoot(
             onLogout = onRequestLogout,
         )
     }
+    if (state.recoveryDialog) {
+        RecoveryDialog(
+            url = state.recoveryUrl,
+            loading = state.recoveryLoading,
+            error = state.recoveryError,
+            onUrlChange = onRecoveryUrl,
+            onConfirm = onSubmitRecovery,
+            onDismiss = onCloseRecovery,
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun RecoveryDialog(
+    url: String,
+    loading: Boolean,
+    error: UiError?,
+    onUrlChange: (String) -> Unit,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = { if (!loading) onDismiss() },
+        title = { Text(stringResource(R.string.recovery_title)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(stringResource(R.string.recovery_hint))
+                OutlinedTextField(
+                    value = url,
+                    onValueChange = onUrlChange,
+                    label = { Text(stringResource(R.string.recovery_url)) },
+                    singleLine = false,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                error?.let {
+                    val message = (it as? UiError.Failed)?.text ?: it.toString()
+                    Text(message, color = MaterialTheme.colorScheme.error)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm, enabled = !loading && url.isNotBlank()) {
+                Text(if (loading) stringResource(R.string.recovery_loading) else stringResource(R.string.recovery_start))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !loading) {
+                Text(stringResource(R.string.cancel))
+            }
+        },
+    )
 }
 
 // ----------------------------------------------------------------------- vault

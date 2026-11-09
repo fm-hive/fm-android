@@ -9,6 +9,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import lan.fmnode.android.crypto.CryptoService
 import lan.fmnode.android.crypto.Encoding
 import lan.fmnode.android.storage.AppDatabase
@@ -228,6 +230,54 @@ class NetworkManager(
     /** Decrypts the profile's Ed25519 seed (requires the correct password). */
     fun seedOf(profile: ProfileEntity, password: String): ByteArray =
         KeyVault.decrypt(profile.encryptedSeed(), password)
+
+
+    /**
+     * Registers [profile]'s existing identity on a recovery node and switches
+     * the profile to that node. The recovery node creates a local recover user
+     * (marked read-only outside Emergency) and the profile re-signs its policy.
+     */
+    suspend fun recover(invite: Invite, profile: ProfileEntity, password: String): PolicyInfo {
+        val address = invite.address
+        require(!address.isNullOrBlank()) { "Recovery invite has no node address" }
+        val seed = seedOf(profile, password)
+        val publicKey = CryptoService.publicKeyFromSeed(seed)
+        val api = apiFactory(invite.apiUrl)
+        invite.nodePublicKey?.let { api.setNodeEd25519PublicKey(it) }
+        api.responseDecryptionKey = CryptoService.x25519PrivateKeyFromSeed(seed)
+
+        val policy = PolicyClient(api).fetchPolicy(userPublicKey = publicKey)
+        val jwsPayload = buildJsonObject {
+            put("address", profile.address)
+            put("node_address", address)
+        }.toString()
+        val jws = CryptoService.createJws(seed, jwsPayload, publicKey)
+        val recoverData = buildJsonObject {
+            put("address", profile.address)
+            put("jws", jws)
+            put("pubkey", Encoding.base64Encode(publicKey))
+        }.toString()
+        api.post("recover", recoverData, ApiKeys(seed, publicKey))
+
+        // Existing user on the recovery node: sign its current policy.
+        val registration = PolicyClient(api).acceptPolicy(
+            policy = policy,
+            seed = seed,
+            publicKey = publicKey,
+            name = profile.displayName,
+        )
+        val updated = profile.copy(
+            apiUrl = invite.apiUrl,
+            appUrl = invite.appUrl,
+            nodePublicKeyB64 = policy.nodeSigPkey,
+            address = registration.address.ifBlank { profile.address },
+            policyJson = policy.payload.toString(),
+            lastSyncAt = null,
+        )
+        db().profileDao().upsert(updated)
+        setActive(updated.id)
+        return policy
+    }
 
     /**
      * Opens the network session of [profile]: its encrypted database, API
