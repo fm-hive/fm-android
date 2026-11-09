@@ -54,6 +54,9 @@ fun SettingsScreen(
     backupError: UiError?,
     onClearBackup: () -> Unit,
     onOpenAdmin: () -> Unit,
+    onOpenRecovery: () -> Unit,
+    openNodes: List<NodeUi> = emptyList(),
+    onRequestVoucher: (NodeUi) -> Unit = {},
     onCreateVoucher: () -> Unit,
     voucherCode: String?,
     voucherLoading: Boolean,
@@ -184,6 +187,28 @@ fun SettingsScreen(
             }
             OutlinedButton(onClick = onOpenPolicyViewer, modifier = Modifier.fillMaxWidth()) {
                 Text(stringResource(R.string.view_policy))
+            }
+            OutlinedButton(onClick = onOpenRecovery, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.recovery_title))
+            }
+            if (openNodes.isNotEmpty()) {
+                Text(stringResource(R.string.recovery_open_nodes), style = MaterialTheme.typography.labelLarge)
+                openNodes.forEach { node ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(node.address, fontFamily = FontFamily.Monospace)
+                            if (node.url.isNotBlank()) {
+                                Text(node.url, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                        TextButton(onClick = { onRequestVoucher(node) }) {
+                            Text(stringResource(R.string.recovery_request_voucher))
+                        }
+                    }
+                }
             }
             if (profile.isAdmin) {
                 OutlinedButton(onClick = onOpenAdmin, modifier = Modifier.fillMaxWidth()) {

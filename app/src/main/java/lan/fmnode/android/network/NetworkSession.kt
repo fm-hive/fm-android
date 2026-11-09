@@ -267,6 +267,19 @@ class NetworkSession(
         }
     }
 
+    /** Sends a voucher request netmail to an open node admin. */
+    suspend fun requestVoucher(adminAddress: String, openNodeAddress: String): SendResult {
+        if (key(adminAddress) == null) {
+            runCatching { requestPublicKey(adminAddress) }
+            runCatching { sync() }
+        }
+        return sendNetmail(
+            adminAddress,
+            "Voucher request",
+            "Please send a voucher for the open node $openNodeAddress",
+        )
+    }
+
     /** Asks the node to deliver the public key of [address] to us. */
     suspend fun requestPublicKey(address: String): Boolean {
         val request = buildJsonObject {

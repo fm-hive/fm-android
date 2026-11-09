@@ -132,4 +132,12 @@
     <string name="create_folder">New folder</string>
     <string name="folder_name">Folder name</string>
     <string name="move_to_folder">Move to folder</string>
+    <string name="recovery_title">Recovery mode</string>
+    <string name="recovery_hint">Connect this identity to a recovery node while your own node is unavailable. Paste its invite link.</string>
+    <string name="recovery_url">Recovery node invite link</string>
+    <string name="recovery_start">Recover</string>
+    <string name="recovery_loading">Recovering…</string>
+    <string name="node_open">open</string>
+    <string name="recovery_open_nodes">Open nodes</string>
+    <string name="recovery_request_voucher">Request voucher</string>
 </resources>

@@ -193,6 +193,7 @@ data class NodeUi(
     val address: String,
     val url: String,
     val isRecoverNode: Boolean,
+    val isOpenNode: Boolean = false,
 )
 
 data class ProtocolUi(
@@ -281,6 +282,10 @@ data class UiState(
     val voucherCode: String? = null,
     val voucherLoading: Boolean = false,
     val voucherError: UiError? = null,
+    val recoveryDialog: Boolean = false,
+    val recoveryUrl: String = "",
+    val recoveryLoading: Boolean = false,
+    val recoveryError: UiError? = null,
     val adminNodes: List<NodeUi> = emptyList(),
     val adminLoading: Boolean = false,
     val adminMergeUrl: String = "",
@@ -1431,6 +1436,42 @@ class AppViewModel(
         _state.update { it.copy(screen = AppScreen.Settings) }
     }
 
+    // --------------------------------------------------------------- recovery
+
+    fun openRecovery() {
+        _state.update { it.copy(recoveryDialog = true, recoveryError = null) }
+    }
+
+    fun closeRecovery() {
+        if (!_state.value.recoveryLoading) {
+            _state.update { it.copy(recoveryDialog = false, recoveryError = null) }
+        }
+    }
+
+    fun setRecoveryUrl(value: String) {
+        _state.update { it.copy(recoveryUrl = value, recoveryError = null) }
+    }
+
+    fun submitRecovery() {
+        val profile = _state.value.activeProfile ?: return
+        val password = session.passwordOrNull() ?: return
+        val invite = InviteParser.parse(_state.value.recoveryUrl.trim())
+        if (invite == null || invite.address.isNullOrBlank()) {
+            _state.update { it.copy(recoveryError = UiError.Failed("Invalid recovery invite")) }
+            return
+        }
+        viewModelScope.launch {
+            _state.update { it.copy(recoveryLoading = true, recoveryError = null) }
+            try {
+                manager.recover(invite, profile, password)
+                _state.update { it.copy(recoveryDialog = false, recoveryLoading = false) }
+                openActiveSession()
+            } catch (e: Exception) {
+                _state.update { it.copy(recoveryLoading = false, recoveryError = UiError.Failed(e.message ?: "Failed")) }
+            }
+        }
+    }
+
     fun loadNodes() {
         val opened = networkSession ?: return
         viewModelScope.launch {
@@ -1442,6 +1483,7 @@ class AppViewModel(
                         address = address,
                         url = (node["url"] as? JsonPrimitive)?.contentOrNull.orEmpty(),
                         isRecoverNode = (node["is_recover_node"] as? JsonPrimitive)?.content == "true",
+                        isOpenNode = (node["is_open_node"] as? JsonPrimitive)?.content == "true",
                     )
                 }
                 _state.update { it.copy(adminNodes = nodes, adminLoading = false) }
@@ -2080,6 +2122,16 @@ class AppViewModel(
 
     fun openSettings() {
         _state.update { it.copy(screen = AppScreen.Settings) }
+        loadNodes()
+    }
+
+    fun requestVoucher(node: NodeUi) {
+        val opened = networkSession ?: return
+        val admin = node.address.substringBeforeLast(':') + ":1"
+        viewModelScope.launch {
+            runCatching { opened.requestVoucher(admin, node.address) }
+                .onFailure { err -> _state.update { state -> state.copy(syncError = UiError.Failed(err.message ?: "Failed")) } }
+        }
     }
 
     fun deleteActiveNetwork() {
