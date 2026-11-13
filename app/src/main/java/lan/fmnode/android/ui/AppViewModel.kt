@@ -262,11 +262,23 @@ data class AddNetworkState(
     val importError: UiError? = null,
 )
 
+/** Network display name from an accepted policy; old policies fall back to FM. */
+internal fun networkNameFromPolicyJson(policyJson: String): String {
+    val json = Json { ignoreUnknownKeys = true }
+    return runCatching {
+        val root = json.parseToJsonElement(policyJson).jsonObject
+        val parameters = root["policy"]?.jsonObject?.get("parameters")?.jsonObject
+        parameters?.get("net_name")?.jsonPrimitive?.contentOrNull?.trim()
+            ?.takeIf { it.isNotEmpty() } ?: "FM"
+    }.getOrDefault("FM")
+}
+
 data class UiState(
     val screen: AppScreen = AppScreen.Networks,
     val profiles: List<ProfileEntity> = emptyList(),
     val activeId: String? = null,
     val activeProfile: ProfileEntity? = null,
+    val networkName: String = "FM",
     val unlocked: Boolean = false,
     val echoes: List<EchoUi> = emptyList(),
     /** Echoes of every unlocked network, grouped by network (#15). */
@@ -414,7 +426,13 @@ class AppViewModel(
             if (!session.isUnlocked) return@launch
             val id = manager.activeProfileId()
             val profile = id?.let { manager.activeProfile() }
-            _state.update { it.copy(activeId = id, activeProfile = profile) }
+            _state.update {
+                it.copy(
+                    activeId = id,
+                    activeProfile = profile,
+                    networkName = profile?.let { p -> networkNameFromPolicyJson(p.policyJson) } ?: "FM",
+                )
+            }
         }
     }
 
@@ -435,7 +453,11 @@ class AppViewModel(
                 return@launch
             }
             _state.update {
-                it.copy(unlocked = true, unlockError = null, activeId = profile.id, activeProfile = profile)
+                it.copy(
+                    unlocked = true, unlockError = null, activeId = profile.id,
+                    activeProfile = profile,
+                    networkName = networkNameFromPolicyJson(profile.policyJson),
+                )
             }
             openActiveSession()
         }
@@ -535,6 +557,7 @@ class AppViewModel(
             it.copy(
                 activeProfile = profile,
                 activeId = profile.id,
+                networkName = networkNameFromPolicyJson(profile.policyJson),
                 syncing = true,
                 syncError = null,
             )
@@ -920,7 +943,13 @@ class AppViewModel(
                 opened.resignPolicy(policy)
                 manager.updateProfilePolicy(opened.profile.id, policy.payload.toString())
                 pendingPolicy = null
-                _state.update { it.copy(showPolicyResign = false, policyResignText = "") }
+                _state.update {
+                    it.copy(
+                        showPolicyResign = false,
+                        policyResignText = "",
+                        networkName = networkNameFromPolicyJson(policy.payload.toString()),
+                    )
+                }
                 syncOnce(opened)
             } catch (e: Exception) {
                 _state.update { it.copy(syncError = UiError.Failed(e.message ?: "Failed")) }

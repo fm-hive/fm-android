@@ -389,7 +389,7 @@ fun FmRoot(
             onScanQr = onOpenScanner,
         )
         AppScreen.Echoes -> EchoesListScreen(
-            title = state.activeProfile?.title ?: stringResource(R.string.app_name),
+            title = state.networkName.ifBlank { stringResource(R.string.app_name) },
             echoes = state.echoes,
             syncing = state.syncing,
             error = state.syncError,
