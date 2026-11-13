@@ -1,5 +1,6 @@
 package lan.fmnode.android.ui
 
+import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -37,6 +38,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.Image
 import lan.fmnode.android.R
 import lan.fmnode.android.crypto.Encoding
+import lan.fmnode.android.network.NetworkSession
 import lan.fmnode.android.storage.ProfileEntity
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -62,6 +64,19 @@ fun SettingsScreen(
     voucherLoading: Boolean,
     voucherError: UiError?,
     onDismissVoucher: () -> Unit,
+    onOpenDisplayName: () -> Unit = {},
+    voucherEnabled: Boolean = true,
+    voucherType: String = NetworkSession.VOUCHER_INVITE,
+    voucherTtl: String = "24h",
+    voucherReusable: Boolean = false,
+    voucherExpiresAt: String? = null,
+    vouchers: List<VoucherUi> = emptyList(),
+    vouchersLoading: Boolean = false,
+    vouchersError: UiError? = null,
+    onVoucherType: (String) -> Unit = {},
+    onVoucherTtl: (String) -> Unit = {},
+    onLoadVouchers: () -> Unit = {},
+    onRevokeVoucher: (String) -> Unit = {},
     onOpenOutbox: () -> Unit,
     onOpenPolicyViewer: () -> Unit,
     onLock: () -> Unit,
@@ -117,7 +132,16 @@ fun SettingsScreen(
                     )
                     Spacer(Modifier.height(4.dp))
                     LabeledValue(stringResource(R.string.address_label), profile.address)
-                    LabeledValue(stringResource(R.string.display_name), profile.displayName)
+                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        Text(
+                            text = stringResource(R.string.display_name) + ": " + profile.displayName,
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.weight(1f),
+                        )
+                        TextButton(onClick = onOpenDisplayName) {
+                            Text(stringResource(R.string.display_name_change))
+                        }
+                    }
                     LabeledValue(stringResource(R.string.network_label), profile.apiUrl)
                     Spacer(Modifier.height(4.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -172,15 +196,122 @@ fun SettingsScreen(
             OutlinedButton(onClick = { showInviteDialog = true }, modifier = Modifier.fillMaxWidth()) {
                 Text(stringResource(R.string.show_invite_qr))
             }
-            OutlinedButton(
-                onClick = onCreateVoucher,
-                enabled = !voucherLoading,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text(stringResource(R.string.send_voucher))
+            if (voucherEnabled) {
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                        Text(
+                            text = stringResource(R.string.voucher_type),
+                            style = MaterialTheme.typography.labelLarge,
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(
+                                onClick = { onVoucherType(NetworkSession.VOUCHER_INVITE) },
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.voucher_type_invite),
+                                    fontWeight = if (voucherType == NetworkSession.VOUCHER_INVITE) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (voucherType == NetworkSession.VOUCHER_INVITE) {
+                                        MaterialTheme.colorScheme.primary
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurface
+                                    },
+                                )
+                            }
+                            // Time vouchers are admin-only on the node.
+                            OutlinedButton(
+                                onClick = { onVoucherType(NetworkSession.VOUCHER_INVITE_TIME) },
+                                enabled = profile.isAdmin,
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.voucher_type_time),
+                                    fontWeight = if (voucherType == NetworkSession.VOUCHER_INVITE_TIME) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (voucherType == NetworkSession.VOUCHER_INVITE_TIME) {
+                                        MaterialTheme.colorScheme.primary
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurface
+                                    },
+                                )
+                            }
+                        }
+                        if (voucherType == NetworkSession.VOUCHER_INVITE_TIME) {
+                            Spacer(Modifier.height(8.dp))
+                            OutlinedTextField(
+                                value = voucherTtl,
+                                onValueChange = onVoucherTtl,
+                                label = { Text(stringResource(R.string.voucher_ttl)) },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        OutlinedButton(
+                            onClick = onCreateVoucher,
+                            enabled = !voucherLoading,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(stringResource(R.string.send_voucher))
+                        }
+                        voucherCode?.let { code ->
+                            Spacer(Modifier.height(8.dp))
+                            Text(code, fontFamily = FontFamily.Monospace)
+                            if (voucherReusable) {
+                                Text(
+                                    text = stringResource(R.string.voucher_type_time) +
+                                        (voucherExpiresAt?.let { " · $it" } ?: ""),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                        voucherError?.let {
+                            Spacer(Modifier.height(8.dp))
+                            Text(errorText(it), color = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                }
             }
-            voucherError?.let {
-                Text(errorText(it), color = MaterialTheme.colorScheme.error)
+            if (voucherEnabled) {
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                            Text(
+                                text = stringResource(R.string.vouchers_title),
+                                style = MaterialTheme.typography.labelLarge,
+                                modifier = Modifier.weight(1f),
+                            )
+                            TextButton(onClick = onLoadVouchers, enabled = !vouchersLoading) {
+                                Text(stringResource(R.string.vouchers_refresh))
+                            }
+                        }
+                        if (vouchers.isEmpty()) {
+                            Text(
+                                text = stringResource(R.string.vouchers_empty),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        vouchers.forEach { voucher ->
+                            Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(voucher.code, fontFamily = FontFamily.Monospace)
+                                    Text(
+                                        text = stringResource(voucherStatusRes(voucher.status)) +
+                                            " · " + stringResource(voucherTypeRes(voucher.type)) +
+                                            if (voucher.expiresAt.isNotBlank()) " · ${voucher.expiresAt}" else "",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                if (voucher.status == "active") {
+                                    TextButton(onClick = { onRevokeVoucher(voucher.code) }) {
+                                        Text(stringResource(R.string.voucher_revoke))
+                                    }
+                                }
+                            }
+                        }
+                        vouchersError?.let { Text(errorText(it), color = MaterialTheme.colorScheme.error) }
+                    }
+                }
             }
             OutlinedButton(onClick = onOpenOutbox, modifier = Modifier.fillMaxWidth()) {
                 Text(stringResource(R.string.outbox_title))
@@ -220,6 +351,20 @@ fun SettingsScreen(
             }
         }
     }
+}
+
+@StringRes
+private fun voucherStatusRes(status: String): Int = when (status) {
+    "used" -> R.string.voucher_status_used
+    "expired" -> R.string.voucher_status_expired
+    "revoked" -> R.string.voucher_status_revoked
+    else -> R.string.voucher_status_active
+}
+
+@StringRes
+private fun voucherTypeRes(type: String): Int = when (type) {
+    NetworkSession.VOUCHER_INVITE_TIME -> R.string.voucher_type_time
+    else -> R.string.voucher_type_invite
 }
 
 private fun inviteUrl(profile: ProfileEntity): String {

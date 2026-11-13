@@ -220,6 +220,12 @@ class NetworkManager(
         db().profileDao().updateAddress(id, address)
     }
 
+    /** Stores a display name the node accepted through `set_name`. */
+    suspend fun updateProfileDisplayName(id: String, name: String) {
+        val profile = db().profileDao().getById(id) ?: return
+        db().profileDao().upsert(profile.copy(displayName = name))
+    }
+
     suspend fun setActive(id: String) {
         db().appStateDao().put(AppStateEntity(KEY_ACTIVE_PROFILE, id))
     }

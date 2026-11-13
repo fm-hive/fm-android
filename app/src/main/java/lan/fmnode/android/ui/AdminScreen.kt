@@ -9,8 +9,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -164,8 +162,10 @@ fun AdminScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             } else {
-                LazyColumn(modifier = Modifier.fillMaxWidth()) {
-                    items(nodes, key = { it.address }) { node ->
+                // The whole screen scrolls, so the list is a plain column: a
+                // LazyColumn here would be measured with infinite height.
+                Column(Modifier.fillMaxWidth()) {
+                    nodes.forEach { node ->
                         Card(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
                             Row(
                                 modifier = Modifier.fillMaxWidth().padding(12.dp),
@@ -173,9 +173,30 @@ fun AdminScreen(
                             ) {
                                 Column(Modifier.weight(1f)) {
                                     Text(node.address, fontWeight = FontWeight.SemiBold)
+                                    if (node.name.isNotBlank()) {
+                                        Text(
+                                            text = node.name,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
                                     if (node.url.isNotBlank()) {
                                         Text(
                                             text = node.url,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                    if (node.clients.isNotEmpty()) {
+                                        Text(
+                                            text = stringResource(R.string.node_clients) + ": " +
+                                                node.clients.joinToString(", ") { client ->
+                                                    if (client.name.isNotBlank()) {
+                                                        "${client.name} (${client.address})"
+                                                    } else {
+                                                        client.address
+                                                    }
+                                                },
                                             style = MaterialTheme.typography.bodySmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
