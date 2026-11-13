@@ -516,8 +516,9 @@ class NetworkSessionTest {
     @Test
     fun `createVoucher signs the invite payload and returns the code`() {
         runBlocking {
-            val code = session.createVoucher()
-            assertEquals("voucher-code-1", code)
+            val issued = session.createVoucher()
+            assertEquals("voucher-code-1", issued.code)
+            assertEquals("invite", issued.type)
             val data = lastControl!!["data"]!!.jsonObject
             val jws = data["voucher"]!!.jsonPrimitive.content
             assertTrue(CryptoService.verifyJws(jws, userPublicKey))

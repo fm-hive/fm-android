@@ -35,6 +35,7 @@ import lan.fmnode.android.network.InviteParser
 import lan.fmnode.android.network.NetworkManager
 import lan.fmnode.android.network.NetworkSession
 import lan.fmnode.android.network.PolicyInfo
+import lan.fmnode.android.network.RulesId
 import lan.fmnode.android.session.Session
 import lan.fmnode.android.storage.BackupService
 import lan.fmnode.android.storage.BlogEntity
@@ -77,7 +78,7 @@ data class NetmailFolderUi(
     val count: Int = 0,
 )
 
-enum class CreateEchoType { LocalEcho, Blog }
+enum class CreateEchoType { LocalEcho, WithRules, Blog }
 
 enum class ScanPurpose { AddNetwork, Merge }
 
@@ -98,6 +99,8 @@ data class EchoUi(
     val subscribed: Boolean = true,
     val isBlog: Boolean = false,
     val blogId: String? = null,
+    /** Raw rules JSON; a non-empty value means subscribing needs acceptance. */
+    val rulesText: String = "",
     val serverId: Int? = null,
 )
 
@@ -167,6 +170,39 @@ data class NetworkGroupUi(
     val unread: Int get() = echoes.sumOf { it.unread }
 }
 
+/** A voucher row shown in the settings list. */
+data class VoucherUi(
+    val code: String,
+    val type: String,
+    val status: String,
+    val createdBy: String,
+    val expiresAt: String,
+)
+
+/** Echo rules the user must accept before subscribing. */
+data class RulesPromptUi(
+    val echoName: String,
+    val rulesText: String,
+)
+
+/** Proposal editor for conference rules and its rename (§ change_rules). */
+data class RulesEditState(
+    val echoName: String,
+    val rulesJson: String,
+    val newName: String = "",
+    val allChunksOnly: Boolean = false,
+    val sending: Boolean = false,
+    val status: String? = null,
+    val error: UiError? = null,
+)
+
+/** User-defined group of conferences inside one network (#366). */
+data class EchoGroupUi(
+    val id: String,
+    val name: String,
+    val echoes: List<String>,
+)
+
 /** "host:port" of a node API URL, for telling networks apart on screen (#15). */
 internal fun endpointLabel(apiUrl: String): String =
     runCatching {
@@ -215,12 +251,22 @@ data class AttachmentUi(
     val dataUrl: String,
 )
 
+/** A user registered on a node, as listed by the node metadata. */
+data class NodeClientUi(
+    val address: String,
+    val name: String,
+)
+
 data class NodeUi(
     val address: String,
     val url: String,
     val isRecoverNode: Boolean,
     val isOpenNode: Boolean = false,
     val isEchomailRouter: Boolean = false,
+    /** Display name of the node admin, reported by the node (#361). */
+    val name: String = "",
+    /** Users of that node, reported by the node (#363). */
+    val clients: List<NodeClientUi> = emptyList(),
 )
 
 data class ProtocolUi(
@@ -262,11 +308,53 @@ data class AddNetworkState(
     val importError: UiError? = null,
 )
 
+/** Network display name from an accepted policy; old policies fall back to FM. */
+internal fun networkNameFromPolicyJson(policyJson: String): String {
+    val json = Json { ignoreUnknownKeys = true }
+    return runCatching {
+        val root = json.parseToJsonElement(policyJson).jsonObject
+        val parameters = root["policy"]?.jsonObject?.get("parameters")?.jsonObject
+        parameters?.get("net_name")?.jsonPrimitive?.contentOrNull?.trim()
+            ?.takeIf { it.isNotEmpty() } ?: "FM"
+    }.getOrDefault("FM")
+}
+
+/** Boolean network policy parameter of the accepted policy (default when absent). */
+internal fun policyFlag(policyJson: String, key: String, default: Boolean): Boolean {
+    val json = Json { ignoreUnknownKeys = true }
+    return runCatching {
+        val root = json.parseToJsonElement(policyJson).jsonObject
+        val parameters = root["policy"]?.jsonObject?.get("parameters")?.jsonObject
+        (parameters?.get(key) as? JsonPrimitive)?.contentOrNull?.let { it == "true" } ?: default
+    }.getOrDefault(default)
+}
+
+/** Human-readable rules for the acceptance dialog. */
+internal fun formatEchoRules(rulesJson: String): String {
+    val rules = RulesId.rulesMap(rulesJson) ?: return rulesJson
+    val text = (rules["text"] as? JsonPrimitive)?.contentOrNull.orEmpty()
+    val parameters = rules["parameters"] as? JsonObject
+    val pretty = if (parameters != null && parameters.isNotEmpty()) {
+        Json { prettyPrint = true }.encodeToString(JsonElement.serializer(), parameters)
+    } else {
+        ""
+    }
+    return listOf(text, pretty).filter { it.isNotBlank() }.joinToString("\n\n")
+}
+
+/** Rules in the canonical `{text, parameters}` form, ready for editing. */
+internal fun prettyEchoRules(rulesJson: String): String {
+    val rules = RulesId.rulesMap(rulesJson)
+        ?: return "{\n  \"text\": \"\",\n  \"parameters\": {}\n}"
+    return Json { prettyPrint = true }.encodeToString(JsonElement.serializer(), rules)
+}
+
 data class UiState(
     val screen: AppScreen = AppScreen.Networks,
     val profiles: List<ProfileEntity> = emptyList(),
     val activeId: String? = null,
     val activeProfile: ProfileEntity? = null,
+    val networkName: String = "FM",
     val unlocked: Boolean = false,
     val echoes: List<EchoUi> = emptyList(),
     /** Echoes of every unlocked network, grouped by network (#15). */
@@ -309,8 +397,33 @@ data class UiState(
     val policyResignText: String = "",
     val scanPurpose: ScanPurpose = ScanPurpose.AddNetwork,
     val voucherCode: String? = null,
+    /** `invite` or `invite_time` (admin-only reusable voucher). */
+    val voucherType: String = NetworkSession.VOUCHER_INVITE,
+    val voucherTtl: String = "24h",
+    val voucherReusable: Boolean = false,
+    val voucherExpiresAt: String? = null,
+    val vouchers: List<VoucherUi> = emptyList(),
+    val vouchersLoading: Boolean = false,
+    val vouchersError: UiError? = null,
+    /** Network policy switch; the create button hides when vouchers are off. */
+    val voucherEnabled: Boolean = true,
     val voucherLoading: Boolean = false,
     val voucherError: UiError? = null,
+    /** Rules of an echo the user is subscribing to; the dialog asks to accept. */
+    val rulesPrompt: RulesPromptUi? = null,
+    /** Rules/rename proposal editor of the current echo (moderator/compat). */
+    val rulesEdit: RulesEditState? = null,
+    /** User-defined echo groups of the active network (#366 of fm-app). */
+    val echoGroups: List<EchoGroupUi> = emptyList(),
+    val echoGroupsDialog: Boolean = false,
+    val echoGroupDraftName: String = "",
+    val echoGroupSelection: Set<String> = emptySet(),
+    val echoGroupError: UiError? = null,
+    /** Renaming the display name on the node. */
+    val displayNameDialog: Boolean = false,
+    val displayNameDraft: String = "",
+    val displayNameSaving: Boolean = false,
+    val displayNameError: UiError? = null,
     val recoveryDialog: Boolean = false,
     val recoveryUrl: String = "",
     val recoveryLoading: Boolean = false,
@@ -329,6 +442,10 @@ data class UiState(
     val createEchoType: CreateEchoType = CreateEchoType.LocalEcho,
     val createEchoName: String = "",
     val createEchoDescription: String = "",
+    /** Rules JSON used when [createEchoType] is WithRules. */
+    val createEchoRules: String = "",
+    /** Keep a rules-based echo local instead of announcing it network-wide. */
+    val createEchoNetworkChannel: Boolean = false,
     val createEchoError: UiError? = null,
     val policyViewer: Boolean = false,
     val policyViewText: String = "",
@@ -414,7 +531,13 @@ class AppViewModel(
             if (!session.isUnlocked) return@launch
             val id = manager.activeProfileId()
             val profile = id?.let { manager.activeProfile() }
-            _state.update { it.copy(activeId = id, activeProfile = profile) }
+            _state.update {
+                it.copy(
+                    activeId = id,
+                    activeProfile = profile,
+                    networkName = profile?.let { p -> networkNameFromPolicyJson(p.policyJson) } ?: "FM",
+                )
+            }
         }
     }
 
@@ -435,7 +558,11 @@ class AppViewModel(
                 return@launch
             }
             _state.update {
-                it.copy(unlocked = true, unlockError = null, activeId = profile.id, activeProfile = profile)
+                it.copy(
+                    unlocked = true, unlockError = null, activeId = profile.id,
+                    activeProfile = profile,
+                    networkName = networkNameFromPolicyJson(profile.policyJson),
+                )
             }
             openActiveSession()
         }
@@ -522,6 +649,14 @@ class AppViewModel(
         backupError = null,
     )
 
+    /** Loads the user-defined conference groups of [opened] into the UI state (#366). */
+    private suspend fun loadEchoGroups(opened: NetworkSession) {
+        val groups = runCatching { opened.echoGroups() }.getOrDefault(emptyList())
+        _state.update { state ->
+            state.copy(echoGroups = groups.map { EchoGroupUi(it.id, it.name, it.echoes) })
+        }
+    }
+
     /** Opens the message database/API session of the active profile. */
     private suspend fun openActiveSession() {
         val password = session.passwordOrNull() ?: return
@@ -535,13 +670,17 @@ class AppViewModel(
             it.copy(
                 activeProfile = profile,
                 activeId = profile.id,
-                syncing = true,
+                networkName = networkNameFromPolicyJson(profile.policyJson),
+                // The node hides the voucher button when the network disabled them.
+                voucherEnabled = policyFlag(profile.policyJson, "voucher_enable", true),
                 syncError = null,
             )
         }
         try {
             val opened = sessionFor(profile, password)
             networkSession = opened
+            loadEchoGroups(opened)
+            _state.update { it.copy(syncing = true) }
             // Local work first: the echo list is stored on the device, so the
             // network must never keep the user off the app. A node that is down,
             // slow or unhappy about the policy only fills syncError later.
@@ -620,6 +759,7 @@ class AppViewModel(
                         unread = counts[echo.name] ?: 0,
                         subscribed = echo.subscribed,
                         serverId = echo.serverId,
+                        rulesText = echo.rulesJson,
                     )
                 }
             }.catch { }.collect { list ->
@@ -672,6 +812,7 @@ class AppViewModel(
                             description = echo.description,
                             unread = counts[echo.name] ?: 0,
                             serverId = echo.serverId,
+                            rulesText = echo.rulesJson,
                         )
                     }
                     rows to blogRows
@@ -708,6 +849,7 @@ class AppViewModel(
                             unread = counts[echo.name] ?: 0,
                             subscribed = echo.subscribed,
                             serverId = echo.serverId,
+                            rulesText = echo.rulesJson,
                         )
                     }
                 }.catch { }.collect { list -> _state.update { it.copy(allEchoes = list) } }
@@ -874,6 +1016,18 @@ class AppViewModel(
      */
     private suspend fun refreshIdentity(opened: NetworkSession) {
         val identity = runCatching { opened.identity() }.getOrNull() ?: return
+        // A name changed on another client follows the same route as the address.
+        val remoteName = identity.name.trim()
+        if (remoteName.isNotEmpty() && remoteName != opened.profile.displayName) {
+            opened.applyNameChange(remoteName)
+            manager.updateProfileDisplayName(opened.profile.id, remoteName)
+            _state.update { state ->
+                val updated = state.activeProfile?.let { current ->
+                    if (current.id == opened.profile.id) current.copy(displayName = remoteName) else current
+                }
+                state.copy(activeProfile = updated)
+            }
+        }
         val oldAddress = opened.profile.address
         val newAddress = identity.address
         if (newAddress.isEmpty() || newAddress == oldAddress) return
@@ -918,9 +1072,19 @@ class AppViewModel(
         viewModelScope.launch {
             try {
                 opened.resignPolicy(policy)
-                manager.updateProfilePolicy(opened.profile.id, policy.payload.toString())
+                val policyJson = policy.payload.toString()
+                manager.updateProfilePolicy(opened.profile.id, policyJson)
                 pendingPolicy = null
-                _state.update { it.copy(showPolicyResign = false, policyResignText = "") }
+                _state.update {
+                    it.copy(
+                        showPolicyResign = false,
+                        policyResignText = "",
+                        networkName = networkNameFromPolicyJson(policyJson),
+                        // Policy switches (e.g. vouchers) follow the new policy.
+                        voucherEnabled = policyFlag(policyJson, "voucher_enable", true),
+                        activeProfile = it.activeProfile?.copy(policyJson = policyJson),
+                    )
+                }
                 syncOnce(opened)
             } catch (e: Exception) {
                 _state.update { it.copy(syncError = UiError.Failed(e.message ?: "Failed")) }
@@ -1643,9 +1807,205 @@ class AppViewModel(
 
     fun toggleSubscription(echoName: String, subscribed: Boolean) {
         val opened = networkSession ?: return
-        viewModelScope.launch {
-            runCatching { opened.setSubscribed(echoName, subscribed) }
+        if (!subscribed) {
+            viewModelScope.launch {
+                applySubscription(opened, echoName, false)
+            }
+            return
+        }
+        // An echo with rules needs the user's acceptance first: show the rules
+        // instead of subscribing silently (the node answers `next: accept_rules`).
+        val rules = _state.value.allEchoes.firstOrNull { it.name == echoName }?.rulesText
+            ?: _state.value.echoes.firstOrNull { it.name == echoName }?.rulesText
+        if (!rules.isNullOrBlank()) {
+            _state.update { it.copy(rulesPrompt = RulesPromptUi(echoName, formatEchoRules(rules))) }
+            return
+        }
+        viewModelScope.launch { applySubscription(opened, echoName, true) }
+    }
+
+    /** Accepts the rules shown in the prompt and subscribes. */
+    fun confirmRulesPrompt() {
+        val prompt = _state.value.rulesPrompt ?: return
+        val opened = networkSession ?: return
+        _state.update { it.copy(rulesPrompt = null) }
+        viewModelScope.launch { applySubscription(opened, prompt.echoName, true) }
+    }
+
+    fun cancelRulesPrompt() = _state.update { it.copy(rulesPrompt = null) }
+
+    /** Subscribes and reports a rejection instead of swallowing it. */
+    private suspend fun applySubscription(opened: NetworkSession, echoName: String, subscribed: Boolean) {
+        try {
+            opened.setSubscribed(echoName, subscribed)
             runCatching { opened.refreshEchoes() }
+        } catch (e: Exception) {
+            _state.update {
+                it.copy(syncError = UiError.Failed("$echoName: ${e.message ?: "subscription failed"}"))
+            }
+        }
+    }
+
+    // ------------------------------------------------------------- echo rules
+
+    /** Opens the rules/rename proposal editor of the current conference. */
+    fun openRulesEditor() {
+        val echo = _state.value.selectedEcho ?: return
+        if (echo.isBlog) return
+        _state.update {
+            it.copy(
+                rulesEdit = RulesEditState(
+                    echoName = echo.name,
+                    rulesJson = prettyEchoRules(echo.rulesText),
+                ),
+            )
+        }
+    }
+
+    fun closeRulesEditor() = _state.update { it.copy(rulesEdit = null) }
+
+    fun setRulesEditJson(value: String) = _state.update {
+        it.copy(rulesEdit = it.rulesEdit?.copy(rulesJson = value, error = null, status = null))
+    }
+
+    fun setRulesEditName(value: String) = _state.update {
+        it.copy(rulesEdit = it.rulesEdit?.copy(newName = value, error = null, status = null))
+    }
+
+    fun setRulesEditAllChunks(value: Boolean) = _state.update {
+        it.copy(rulesEdit = it.rulesEdit?.copy(allChunksOnly = value))
+    }
+
+    fun submitRulesEdit() {
+        val edit = _state.value.rulesEdit ?: return
+        val opened = networkSession ?: return
+        val rules = edit.rulesJson.trim()
+        if (runCatching { messageJson.parseToJsonElement(rules).jsonObject }.isFailure) {
+            _state.update { it.copy(rulesEdit = edit.copy(error = UiError.Failed("Rules must be a JSON object"))) }
+            return
+        }
+        viewModelScope.launch {
+            _state.update { it.copy(rulesEdit = edit.copy(sending = true, error = null, status = null)) }
+            try {
+                opened.proposeChangeRules(
+                    echoName = edit.echoName,
+                    rulesJson = rules,
+                    allChunksOnly = edit.allChunksOnly,
+                    newName = edit.newName.trim().takeIf { it.isNotEmpty() },
+                )
+                _state.update {
+                    it.copy(rulesEdit = it.rulesEdit?.copy(sending = false, status = "Proposal queued"))
+                }
+                syncOnce(opened)
+            } catch (e: Exception) {
+                _state.update {
+                    it.copy(rulesEdit = it.rulesEdit?.copy(sending = false, error = UiError.Failed(e.message ?: "Failed")))
+                }
+            }
+        }
+    }
+
+    // -------------------------------------------------------------- echo groups
+
+    /** User-defined groups of conferences, stored per network profile (#366). */
+    fun openEchoGroupsDialog() {
+        _state.update { it.copy(echoGroupsDialog = true, echoGroupDraftName = "", echoGroupSelection = emptySet(), echoGroupError = null) }
+    }
+
+    fun closeEchoGroupsDialog() = _state.update { it.copy(echoGroupsDialog = false) }
+
+    fun setEchoGroupDraftName(value: String) = _state.update { it.copy(echoGroupDraftName = value, echoGroupError = null) }
+
+    fun createEchoGroup() {
+        val name = _state.value.echoGroupDraftName.trim()
+        if (name.isEmpty()) {
+            _state.update { it.copy(echoGroupError = UiError.Failed("Group name is required")) }
+            return
+        }
+        val groups = _state.value.echoGroups + EchoGroupUi(
+            id = "g_${System.currentTimeMillis()}_${java.util.UUID.randomUUID().toString().take(6)}",
+            name = name,
+            echoes = emptyList(),
+        )
+        persistEchoGroups(groups) { it.copy(echoGroupDraftName = "") }
+    }
+
+    fun deleteEchoGroup(id: String) = persistEchoGroups(_state.value.echoGroups.filterNot { it.id == id })
+
+    fun toggleEchoGroupSelection(echoName: String) {
+        _state.update {
+            val selection = it.echoGroupSelection.toMutableSet()
+            if (!selection.add(echoName)) selection.remove(echoName)
+            it.copy(echoGroupSelection = selection)
+        }
+    }
+
+    /** Moves the selected conferences into [groupId]; null removes them from every group. */
+    fun assignSelectionToGroup(groupId: String?) {
+        val selected = _state.value.echoGroupSelection
+        if (selected.isEmpty()) return
+        val groups = _state.value.echoGroups.map { group ->
+            group.copy(echoes = group.echoes.filterNot { it in selected })
+        }.toMutableList()
+        if (groupId != null) {
+            val index = groups.indexOfFirst { it.id == groupId }
+            if (index >= 0) {
+                val target = groups[index]
+                groups[index] = target.copy(echoes = (target.echoes + selected).distinct())
+            }
+        }
+        persistEchoGroups(groups) { it.copy(echoGroupSelection = emptySet()) }
+    }
+
+    private fun persistEchoGroups(groups: List<EchoGroupUi>, extra: (UiState) -> UiState = { it }) {
+        val opened = networkSession ?: return
+        viewModelScope.launch {
+            runCatching { opened.saveEchoGroups(groups.map { NetworkSession.EchoGroup(it.id, it.name, it.echoes) }) }
+            _state.update { extra(it.copy(echoGroups = groups)) }
+        }
+    }
+
+    // ------------------------------------------------------------ display name
+
+    fun openDisplayNameDialog() {
+        _state.update {
+            it.copy(
+                displayNameDialog = true,
+                displayNameDraft = it.activeProfile?.displayName.orEmpty(),
+                displayNameError = null,
+            )
+        }
+    }
+
+    fun closeDisplayNameDialog() = _state.update { it.copy(displayNameDialog = false) }
+
+    fun setDisplayNameDraft(value: String) = _state.update { it.copy(displayNameDraft = value, displayNameError = null) }
+
+    fun submitDisplayName() {
+        val opened = networkSession ?: return
+        val name = _state.value.displayNameDraft.trim()
+        if (name.isEmpty()) {
+            _state.update { it.copy(displayNameError = UiError.Failed("Name is required")) }
+            return
+        }
+        viewModelScope.launch {
+            _state.update { it.copy(displayNameSaving = true, displayNameError = null) }
+            try {
+                opened.setName(name)
+                manager.updateProfileDisplayName(opened.profile.id, name)
+                refreshIdentity(opened)
+                _state.update {
+                    it.copy(
+                        displayNameSaving = false,
+                        displayNameDialog = false,
+                        activeProfile = it.activeProfile?.copy(displayName = name),
+                    )
+                }
+            } catch (e: Exception) {
+                _state.update {
+                    it.copy(displayNameSaving = false, displayNameError = UiError.Failed(e.message ?: "Failed"))
+                }
+            }
         }
     }
 
@@ -1703,12 +2063,22 @@ class AppViewModel(
             try {
                 val nodes = opened.nodeList().mapNotNull { node ->
                     val address = (node["address"] as? JsonPrimitive)?.contentOrNull ?: return@mapNotNull null
+                    val clients = (node["clients"] as? kotlinx.serialization.json.JsonArray)
+                        ?.mapNotNull { element ->
+                            val obj = element as? JsonObject ?: return@mapNotNull null
+                            val clientAddress = (obj["address"] as? JsonPrimitive)?.contentOrNull
+                                ?: return@mapNotNull null
+                            NodeClientUi(clientAddress, (obj["name"] as? JsonPrimitive)?.contentOrNull.orEmpty())
+                        }
+                        ?: emptyList()
                     NodeUi(
                         address = address,
                         url = (node["url"] as? JsonPrimitive)?.contentOrNull.orEmpty(),
                         isRecoverNode = (node["is_recover_node"] as? JsonPrimitive)?.content == "true",
                         isOpenNode = (node["is_open_node"] as? JsonPrimitive)?.content == "true",
                         isEchomailRouter = (node["is_echomail_router"] as? JsonPrimitive)?.content == "true",
+                        name = (node["name"] as? JsonPrimitive)?.contentOrNull.orEmpty(),
+                        clients = clients,
                     )
                 }
                 _state.update { it.copy(adminNodes = nodes, adminLoading = false) }
@@ -1995,6 +2365,8 @@ class AppViewModel(
                 createEchoType = CreateEchoType.LocalEcho,
                 createEchoName = "",
                 createEchoDescription = "",
+                createEchoRules = DEFAULT_ECHO_RULES,
+                createEchoNetworkChannel = false,
                 createEchoError = null,
             )
         }
@@ -2013,6 +2385,12 @@ class AppViewModel(
     fun setCreateEchoDescription(value: String) =
         _state.update { it.copy(createEchoDescription = value, createEchoError = null) }
 
+    fun setCreateEchoRules(value: String) =
+        _state.update { it.copy(createEchoRules = value, createEchoError = null) }
+
+    fun setCreateEchoNetworkChannel(value: Boolean) =
+        _state.update { it.copy(createEchoNetworkChannel = value) }
+
     fun createLocalEcho() {
         val opened = networkSession ?: return
         val state = _state.value
@@ -2021,13 +2399,14 @@ class AppViewModel(
             _state.update { it.copy(createEchoError = UiError.Failed("Name is required")) }
             return
         }
+        if (state.echoes.any { it.name.equals(name, ignoreCase = true) } ||
+            state.blogs.any { it.name.equals(name, ignoreCase = true) } ||
+            state.allEchoes.any { it.name.equals(name, ignoreCase = true) && !it.isBlog }
+        ) {
+            _state.update { it.copy(createEchoError = UiError.Failed("Name is already in use")) }
+            return
+        }
         if (state.createEchoType == CreateEchoType.Blog) {
-            if (state.blogs.any { it.name.equals(name, ignoreCase = true) } ||
-                state.allEchoes.any { it.name.equals(name, ignoreCase = true) && !it.isBlog }
-            ) {
-                _state.update { it.copy(createEchoError = UiError.Failed("Name is already in use")) }
-                return
-            }
             viewModelScope.launch {
                 val id = "blog_${System.currentTimeMillis()}_${java.util.UUID.randomUUID().toString().take(6)}"
                 val blog = BlogEntity(id, name, state.createEchoDescription.trim(), System.currentTimeMillis(), System.currentTimeMillis())
@@ -2050,7 +2429,21 @@ class AppViewModel(
         }
         viewModelScope.launch {
             try {
-                opened.createLocalEcho(name, state.createEchoDescription.trim())
+                if (state.createEchoType == CreateEchoType.WithRules) {
+                    val rules = state.createEchoRules.trim()
+                    if (runCatching { messageJson.parseToJsonElement(rules).jsonObject }.isFailure) {
+                        _state.update { it.copy(createEchoError = UiError.Failed("Rules must be a JSON object")) }
+                        return@launch
+                    }
+                    opened.createEchoWithRules(
+                        name = name,
+                        description = state.createEchoDescription.trim(),
+                        rulesJson = rules,
+                        networkChannel = state.createEchoNetworkChannel,
+                    )
+                } else {
+                    opened.createLocalEcho(name, state.createEchoDescription.trim())
+                }
                 runCatching { opened.refreshEchoes() }
                 _state.update { it.copy(createEchoDialog = false) }
             } catch (e: Exception) {
@@ -2180,17 +2573,68 @@ class AppViewModel(
         }
     }
 
+    /** Creates a voucher of the selected type and TTL (see the voucher docs). */
     fun createVoucher() {
         val opened = networkSession ?: return
+        val state = _state.value
+        val type = state.voucherType
+        val ttl = state.voucherTtl.trim().takeIf { it.isNotEmpty() }
         viewModelScope.launch {
             _state.update { it.copy(voucherLoading = true, voucherError = null) }
             try {
-                val code = opened.createVoucher()
-                _state.update { it.copy(voucherLoading = false, voucherCode = code) }
+                val issued = opened.createVoucher(type = type, ttl = ttl)
+                _state.update {
+                    it.copy(
+                        voucherLoading = false,
+                        voucherCode = issued.code,
+                        voucherReusable = issued.reusable,
+                        voucherExpiresAt = issued.expiresAt,
+                    )
+                }
+                loadVouchers()
             } catch (e: Exception) {
                 _state.update {
                     it.copy(voucherLoading = false, voucherError = UiError.Failed(e.message ?: "Failed"))
                 }
+            }
+        }
+    }
+
+    fun setVoucherType(type: String) = _state.update { it.copy(voucherType = type, voucherError = null) }
+
+    fun setVoucherTtl(ttl: String) = _state.update { it.copy(voucherTtl = ttl, voucherError = null) }
+
+    /** Lists the vouchers of this user (an admin sees every voucher of the node). */
+    fun loadVouchers() {
+        val opened = networkSession ?: return
+        viewModelScope.launch {
+            _state.update { it.copy(vouchersLoading = true, vouchersError = null) }
+            try {
+                val rows = opened.vouchers()
+                _state.update {
+                    it.copy(
+                        vouchersLoading = false,
+                        vouchers = rows.map { row ->
+                            VoucherUi(row.code, row.type, row.status, row.createdBy, row.expiresAt)
+                        },
+                    )
+                }
+            } catch (e: Exception) {
+                _state.update {
+                    it.copy(vouchersLoading = false, vouchersError = UiError.Failed(e.message ?: "Failed"))
+                }
+            }
+        }
+    }
+
+    fun revokeVoucher(code: String) {
+        val opened = networkSession ?: return
+        viewModelScope.launch {
+            try {
+                opened.revokeVoucher(code)
+                loadVouchers()
+            } catch (e: Exception) {
+                _state.update { it.copy(vouchersError = UiError.Failed(e.message ?: "Failed")) }
             }
         }
     }
@@ -2880,6 +3324,8 @@ class AppViewModel(
         private const val MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024
         private const val MAX_ATTACHMENTS_TOTAL = 6 * 1024 * 1024
         private const val MAX_SEND_ERRORS = 10
+        /** Starter rules for a conference created with rules. */
+        private const val DEFAULT_ECHO_RULES = "{\n  \"text\": \"\",\n  \"parameters\": {}\n}"
 
         fun factory(manager: NetworkManager, session: Session): ViewModelProvider.Factory =
             object : ViewModelProvider.Factory {

@@ -29,6 +29,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
+import androidx.compose.material3.Checkbox
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.CenterAlignedTopAppBar
@@ -56,6 +57,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -665,10 +667,14 @@ fun CreateEchoDialog(
     name: String,
     description: String,
     type: CreateEchoType,
+    rules: String,
+    networkChannel: Boolean,
     error: UiError?,
     onName: (String) -> Unit,
     onDescription: (String) -> Unit,
     onType: (CreateEchoType) -> Unit,
+    onRules: (String) -> Unit,
+    onNetworkChannel: (Boolean) -> Unit,
     onCreate: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -676,10 +682,13 @@ fun CreateEchoDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.create_echo)) },
         text = {
-            Column {
+            Column(Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState())) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(onClick = { onType(CreateEchoType.LocalEcho) }) {
                         Text(stringResource(R.string.fm_createecho_local))
+                    }
+                    OutlinedButton(onClick = { onType(CreateEchoType.WithRules) }) {
+                        Text(stringResource(R.string.create_echo_with_rules))
                     }
                     OutlinedButton(onClick = { onType(CreateEchoType.Blog) }) {
                         Text(stringResource(R.string.fm_createecho_blog))
@@ -698,6 +707,23 @@ fun CreateEchoDialog(
                     onValueChange = onDescription,
                     label = { Text(stringResource(R.string.create_echo_description)) },
                 )
+                if (type == CreateEchoType.WithRules) {
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = rules,
+                        onValueChange = onRules,
+                        label = { Text(stringResource(R.string.create_echo_rules)) },
+                        textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 140.dp),
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(checked = networkChannel, onCheckedChange = onNetworkChannel)
+                        Text(
+                            text = stringResource(R.string.create_echo_network_channel),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
                 error?.let {
                     Spacer(Modifier.height(8.dp))
                     Text(errorText(it), color = MaterialTheme.colorScheme.error)

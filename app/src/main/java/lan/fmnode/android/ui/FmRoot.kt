@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -149,6 +150,31 @@ fun FmRoot(
     onExportFull: () -> Unit = {},
     onImportBackup: () -> Unit = {},
     onClearBackup: () -> Unit = {},
+    onAcceptRules: () -> Unit = {},
+    onCancelRules: () -> Unit = {},
+    onOpenRulesEditor: () -> Unit = {},
+    onCloseRulesEditor: () -> Unit = {},
+    onRulesEditJson: (String) -> Unit = {},
+    onRulesEditName: (String) -> Unit = {},
+    onRulesEditAllChunks: (Boolean) -> Unit = {},
+    onSubmitRulesEdit: () -> Unit = {},
+    onOpenEchoGroups: () -> Unit = {},
+    onCloseEchoGroups: () -> Unit = {},
+    onEchoGroupDraftName: (String) -> Unit = {},
+    onCreateEchoGroup: () -> Unit = {},
+    onDeleteEchoGroup: (String) -> Unit = {},
+    onToggleEchoGroupSelection: (String) -> Unit = {},
+    onAssignEchoGroup: (String?) -> Unit = {},
+    onOpenDisplayName: () -> Unit = {},
+    onCloseDisplayName: () -> Unit = {},
+    onDisplayNameDraft: (String) -> Unit = {},
+    onSubmitDisplayName: () -> Unit = {},
+    onCreateEchoRules: (String) -> Unit = {},
+    onCreateEchoNetworkChannel: (Boolean) -> Unit = {},
+    onVoucherType: (String) -> Unit = {},
+    onVoucherTtl: (String) -> Unit = {},
+    onLoadVouchers: () -> Unit = {},
+    onRevokeVoucher: (String) -> Unit = {},
     onOpenSearch: () -> Unit = {},
     onCloseSearch: () -> Unit = {},
     onSearchQuery: (String) -> Unit = {},
@@ -338,12 +364,54 @@ fun FmRoot(
             name = state.createEchoName,
             description = state.createEchoDescription,
             type = state.createEchoType,
+            rules = state.createEchoRules,
+            networkChannel = state.createEchoNetworkChannel,
             error = state.createEchoError,
             onName = onCreateEchoName,
             onDescription = onCreateEchoDescription,
             onType = onCreateEchoType,
+            onRules = onCreateEchoRules,
+            onNetworkChannel = onCreateEchoNetworkChannel,
             onCreate = onCreateLocalEcho,
             onDismiss = onCloseCreateEchoDialog,
+        )
+    }
+    state.rulesPrompt?.let { prompt ->
+        RulesPromptDialog(prompt = prompt, onAccept = onAcceptRules, onDismiss = onCancelRules)
+    }
+    state.rulesEdit?.let { edit ->
+        RulesEditDialog(
+            state = edit,
+            onRules = onRulesEditJson,
+            onName = onRulesEditName,
+            onAllChunks = onRulesEditAllChunks,
+            onSubmit = onSubmitRulesEdit,
+            onDismiss = onCloseRulesEditor,
+        )
+    }
+    if (state.echoGroupsDialog) {
+        EchoGroupsDialog(
+            groups = state.echoGroups,
+            echoes = state.echoes.filterNot { it.isBlog },
+            draftName = state.echoGroupDraftName,
+            selection = state.echoGroupSelection,
+            error = state.echoGroupError,
+            onDraftName = onEchoGroupDraftName,
+            onCreate = onCreateEchoGroup,
+            onDelete = onDeleteEchoGroup,
+            onToggle = onToggleEchoGroupSelection,
+            onAssign = onAssignEchoGroup,
+            onDismiss = onCloseEchoGroups,
+        )
+    }
+    if (state.displayNameDialog) {
+        DisplayNameDialog(
+            draft = state.displayNameDraft,
+            saving = state.displayNameSaving,
+            error = state.displayNameError,
+            onChange = onDisplayNameDraft,
+            onSubmit = onSubmitDisplayName,
+            onDismiss = onCloseDisplayName,
         )
     }
     if (state.refillDialog) {
@@ -389,7 +457,7 @@ fun FmRoot(
             onScanQr = onOpenScanner,
         )
         AppScreen.Echoes -> EchoesListScreen(
-            title = state.activeProfile?.title ?: stringResource(R.string.app_name),
+            title = state.networkName.ifBlank { stringResource(R.string.app_name) },
             echoes = state.echoes,
             syncing = state.syncing,
             error = state.syncError,
@@ -409,6 +477,8 @@ fun FmRoot(
             onSelectEchoInNetwork = onSelectEchoInNetwork,
             onDismissSendErrors = onDismissSendErrors,
             onDismissAddressNotice = onDismissAddressNotice,
+            echoGroups = state.echoGroups,
+            onOpenEchoGroups = onOpenEchoGroups,
         )
         AppScreen.Echo -> EchoConversationScreen(
             echoName = state.selectedEcho?.name ?: "",
@@ -432,6 +502,7 @@ fun FmRoot(
             onOpenMessage = onOpenMessage,
             sendErrors = state.sendErrors,
             onDismissSendErrors = onDismissSendErrors,
+            onOpenRules = onOpenRulesEditor,
         )
         AppScreen.MessageDetail -> MessageDetailScreen(
             message = state.selectedMessage,
@@ -586,6 +657,19 @@ fun FmRoot(
             onDismissVoucher = onDismissVoucher,
             onOpenOutbox = onOpenOutbox,
             onOpenPolicyViewer = onOpenPolicyViewer,
+            onOpenDisplayName = onOpenDisplayName,
+            voucherEnabled = state.voucherEnabled,
+            voucherType = state.voucherType,
+            voucherTtl = state.voucherTtl,
+            voucherReusable = state.voucherReusable,
+            voucherExpiresAt = state.voucherExpiresAt,
+            vouchers = state.vouchers,
+            vouchersLoading = state.vouchersLoading,
+            vouchersError = state.vouchersError,
+            onVoucherType = onVoucherType,
+            onVoucherTtl = onVoucherTtl,
+            onLoadVouchers = onLoadVouchers,
+            onRevokeVoucher = onRevokeVoucher,
             onLock = onLock,
             onLogout = onRequestLogout,
         )
@@ -970,6 +1054,9 @@ fun EchoesListScreen(
     onSelectEchoInNetwork: (String, String) -> Unit = { _, _ -> },
     onDismissSendErrors: () -> Unit = {},
     onDismissAddressNotice: () -> Unit = {},
+    /** User-defined groups of the active network (#366 of fm-app). */
+    echoGroups: List<EchoGroupUi> = emptyList(),
+    onOpenEchoGroups: () -> Unit = {},
 ) {
     Scaffold(
         bottomBar = {
@@ -991,6 +1078,9 @@ fun EchoesListScreen(
                     }
                     IconButton(onClick = onProtocols) {
                         Icon(Icons.Default.HowToVote, contentDescription = stringResource(R.string.protocols_title))
+                    }
+                    IconButton(onClick = onOpenEchoGroups) {
+                        Icon(Icons.Default.Checklist, contentDescription = stringResource(R.string.echo_groups_title))
                     }
                     IconButton(onClick = onRefresh) {
                         Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.refresh))
@@ -1053,24 +1143,76 @@ fun EchoesListScreen(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 if (groups.isEmpty()) {
-                    items(flat, key = { it.name }) { echo ->
-                        EchoCard(echo = echo, onClick = { onSelectEcho(echo.name) })
-                    }
+                    val activeId = groups.firstOrNull()?.profileId
+                    EchoItems(
+                        echoes = flat,
+                        echoGroups = echoGroups,
+                        keyPrefix = activeId ?: "echo",
+                        onSelect = { onSelectEcho(it.name) },
+                    )
                 } else {
                     groups.forEach { group ->
                         if (group.echoes.isEmpty()) return@forEach
                         stickyHeader(key = "group-${group.profileId}") {
                             NetworkGroupHeader(group)
                         }
-                        items(group.echoes, key = { "${group.profileId}:${it.name}" }) { echo ->
-                            EchoCard(
-                                echo = echo,
-                                onClick = { onSelectEchoInNetwork(group.profileId, echo.name) },
-                            )
-                        }
+                        EchoItems(
+                            echoes = group.echoes,
+                            // Groups belong to the active network profile only.
+                            echoGroups = if (group.isActive) echoGroups else emptyList(),
+                            keyPrefix = group.profileId,
+                            onSelect = { onSelectEchoInNetwork(group.profileId, it.name) },
+                        )
                     }
                 }
             }
+        }
+    }
+}
+
+/** Echo cards of one network, split by the user's groups when they exist (#366). */
+private fun LazyListScope.EchoItems(
+    echoes: List<EchoUi>,
+    echoGroups: List<EchoGroupUi>,
+    keyPrefix: String,
+    onSelect: (EchoUi) -> Unit,
+) {
+    if (echoGroups.isEmpty()) {
+        items(echoes, key = { "$keyPrefix:${it.name}" }) { echo ->
+            EchoCard(echo = echo, onClick = { onSelect(echo) })
+        }
+        return
+    }
+    // Conferences inside one network are split by the user's own groups; the
+    // conferences that belong to no group stay under "Ungrouped".
+    val grouped = echoGroups.flatMap { it.echoes }.toSet()
+    echoGroups.forEach { group ->
+        val members = echoes.filter { it.name in group.echoes }
+        if (members.isEmpty()) return@forEach
+        item(key = "$keyPrefix:ug:${group.id}") {
+            Text(
+                text = group.name,
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+        }
+        items(members, key = { "$keyPrefix:${group.id}:${it.name}" }) { echo ->
+            EchoCard(echo = echo, onClick = { onSelect(echo) })
+        }
+    }
+    val rest = echoes.filterNot { it.name in grouped }
+    if (rest.isNotEmpty()) {
+        item(key = "$keyPrefix:ug:none") {
+            Text(
+                text = stringResource(R.string.echo_groups_ungrouped),
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+        }
+        items(rest, key = { "$keyPrefix:${it.name}" }) { echo ->
+            EchoCard(echo = echo, onClick = { onSelect(echo) })
         }
     }
 }
@@ -1219,8 +1361,10 @@ fun EchoConversationScreen(
     onOpenMessage: (MessageUi) -> Unit = {},
     sendErrors: List<String> = emptyList(),
     onDismissSendErrors: () -> Unit = {},
+    onOpenRules: () -> Unit = {},
 ) {
     var versionsMessage by remember { mutableStateOf<MessageUi?>(null) }
+    var menuExpanded by remember { mutableStateOf(false) }
     // Attachment-only uploads are listed separately as one entry per file bundle (#9).
     val visibleMessages = remember(messages, messageView) {
         if (messageView == EchoMessageView.Attachments) {
@@ -1260,6 +1404,20 @@ fun EchoConversationScreen(
                     }
                     IconButton(onClick = onRefresh) {
                         Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.refresh))
+                    }
+                    Box {
+                        IconButton(onClick = { menuExpanded = true }) {
+                            Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.more))
+                        }
+                        DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.rules_edit_title)) },
+                                onClick = {
+                                    menuExpanded = false
+                                    onOpenRules()
+                                },
+                            )
+                        }
                     }
                 },
             )

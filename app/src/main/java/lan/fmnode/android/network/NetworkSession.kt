@@ -9,6 +9,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.longOrNull
@@ -64,6 +65,31 @@ class NetworkSession(
         val isModerator: Boolean,
     )
 
+    /** A voucher as returned after creation. */
+    data class VoucherIssued(
+        val code: String,
+        val type: String,
+        val reusable: Boolean = false,
+        val expiresAt: String? = null,
+    )
+
+    /** A voucher row from `action: "list"`. */
+    data class VoucherInfo(
+        val code: String,
+        val type: String,
+        val status: String,
+        val createdBy: String,
+        val expiresAt: String,
+        val reusable: Boolean,
+    )
+
+    /** User-defined group of conferences inside this network. */
+    data class EchoGroup(
+        val id: String,
+        val name: String,
+        val echoes: List<String>,
+    )
+
     // ------------------------------------------------------------------ echoes
 
     /** Loads the echo list (with subscription flags) from the node. */
@@ -109,18 +135,108 @@ class NetworkSession(
                     database.echoDao().delete(old.name)
                 }
             }
+            // User groups follow a server-side rename.
+            runCatching {
+                val groups = echoGroups()
+                if (groups.any { group -> renames.any { (old, name) -> old.name in group.echoes && old.name != name } }) {
+                    saveEchoGroups(
+                        groups.map { group ->
+                            group.copy(
+                                echoes = renames.fold(group.echoes) { acc, (old, name) ->
+                                    acc.map { if (it == old.name) name else it }.distinct()
+                                },
+                            )
+                        },
+                    )
+                }
+            }
         }
         database.echoDao().upsertAll(echoes)
         return echoes
     }
 
+    /**
+     * Subscribes or unsubscribes an echo. An echo with rules needs the user's
+     * signature over the current rules first, so the node's `next: accept_rules`
+     * answer is answered transparently and the subscribe is retried.
+     */
     suspend fun setSubscribed(echoName: String, subscribed: Boolean) {
         val body = buildJsonObject {
             put("echo_name", echoName)
             put("user_address", profile.address)
         }
-        api.post(if (subscribed) "subscribe_echo" else "unsubscribe_echo", body.toString(), auth)
-        database.echoDao().setSubscribed(echoName, subscribed)
+        if (!subscribed) {
+            api.post("unsubscribe_echo", body.toString(), auth)
+            database.echoDao().setSubscribed(echoName, false)
+            return
+        }
+        try {
+            api.post("subscribe_echo", body.toString(), auth)
+        } catch (e: FmApiException) {
+            if (e.next != "accept_rules") throw e
+            acceptRules(echoName)
+            api.post("subscribe_echo", body.toString(), auth)
+        }
+        database.echoDao().setSubscribed(echoName, true)
+    }
+
+    /** Rules of an echo as the node reported them (empty when the echo has none). */
+    suspend fun rulesText(echoName: String): String =
+        database.echoDao().getByName(echoName)?.rulesJson.orEmpty()
+
+    /** User-defined conference groups of this network (local only). */
+    suspend fun echoGroups(): List<EchoGroup> {
+        val raw = database.metaDao().get(META_ECHO_GROUPS) ?: return emptyList()
+        val array = runCatching { json.parseToJsonElement(raw) as? JsonArray }.getOrNull()
+            ?: return emptyList()
+        return array.mapNotNull { element ->
+            val obj = element as? JsonObject ?: return@mapNotNull null
+            val id = obj.string("id") ?: return@mapNotNull null
+            val name = obj.string("name") ?: return@mapNotNull null
+            val echoes = (obj["echoes"] as? JsonArray)
+                ?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
+                ?: emptyList()
+            EchoGroup(id, name, echoes)
+        }
+    }
+
+    /** Stores the user-defined conference groups of this network. */
+    suspend fun saveEchoGroups(groups: List<EchoGroup>) {
+        val array = buildJsonArray {
+            groups.forEach { group ->
+                add(
+                    buildJsonObject {
+                        put("id", group.id)
+                        put("name", group.name)
+                        put("echoes", buildJsonArray { group.echoes.forEach { add(JsonPrimitive(it)) } })
+                    },
+                )
+            }
+        }
+        database.metaDao().put(MetaEntity(META_ECHO_GROUPS, array.toString()))
+    }
+
+    /**
+     * Signs the current rules of an echo and stores the acceptance on the node.
+     * The payload is `{id, rules}` and the id must match what the node computes.
+     */
+    suspend fun acceptRules(echoName: String) {
+        val rulesJson = rulesText(echoName)
+        val rules = RulesId.rulesMap(rulesJson)
+            ?: throw FmApiException(0, "echo $echoName has no rules")
+        val id = RulesId.compute(rulesJson)
+            ?: throw FmApiException(0, "echo $echoName has no rules")
+        val payload = buildJsonObject {
+            put("id", id)
+            put("rules", rules)
+        }.toString()
+        val data = buildJsonObject {
+            put("echo_name", echoName)
+            put("rules_id", id)
+            put("rules_jws", CryptoService.createJws(seed, payload, publicKey))
+            put("sig_pkey", Encoding.base64Encode(publicKey))
+        }.toString()
+        api.post("accept_rules", data, auth)
     }
 
     /** Fetches the current network policy (phase 1, encrypted for us). */
@@ -166,6 +282,12 @@ class NetworkSession(
             val rewritten = OutboxAddress.rewrite(entry.dataJson, old, newAddress) ?: continue
             database.outboxDao().updateData(entry.id, rewritten)
         }
+    }
+
+    /** Adopts a display name the node reports (changed by another client). */
+    fun applyNameChange(name: String) {
+        if (name.isBlank() || name == profile.displayName) return
+        profile = profile.copy(displayName = name)
     }
 
     // -------------------------------------------------------------------- sync
@@ -417,24 +539,63 @@ class NetworkSession(
 
     // --------------------------------------------------------------- admin
 
-    /** Creates a signed invite voucher and returns its code. */
-    suspend fun createVoucher(): String {
+    /**
+     * Creates a signed voucher.
+     *
+     * [type] is `invite` (single use) or `invite_time` (reusable until [ttl]
+     * expires, admin only). [ttl] accepts Go durations (`30m`, `24h`) and days
+     * (`7d`); empty means the node default of 24 hours.
+     */
+    suspend fun createVoucher(type: String = VOUCHER_INVITE, ttl: String? = null): VoucherIssued {
         val nonce = "${System.currentTimeMillis()}-${java.util.UUID.randomUUID().toString().take(8)}"
         val payload = buildJsonObject {
-            put("type", "invite")
+            put("type", type)
             put("nonce", nonce)
+            if (!ttl.isNullOrBlank()) put("ttl", ttl)
         }.toString()
         val data = buildJsonObject {
             put("voucher", CryptoService.createJws(seed, payload, publicKey))
-            put("type", "invite")
+            put("type", type)
         }.toString()
         val response = api.post("voucher", data, auth)
         return when (response) {
-            is JsonPrimitive -> response.content
-            is JsonObject -> response.string("voucher")
-                ?: throw FmApiException(0, "invalid voucher response")
+            is JsonPrimitive -> VoucherIssued(code = response.content, type = type)
+            is JsonObject -> VoucherIssued(
+                code = response.string("voucher") ?: throw FmApiException(0, "invalid voucher response"),
+                type = response.string("type") ?: type,
+                reusable = response.boolean("reusable"),
+                expiresAt = response.string("expires_at"),
+            )
             else -> throw FmApiException(0, "invalid voucher response")
         }
+    }
+
+    /** Vouchers of this user (an admin sees every voucher of the node). */
+    suspend fun vouchers(): List<VoucherInfo> {
+        val data = buildJsonObject { put("action", "list") }.toString()
+        val response = api.post("voucher", data, auth) as? JsonObject ?: return emptyList()
+        val array = response["vouchers"] as? JsonArray ?: return emptyList()
+        return array.mapNotNull { element ->
+            val obj = element as? JsonObject ?: return@mapNotNull null
+            val code = obj.string("code") ?: return@mapNotNull null
+            VoucherInfo(
+                code = code,
+                type = obj.string("type").orEmpty(),
+                status = obj.string("status").orEmpty(),
+                createdBy = obj.string("created_by").orEmpty(),
+                expiresAt = obj.string("expires_at").orEmpty(),
+                reusable = obj.boolean("reusable"),
+            )
+        }
+    }
+
+    /** Revokes a voucher; the author and a node admin may do it. */
+    suspend fun revokeVoucher(code: String) {
+        val data = buildJsonObject {
+            put("action", "revoke")
+            put("code", code)
+        }.toString()
+        api.post("voucher", data, auth)
     }
 
     /** Creates a local conference (blog-like channel stored by the node). */
@@ -445,6 +606,64 @@ class NetworkSession(
             put("user_address", profile.address)
         }
         api.post("create_local_echo", data.toString(), auth)
+    }
+
+    /**
+     * Creates a conference with rules ([rulesJson] is `{"text", "parameters"}`).
+     * [networkChannel] keeps the conference local to this node instead of
+     * announcing it to the network with a NEW_ECHO broadcast.
+     */
+    suspend fun createEchoWithRules(
+        name: String,
+        description: String,
+        rulesJson: String,
+        networkChannel: Boolean,
+    ) {
+        val rules = runCatching { json.parseToJsonElement(rulesJson) }.getOrNull()
+            ?: throw FmApiException(0, "rules must be valid JSON")
+        val data = buildJsonObject {
+            put("name", name)
+            put("description", description)
+            put("rules", rules)
+            put("network_channel", networkChannel)
+            put("user_address", profile.address)
+        }
+        api.post("create_echo_with_rules", data.toString(), auth)
+    }
+
+    /**
+     * Proposes new rules for a conference (moderator only). [newName] renames the
+     * conference through the same protocol: the node votes on the name as its own
+     * diff chunk.
+     */
+    suspend fun proposeChangeRules(
+        echoName: String,
+        rulesJson: String,
+        allChunksOnly: Boolean,
+        newName: String?,
+    ): SendResult {
+        val rules = runCatching { json.parseToJsonElement(rulesJson) }.getOrNull()
+            ?: throw FmApiException(0, "rules must be valid JSON")
+        val data = buildJsonObject {
+            put("proto", "change_rules")
+            put("from", profile.address)
+            put("to", "all")
+            put("subject", "Change rules")
+            put("message", "Rules change proposal")
+            put("date", java.time.Instant.now().toString())
+            put("node1", profile.address)
+            put("echo", echoName)
+            put("all_chunks_only", allChunksOnly)
+            put("proposed_rules", rules)
+            if (!newName.isNullOrBlank() && newName != echoName) put("new_name", newName)
+        }.toString()
+        return postProtocol(echoName, "change_rules", data)
+    }
+
+    /** Updates the display name of this profile on the node. */
+    suspend fun setName(name: String) {
+        val data = buildJsonObject { put("name", name) }.toString()
+        api.post("set_name", data, auth)
     }
 
     /** Nodelist as reported by the node. */
@@ -948,6 +1167,11 @@ class NetworkSession(
         private const val META_CLIENT_ID = "client_id"
         const val CLIENT_LIST_CONTAINER = "client_synchronize"
         const val CLIENT_CONTAINER_PREFIX = "outbound_client_"
+        private const val META_ECHO_GROUPS = "echo_groups"
+        /** Single-use invite voucher. */
+        const val VOUCHER_INVITE = "invite"
+        /** Reusable time voucher (admin only, up to 30 days). */
+        const val VOUCHER_INVITE_TIME = "invite_time"
         private const val META_PENDING_PUBKEY_REQUESTS = "pending_pubkey_requests"
         private const val META_AUTO_SEND_PUBKEY = "auto_send_pubkey"
         private const val META_AUTO_REQUEST_PUBKEYS = "auto_request_pubkeys"
