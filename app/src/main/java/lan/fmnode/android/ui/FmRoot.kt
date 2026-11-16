@@ -59,6 +59,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -171,6 +172,18 @@ fun FmRoot(
     onSubmitDisplayName: () -> Unit = {},
     onCreateEchoRules: (String) -> Unit = {},
     onCreateEchoNetworkChannel: (Boolean) -> Unit = {},
+    onCreateEchoWriters: (String) -> Unit = {},
+    onCreateEchoElectWritersFrom: (String) -> Unit = {},
+    onCreateEchoRetractVote: (Boolean) -> Unit = {},
+    onCreateEchoRetractVoteDays: (String) -> Unit = {},
+    onFeedVote: (VoteCardUi, String) -> Unit = { _, _ -> },
+    onOpenVoteCompose: () -> Unit = {},
+    onCloseVoteCompose: () -> Unit = {},
+    onVoteQuestion: (String) -> Unit = {},
+    onVoteVariant: (Int, String) -> Unit = { _, _ -> },
+    onAddVoteVariant: () -> Unit = {},
+    onRemoveVoteVariant: (Int) -> Unit = {},
+    onSubmitVoteCompose: () -> Unit = {},
     onVoucherType: (String) -> Unit = {},
     onVoucherTtl: (String) -> Unit = {},
     onLoadVouchers: () -> Unit = {},
@@ -236,7 +249,9 @@ fun FmRoot(
     onOpenPolicyEdit: () -> Unit = {},
     onClosePolicyEdit: () -> Unit = {},
     onPolicyEditText: (String) -> Unit = {},
-    onPolicyEditParams: (String) -> Unit = {},
+    onPolicyEditField: (String, String) -> Unit = { _, _ -> },
+    onPolicyEditRateLimit: (String, String) -> Unit = { _, _ -> },
+    onPreviewPolicyDiff: () -> Unit = {},
     onPolicyEditAllChunks: (Boolean) -> Unit = {},
     onSubmitPolicyEdit: () -> Unit = {},
     onOpenModeration: (MessageUi) -> Unit = {},
@@ -330,17 +345,25 @@ fun FmRoot(
             onDismiss = onCloseRemoveEcho,
         )
     }
-    if (state.policyEditDialog) {
+    state.voteCompose?.let { draft ->
+        VoteComposeDialog(
+            state = draft,
+            onQuestion = onVoteQuestion,
+            onVariant = onVoteVariant,
+            onAddVariant = onAddVoteVariant,
+            onRemoveVariant = onRemoveVoteVariant,
+            onSubmit = onSubmitVoteCompose,
+            onDismiss = onCloseVoteCompose,
+        )
+    }
+    state.policyEdit?.let { edit ->
         PolicyEditDialog(
-            text = state.policyEditText,
-            params = state.policyEditParams,
-            allChunks = state.policyEditAllChunks,
-            sending = state.policyEditSending,
-            status = state.policyEditStatus,
-            error = state.policyEditError,
+            state = edit,
             onText = onPolicyEditText,
-            onParams = onPolicyEditParams,
+            onField = onPolicyEditField,
+            onRateLimit = onPolicyEditRateLimit,
             onAllChunks = onPolicyEditAllChunks,
+            onPreview = onPreviewPolicyDiff,
             onSubmit = onSubmitPolicyEdit,
             onDismiss = onClosePolicyEdit,
         )
@@ -366,12 +389,20 @@ fun FmRoot(
             type = state.createEchoType,
             rules = state.createEchoRules,
             networkChannel = state.createEchoNetworkChannel,
+            writers = state.createEchoWriters,
+            electWritersFrom = state.createEchoElectWritersFrom,
+            retractVote = state.createEchoRetractVote,
+            retractVoteDays = state.createEchoRetractVoteDays,
             error = state.createEchoError,
             onName = onCreateEchoName,
             onDescription = onCreateEchoDescription,
             onType = onCreateEchoType,
             onRules = onCreateEchoRules,
             onNetworkChannel = onCreateEchoNetworkChannel,
+            onWriters = onCreateEchoWriters,
+            onElectWritersFrom = onCreateEchoElectWritersFrom,
+            onRetractVote = onCreateEchoRetractVote,
+            onRetractVoteDays = onCreateEchoRetractVoteDays,
             onCreate = onCreateLocalEcho,
             onDismiss = onCloseCreateEchoDialog,
         )
@@ -503,6 +534,8 @@ fun FmRoot(
             sendErrors = state.sendErrors,
             onDismissSendErrors = onDismissSendErrors,
             onOpenRules = onOpenRulesEditor,
+            onOpenVote = onOpenVoteCompose,
+            onVote = onFeedVote,
         )
         AppScreen.MessageDetail -> MessageDetailScreen(
             message = state.selectedMessage,
@@ -636,6 +669,7 @@ fun FmRoot(
         )
         AppScreen.Settings -> SettingsScreen(
             profile = state.activeProfile,
+            networkName = state.networkName,
             onDeleteNetwork = onDeleteActiveNetwork,
             onEchoes = onSelectEchoTab,
             onNetmail = onOpenNetmail,
@@ -857,7 +891,12 @@ private fun ProfileCard(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f)) {
-                Text(profile.title, style = MaterialTheme.typography.titleMedium)
+                // The network is named by its policy (#20), not by the HTTP host.
+                val networkName = networkNameFromPolicyJson(profile.policyJson)
+                Text(
+                    text = networkName.takeIf { it != UNNAMED_NETWORK } ?: profile.title,
+                    style = MaterialTheme.typography.titleMedium,
+                )
                 Text(
                     text = profile.address,
                     style = MaterialTheme.typography.bodySmall,
@@ -1227,7 +1266,8 @@ private fun NetworkGroupHeader(group: NetworkGroupUi) {
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                text = group.title,
+                // Network name from the policy, not the node URL (#20).
+                text = group.displayName,
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.weight(1f),
@@ -1244,6 +1284,8 @@ private fun NetworkGroupHeader(group: NetworkGroupUi) {
             }
         }
         Text(
+            // The endpoint stays as secondary information for telling two
+            // networks on one host apart.
             text = "${group.address} · ${group.endpoint}",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1362,6 +1404,8 @@ fun EchoConversationScreen(
     sendErrors: List<String> = emptyList(),
     onDismissSendErrors: () -> Unit = {},
     onOpenRules: () -> Unit = {},
+    onOpenVote: () -> Unit = {},
+    onVote: (VoteCardUi, String) -> Unit = { _, _ -> },
 ) {
     var versionsMessage by remember { mutableStateOf<MessageUi?>(null) }
     var menuExpanded by remember { mutableStateOf(false) }
@@ -1410,6 +1454,13 @@ fun EchoConversationScreen(
                             Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.more))
                         }
                         DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.vote_create_title)) },
+                                onClick = {
+                                    menuExpanded = false
+                                    onOpenVote()
+                                },
+                            )
                             DropdownMenuItem(
                                 text = { Text(stringResource(R.string.rules_edit_title)) },
                                 onClick = {
@@ -1478,6 +1529,7 @@ fun EchoConversationScreen(
                 onForward = onForward,
                 onOpenMessage = onOpenMessage,
                 versionsMessage = { versionsMessage = it },
+                onVote = onVote,
             )
         }
     }
@@ -1498,6 +1550,7 @@ private fun ConversationList(
     onForward: (MessageUi) -> Unit,
     onOpenMessage: (MessageUi) -> Unit,
     versionsMessage: (MessageUi) -> Unit,
+    onVote: (VoteCardUi, String) -> Unit = { _, _ -> },
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -1521,6 +1574,106 @@ private fun ConversationList(
                 onForward = onForward,
                 onVersions = { versionsMessage(message) },
                 onOpen = { onOpenMessage(message) },
+                onVote = onVote,
+            )
+        }
+    }
+}
+
+/**
+ * Ballot of a vote poster: question, variants with counts, the current choice,
+ * vote/retract actions and the result once the vote is over (#21).
+ */
+@Composable
+private fun VoteBallot(vote: VoteCardUi, onVote: (String) -> Unit) {
+    Column(Modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = stringResource(R.string.vote_card_title),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(
+                text = if (vote.finished) {
+                    stringResource(R.string.vote_card_finished)
+                } else {
+                    stringResource(R.string.vote_card_active)
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.weight(1f))
+            Text(
+                text = stringResource(R.string.vote_card_total, vote.totalVotes),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (vote.question.isNotBlank()) {
+            Spacer(Modifier.height(6.dp))
+            Text(vote.question, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+        }
+        if (vote.variants.isNotEmpty()) {
+            Spacer(Modifier.height(8.dp))
+            vote.variants.forEach { variant ->
+                val count = vote.counts[variant] ?: 0
+                val selected = vote.myVote == variant
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(enabled = !vote.finished) { onVote(variant) }
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    RadioButton(
+                        selected = selected,
+                        onClick = { onVote(variant) },
+                        enabled = !vote.finished,
+                    )
+                    Text(
+                        text = if (count > 0) "$variant ($count)" else variant,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                        color = if (selected) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurface
+                        },
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (vote.finished && vote.winner == variant) {
+                        Text(
+                            text = "\uD83C\uDFC6",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                }
+            }
+        }
+        if (vote.myVote != null && !vote.finished) {
+            Spacer(Modifier.height(4.dp))
+            TextButton(onClick = { onVote("") }) {
+                Text(stringResource(R.string.vote_retract))
+            }
+        }
+        if (vote.finished) {
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = when {
+                    !vote.success -> vote.resultText.ifBlank { stringResource(R.string.vote_card_failed) }
+                    vote.winner != null -> {
+                        val base = stringResource(R.string.vote_card_winner, vote.winner)
+                        if (vote.resultText.isBlank()) base else "$base — ${vote.resultText}"
+                    }
+                    else -> vote.resultText
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = if (vote.success) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.error
+                },
             )
         }
     }
@@ -1538,6 +1691,7 @@ private fun MessageCard(
     onForward: (MessageUi) -> Unit,
     onVersions: (MessageUi) -> Unit,
     onOpen: (MessageUi) -> Unit = {},
+    onVote: (VoteCardUi, String) -> Unit = { _, _ -> },
 ) {
     Card(modifier = Modifier.fillMaxWidth().clickable { onOpen(message) }) {
         Column(Modifier.fillMaxWidth().padding(12.dp)) {
@@ -1575,17 +1729,25 @@ private fun MessageCard(
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            if (message.subject.isNotBlank()) {
+            val vote = message.vote
+            if (vote != null) {
+                // A vote poster is shown as a ballot: question, options with
+                // counts, the current choice and the result (#21).
                 Spacer(Modifier.height(6.dp))
-                Text(message.subject, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-            }
-            if (message.body.isNotBlank()) {
-                Spacer(Modifier.height(4.dp))
-                Text(MarkdownRenderer.render(message.body), style = MaterialTheme.typography.bodyMedium)
-            }
-            if (message.attachments.isNotEmpty()) {
-                Spacer(Modifier.height(6.dp))
-                AttachmentsRow(message.attachments)
+                VoteBallot(vote = vote, onVote = { variant -> onVote(vote, variant) })
+            } else {
+                if (message.subject.isNotBlank()) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(message.subject, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                }
+                if (message.body.isNotBlank()) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(MarkdownRenderer.render(message.body), style = MaterialTheme.typography.bodyMedium)
+                }
+                if (message.attachments.isNotEmpty()) {
+                    Spacer(Modifier.height(6.dp))
+                    AttachmentsRow(message.attachments)
+                }
             }
             val quick = listOf("👍", "❤️", "😂")
             Spacer(Modifier.height(2.dp))

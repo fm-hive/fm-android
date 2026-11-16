@@ -78,7 +78,7 @@ data class NetmailFolderUi(
     val count: Int = 0,
 )
 
-enum class CreateEchoType { LocalEcho, WithRules, Blog }
+enum class CreateEchoType { LocalEcho, WithRules, Channel, Blog }
 
 enum class ScanPurpose { AddNetwork, Merge }
 
@@ -136,6 +136,72 @@ data class MessageVersionUi(
     val timestamp: Long,
 )
 
+/** One parameter row of the policy editor. */
+data class PolicyParamFieldUi(
+    val key: String,
+    val kind: PolicyParamKind,
+    val value: String,
+    val original: String,
+    val options: List<String> = emptyList(),
+    val maxLength: Int? = null,
+) {
+    val changed: Boolean get() = value.trim() != original.trim()
+}
+
+/**
+ * Policy change proposal (#21): the policy text plus one field per parameter,
+ * the nested rate limits and a diff preview. Unknown parameters of the node
+ * are preserved as they are.
+ */
+data class PolicyEditUi(
+    val text: String,
+    val originalText: String,
+    val fields: List<PolicyParamFieldUi>,
+    val rateLimits: Map<String, String>,
+    val originalRateLimits: Map<String, String>,
+    val preserved: JsonObject,
+    val allChunksOnly: Boolean = false,
+    val showDiff: Boolean = false,
+    val sending: Boolean = false,
+    val status: String? = null,
+    val error: UiError? = null,
+) {
+    val textChanged: Boolean get() = text != originalText
+
+    /** Changes to show in the diff preview, e.g. `voting_period: 1m → 2d`. */
+    val changes: List<String>
+        get() = buildList {
+            if (textChanged) add("text")
+            fields.filter { it.changed }.forEach { field ->
+                add("${field.key}: ${field.original.ifBlank { "—" }} → ${field.value.ifBlank { "—" }}")
+            }
+            rateLimits.forEach { (key, value) ->
+                val original = originalRateLimits[key].orEmpty()
+                if (value.trim() != original.trim()) {
+                    add("rate_limit.$key: ${original.ifBlank { "—" }} → ${value.ifBlank { "—" }}")
+                }
+            }
+        }
+}
+
+/** A vote (poster + collected votes + result) shown in the conference feed. */
+data class VoteCardUi(
+    /** Poster text: the key votes and results refer to (`poster_message`). */
+    val posterMessage: String,
+    val echoName: String,
+    val question: String,
+    val variants: List<String>,
+    /** Variant to votes cast for it. */
+    val counts: Map<String, Int>,
+    /** This user's variant; null when not voted. */
+    val myVote: String?,
+    val totalVotes: Int,
+    val finished: Boolean,
+    val winner: String? = null,
+    val success: Boolean = true,
+    val resultText: String = "",
+)
+
 data class MessageUi(
     val messageId: String,
     val senderName: String,
@@ -150,6 +216,10 @@ data class MessageUi(
     val reactions: Map<String, Int> = emptyMap(),
     val myReaction: String? = null,
     val versions: List<MessageVersionUi> = emptyList(),
+    /** Conference of the message; vote actions need it. */
+    val echoName: String = "",
+    /** Set for vote posters: the card replaces the plain message body. */
+    val vote: VoteCardUi? = null,
 )
 
 data class ContactUi(
@@ -160,6 +230,9 @@ data class ContactUi(
 /** One network of the vault with its echoes, shown as a group (#15). */
 data class NetworkGroupUi(
     val profileId: String,
+    /** Network name from the accepted policy; falls back to the endpoint. */
+    val networkName: String,
+    /** Profile title (host and address), used while no policy name is known. */
     val title: String,
     val address: String,
     /** Host and port of the node, keeps same-host networks apart. */
@@ -168,6 +241,14 @@ data class NetworkGroupUi(
     val echoes: List<EchoUi>,
 ) {
     val unread: Int get() = echoes.sumOf { it.unread }
+
+    /**
+     * What the UI shows as the network title: the name from the accepted policy,
+     * not the HTTP endpoint (#20). An unnamed network keeps its profile title so
+     * the header never degrades to a bare URL.
+     */
+    val displayName: String
+        get() = networkName.takeIf { it.isNotBlank() && it != UNNAMED_NETWORK } ?: title
 }
 
 /** A voucher row shown in the settings list. */
@@ -193,6 +274,14 @@ data class RulesEditState(
     val allChunksOnly: Boolean = false,
     val sending: Boolean = false,
     val status: String? = null,
+    val error: UiError? = null,
+)
+
+/** Draft of a new vote poster (vote protocol). */
+data class VoteComposeState(
+    val question: String = "",
+    val variants: List<String> = listOf("", ""),
+    val sending: Boolean = false,
     val error: UiError? = null,
 )
 
@@ -281,6 +370,11 @@ data class ProtocolUi(
     val isPoster: Boolean,
     val canRespondRefill: Boolean = false,
     val electionCandidate: String? = null,
+    /** Variant to votes, collected from the echo votes of a vote poster. */
+    val variantCounts: Map<String, Int> = emptyMap(),
+    /** This user's variant (null = not voted, empty = retracted). */
+    val myVote: String? = null,
+    val totalVotes: Int = 0,
 )
 
 data class ComposeState(
@@ -308,6 +402,14 @@ data class AddNetworkState(
     val importError: UiError? = null,
 )
 
+/**
+ * Name a network gets while its accepted policy carries no `net_name`.
+ *
+ * It is the product name, so the top bar always has a heading; callers that
+ * would rather show the profile title compare against it.
+ */
+internal const val UNNAMED_NETWORK = "FM"
+
 /** Network display name from an accepted policy; old policies fall back to FM. */
 internal fun networkNameFromPolicyJson(policyJson: String): String {
     val json = Json { ignoreUnknownKeys = true }
@@ -315,7 +417,7 @@ internal fun networkNameFromPolicyJson(policyJson: String): String {
         val root = json.parseToJsonElement(policyJson).jsonObject
         val parameters = root["policy"]?.jsonObject?.get("parameters")?.jsonObject
         parameters?.get("net_name")?.jsonPrimitive?.contentOrNull?.trim()
-            ?.takeIf { it.isNotEmpty() } ?: "FM"
+            ?.takeIf { it.isNotEmpty() } ?: UNNAMED_NETWORK
     }.getOrDefault("FM")
 }
 
@@ -354,7 +456,7 @@ data class UiState(
     val profiles: List<ProfileEntity> = emptyList(),
     val activeId: String? = null,
     val activeProfile: ProfileEntity? = null,
-    val networkName: String = "FM",
+    val networkName: String = UNNAMED_NETWORK,
     val unlocked: Boolean = false,
     val echoes: List<EchoUi> = emptyList(),
     /** Echoes of every unlocked network, grouped by network (#15). */
@@ -413,6 +515,8 @@ data class UiState(
     val rulesPrompt: RulesPromptUi? = null,
     /** Rules/rename proposal editor of the current echo (moderator/compat). */
     val rulesEdit: RulesEditState? = null,
+    /** New vote poster of the current conference (null = dialog closed). */
+    val voteCompose: VoteComposeState? = null,
     /** User-defined echo groups of the active network (#366 of fm-app). */
     val echoGroups: List<EchoGroupUi> = emptyList(),
     val echoGroupsDialog: Boolean = false,
@@ -446,6 +550,12 @@ data class UiState(
     val createEchoRules: String = "",
     /** Keep a rules-based echo local instead of announcing it network-wide. */
     val createEchoNetworkChannel: Boolean = false,
+    /** Comma-separated writers of a channel; empty means everybody. */
+    val createEchoWriters: String = "",
+    /** Comma-separated echoes a writer election may draw candidates from. */
+    val createEchoElectWritersFrom: String = "",
+    val createEchoRetractVote: Boolean = false,
+    val createEchoRetractVoteDays: String = "1",
     val createEchoError: UiError? = null,
     val policyViewer: Boolean = false,
     val policyViewText: String = "",
@@ -455,13 +565,8 @@ data class UiState(
     val removeEchoSending: Boolean = false,
     val removeEchoStatus: String? = null,
     val removeEchoError: UiError? = null,
-    val policyEditDialog: Boolean = false,
-    val policyEditText: String = "",
-    val policyEditParams: String = "",
-    val policyEditAllChunks: Boolean = false,
-    val policyEditSending: Boolean = false,
-    val policyEditStatus: String? = null,
-    val policyEditError: UiError? = null,
+    /** Policy change proposal of an admin; null when the dialog is closed. */
+    val policyEdit: PolicyEditUi? = null,
     val moderationTarget: MessageUi? = null,
     val moderationSeverity: String = "warning",
     val moderationDuration: String = "24",
@@ -535,7 +640,7 @@ class AppViewModel(
                 it.copy(
                     activeId = id,
                     activeProfile = profile,
-                    networkName = profile?.let { p -> networkNameFromPolicyJson(p.policyJson) } ?: "FM",
+                    networkName = profile?.let { p -> networkNameFromPolicyJson(p.policyJson) } ?: UNNAMED_NETWORK,
                 )
             }
         }
@@ -640,7 +745,7 @@ class AppViewModel(
         createEchoDialog = false,
         createEchoType = CreateEchoType.LocalEcho,
         policyViewer = false,
-        policyEditDialog = false,
+        policyEdit = null,
         removeEchoDialog = false,
         syncing = false,
         syncError = null,
@@ -775,6 +880,11 @@ class AppViewModel(
             val echoes = groupEchoes[profile.id] ?: return@mapNotNull null
             NetworkGroupUi(
                 profileId = profile.id,
+                // A network is shown by the name from its accepted policy (#20);
+                // the HTTP endpoint stays as secondary information.
+                // `displayName` falls back to the profile title when the policy
+                // carries no name, so the endpoint never becomes the heading.
+                networkName = networkNameFromPolicyJson(profile.policyJson),
                 title = profile.title,
                 address = profile.address,
                 endpoint = endpointLabel(profile.apiUrl),
@@ -901,7 +1011,12 @@ class AppViewModel(
             }
             launch {
                 opened.database.messageDao().observeProtocols().catch { }.collect { rows ->
-                    _state.update { it.copy(protocols = rows.mapNotNull { row -> row.toProtocolUi() }) }
+                    // Votes are folded into their poster so the list shows counts.
+                    val votes = VoteMapping.collect(rows, messageJson)
+                    val me = opened.profile.address
+                    _state.update {
+                        it.copy(protocols = rows.mapNotNull { row -> row.toProtocolUi(votes, me) })
+                    }
                 }
             }
             launch {
@@ -1694,7 +1809,17 @@ class AppViewModel(
     fun castVote(protocol: ProtocolUi, variant: String) {
         val opened = networkSession ?: return
         viewModelScope.launch {
+            // A vote refers to its poster by text (`poster_message`), not by id.
             runCatching { opened.postVote(protocol.echoName, protocol.title, variant) }
+            syncOnce(opened)
+        }
+    }
+
+    /** Votes (or retracts with an empty variant) on a card in the feed. */
+    fun castFeedVote(vote: VoteCardUi, variant: String) {
+        val opened = networkSession ?: return
+        viewModelScope.launch {
+            runCatching { opened.postVote(vote.echoName, vote.posterMessage, variant) }
             syncOnce(opened)
         }
     }
@@ -1842,6 +1967,69 @@ class AppViewModel(
         } catch (e: Exception) {
             _state.update {
                 it.copy(syncError = UiError.Failed("$echoName: ${e.message ?: "subscription failed"}"))
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ votes
+
+    /** Opens the "new vote" dialog of the current conference. */
+    fun openVoteCompose() {
+        if (_state.value.selectedEcho == null) return
+        _state.update { it.copy(voteCompose = VoteComposeState()) }
+    }
+
+    fun closeVoteCompose() = _state.update { it.copy(voteCompose = null) }
+
+    fun setVoteQuestion(value: String) = _state.update { state ->
+        val draft = state.voteCompose ?: return@update state
+        state.copy(voteCompose = draft.copy(question = value, error = null))
+    }
+
+    fun setVoteVariant(index: Int, value: String) = _state.update { state ->
+        val draft = state.voteCompose ?: return@update state
+        if (index !in draft.variants.indices) return@update state
+        val variants = draft.variants.toMutableList()
+        variants[index] = value
+        state.copy(voteCompose = draft.copy(variants = variants, error = null))
+    }
+
+    fun addVoteVariant() = _state.update { state ->
+        val draft = state.voteCompose ?: return@update state
+        state.copy(voteCompose = draft.copy(variants = draft.variants + ""))
+    }
+
+    fun removeVoteVariant(index: Int) = _state.update { state ->
+        val draft = state.voteCompose ?: return@update state
+        // Two variants are the minimum a vote can offer.
+        if (draft.variants.size <= 2 || index !in draft.variants.indices) return@update state
+        state.copy(voteCompose = draft.copy(variants = draft.variants.filterIndexed { i, _ -> i != index }))
+    }
+
+    fun submitVoteCompose() {
+        val opened = networkSession ?: return
+        val echo = _state.value.selectedEcho ?: return
+        val draft = _state.value.voteCompose ?: return
+        val question = draft.question.trim()
+        val variants = draft.variants.map { it.trim() }.filter { it.isNotEmpty() }
+        if (question.isEmpty()) {
+            _state.update { it.copy(voteCompose = draft.copy(error = UiError.Failed("Question is required"))) }
+            return
+        }
+        if (variants.size < 2) {
+            _state.update { it.copy(voteCompose = draft.copy(error = UiError.Failed("At least two options are required"))) }
+            return
+        }
+        viewModelScope.launch {
+            _state.update { it.copy(voteCompose = draft.copy(sending = true, error = null)) }
+            try {
+                opened.postVotePoster(echo.name, question, variants)
+                _state.update { it.copy(voteCompose = null) }
+                syncOnce(opened)
+            } catch (e: Exception) {
+                _state.update {
+                    it.copy(voteCompose = it.voteCompose?.copy(sending = false, error = UiError.Failed(e.message ?: "Failed")))
+                }
             }
         }
     }
@@ -2229,45 +2417,115 @@ class AppViewModel(
 
     // ------------------------------------------------------------- policy edit
 
+    /**
+     * Opens the admin policy editor: policy text, a field per known parameter and
+     * the nested rate limits. Unknown parameters are preserved untouched.
+     */
     fun openPolicyEditDialog() {
         val payload = _state.value.activeProfile?.policyJson ?: return
         val parsed = runCatching { messageJson.parseToJsonElement(payload).jsonObject }.getOrNull()
-        val policy = (parsed?.get("policy") as? JsonObject)
+        val policy = parsed?.get("policy") as? JsonObject
         val text = (policy?.get("text") as? JsonPrimitive)?.contentOrNull.orEmpty()
-        val params = policy?.get("parameters")?.let {
-            runCatching { prettyJson.encodeToString(JsonElement.serializer(), it) }.getOrNull().orEmpty()
-        }.orEmpty()
+        val params = policy?.get("parameters") as? JsonObject
+        val defs = PolicyParams.editable(params)
+        val fields = defs.map { def ->
+            val value = PolicyParams.value(params, def.key)
+            PolicyParamFieldUi(
+                key = def.key,
+                kind = def.kind,
+                value = value,
+                original = value,
+                options = def.options,
+                maxLength = def.maxLength,
+            )
+        }
+        val rateLimits = PolicyParams.RATE_LIMIT_KEYS.associateWith { key ->
+            val nested = params?.get(PolicyParams.RATE_LIMIT) as? JsonObject
+            PolicyParams.value(nested, key)
+        }
+        // Nested maps that are not edited here must survive the round trip.
+        val preserved = buildJsonObject {
+            (params?.get(PolicyParams.SPECIAL_ECHOGROUPS))?.let {
+                put(PolicyParams.SPECIAL_ECHOGROUPS, it)
+            }
+        }
         _state.update {
             it.copy(
-                policyEditDialog = true,
-                policyEditText = text,
-                policyEditParams = params,
-                policyEditAllChunks = false,
-                policyEditStatus = null,
-                policyEditError = null,
+                policyEdit = PolicyEditUi(
+                    text = text,
+                    originalText = text,
+                    fields = fields,
+                    rateLimits = rateLimits,
+                    originalRateLimits = rateLimits,
+                    preserved = preserved,
+                ),
             )
         }
     }
 
     fun closePolicyEditDialog() {
-        _state.update { it.copy(policyEditDialog = false) }
+        _state.update { it.copy(policyEdit = null) }
     }
 
-    fun setPolicyEditText(value: String) = _state.update { it.copy(policyEditText = value) }
-    fun setPolicyEditParams(value: String) = _state.update { it.copy(policyEditParams = value) }
-    fun setPolicyEditAllChunks(value: Boolean) = _state.update { it.copy(policyEditAllChunks = value) }
+    fun setPolicyEditText(value: String) = _state.update {
+        it.copy(policyEdit = it.policyEdit?.copy(text = value, error = null, status = null))
+    }
+
+    /** Updates one parameter field; unknown keys are ignored. */
+    fun setPolicyEditField(key: String, value: String) = _state.update { state ->
+        val edit = state.policyEdit ?: return@update state
+        state.copy(
+            policyEdit = edit.copy(
+                fields = edit.fields.map { field ->
+                    if (field.key == key) field.copy(value = value) else field
+                },
+                error = null,
+                status = null,
+            ),
+        )
+    }
+
+    fun setPolicyEditRateLimit(key: String, value: String) = _state.update { state ->
+        val edit = state.policyEdit ?: return@update state
+        state.copy(
+            policyEdit = edit.copy(
+                rateLimits = edit.rateLimits + (key to value),
+                error = null,
+                status = null,
+            ),
+        )
+    }
+
+    fun setPolicyEditAllChunks(value: Boolean) = _state.update { state ->
+        val edit = state.policyEdit ?: return@update state
+        state.copy(policyEdit = edit.copy(allChunksOnly = value))
+    }
+
+    /** Recomputes the diff preview shown before sending the proposal. */
+    fun previewPolicyDiff() = _state.update { state ->
+        val edit = state.policyEdit ?: return@update state
+        state.copy(policyEdit = edit.copy(showDiff = true))
+    }
 
     fun submitPolicyEdit() {
         val opened = networkSession ?: return
-        val parameters = runCatching {
-            messageJson.parseToJsonElement(_state.value.policyEditParams)
-        }.getOrElse {
-            _state.update { it.copy(policyEditError = UiError.Failed("Parameters must be valid JSON")) }
-            return
-        }
+        val edit = _state.value.policyEdit ?: return
         viewModelScope.launch {
-            _state.update { it.copy(policyEditSending = true, policyEditError = null, policyEditStatus = null) }
+            _state.update { it.copy(policyEdit = edit.copy(sending = true, error = null, status = null)) }
             try {
+                val parameters = buildJsonObject {
+                    edit.fields.forEach { field ->
+                        if (field.value.isNotBlank()) put(field.key, field.value.trim())
+                    }
+                    val limits = edit.rateLimits.filterValues { it.isNotBlank() }
+                    if (limits.isNotEmpty()) {
+                        put(
+                            PolicyParams.RATE_LIMIT,
+                            buildJsonObject { limits.forEach { (key, value) -> put(key, value.trim()) } },
+                        )
+                    }
+                    edit.preserved.forEach { (key, value) -> put(key, value) }
+                }
                 val data = buildJsonObject {
                     put("proto", "change_policy")
                     put("from", opened.profile.address)
@@ -2276,21 +2534,23 @@ class AppViewModel(
                     put("message", "Policy change proposal")
                     put("date", java.time.Instant.now().toString())
                     put("node1", opened.profile.address)
-                    put("all_chunks_only", _state.value.policyEditAllChunks)
+                    put("all_chunks_only", edit.allChunksOnly)
                     put(
                         "proposed_policy",
                         buildJsonObject {
-                            put("text", _state.value.policyEditText)
+                            put("text", edit.text)
                             put("parameters", parameters)
                         },
                     )
                 }.toString()
                 opened.postProtocol("Admin council", "change_policy", data)
-                _state.update { it.copy(policyEditSending = false, policyEditStatus = "Proposal submitted") }
+                _state.update {
+                    it.copy(policyEdit = it.policyEdit?.copy(sending = false, status = "Proposal submitted"))
+                }
                 syncOnce(opened)
             } catch (e: Exception) {
                 _state.update {
-                    it.copy(policyEditSending = false, policyEditError = UiError.Failed(e.message ?: "Failed"))
+                    it.copy(policyEdit = it.policyEdit?.copy(sending = false, error = UiError.Failed(e.message ?: "Failed")))
                 }
             }
         }
@@ -2391,6 +2651,18 @@ class AppViewModel(
     fun setCreateEchoNetworkChannel(value: Boolean) =
         _state.update { it.copy(createEchoNetworkChannel = value) }
 
+    fun setCreateEchoWriters(value: String) =
+        _state.update { it.copy(createEchoWriters = value, createEchoError = null) }
+
+    fun setCreateEchoElectWritersFrom(value: String) =
+        _state.update { it.copy(createEchoElectWritersFrom = value, createEchoError = null) }
+
+    fun setCreateEchoRetractVote(value: Boolean) =
+        _state.update { it.copy(createEchoRetractVote = value, createEchoError = null) }
+
+    fun setCreateEchoRetractVoteDays(value: String) =
+        _state.update { it.copy(createEchoRetractVoteDays = value, createEchoError = null) }
+
     fun createLocalEcho() {
         val opened = networkSession ?: return
         val state = _state.value
@@ -2427,22 +2699,52 @@ class AppViewModel(
             }
             return
         }
+        // Writers and the writer election are conference rules on the node: a
+        // local echo sends them as separate fields, a rules-based one inside
+        // `rules.parameters` (same shape fm-app sends).
+        val writers = splitAddressList(state.createEchoWriters)
+        val electFrom = splitAddressList(state.createEchoElectWritersFrom)
+        val retractDays = state.createEchoRetractVoteDays.trim().toIntOrNull() ?: 1
         viewModelScope.launch {
             try {
-                if (state.createEchoType == CreateEchoType.WithRules) {
-                    val rules = state.createEchoRules.trim()
-                    if (runCatching { messageJson.parseToJsonElement(rules).jsonObject }.isFailure) {
-                        _state.update { it.copy(createEchoError = UiError.Failed("Rules must be a JSON object")) }
-                        return@launch
-                    }
-                    opened.createEchoWithRules(
+                when (state.createEchoType) {
+                    CreateEchoType.LocalEcho -> opened.createLocalEcho(
                         name = name,
                         description = state.createEchoDescription.trim(),
-                        rulesJson = rules,
-                        networkChannel = state.createEchoNetworkChannel,
+                        writers = writers,
+                        electWritersFrom = electFrom,
+                        retractVote = state.createEchoRetractVote,
+                        retractVoteDays = retractDays,
                     )
-                } else {
-                    opened.createLocalEcho(name, state.createEchoDescription.trim())
+                    CreateEchoType.WithRules, CreateEchoType.Channel -> {
+                        val rules = echoRulesWithWriters(
+                            rulesJson = if (state.createEchoType == CreateEchoType.Channel) {
+                                DEFAULT_ECHO_RULES
+                            } else {
+                                state.createEchoRules.trim()
+                            },
+                            echoName = name,
+                            writers = writers,
+                            electWritersFrom = electFrom,
+                            retractVote = state.createEchoRetractVote,
+                            retractVoteDays = retractDays,
+                        ) ?: run {
+                            _state.update {
+                                it.copy(createEchoError = UiError.Failed("Rules must be a JSON object"))
+                            }
+                            return@launch
+                        }
+                        opened.createEchoWithRules(
+                            name = name,
+                            description = state.createEchoDescription.trim(),
+                            rulesJson = rules,
+                            // A channel is announced network-wide; a plain
+                            // rules-based echo follows the dialog switch.
+                            networkChannel = state.createEchoType == CreateEchoType.WithRules &&
+                                state.createEchoNetworkChannel,
+                        )
+                    }
+                    CreateEchoType.Blog -> Unit
                 }
                 runCatching { opened.refreshEchoes() }
                 _state.update { it.copy(createEchoDialog = false) }
@@ -2450,6 +2752,46 @@ class AppViewModel(
                 _state.update { it.copy(createEchoError = UiError.Failed(e.message ?: "Failed")) }
             }
         }
+    }
+
+    /** `":0:1, :0:2"` → `[":0:1", ":0:2"]`; blanks are dropped. */
+    private fun splitAddressList(raw: String): List<String> =
+        raw.split(',', '\n')
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+
+    /**
+     * Puts writers, the writer-election source and vote retraction into the
+     * rules map, replacing `{echoname}` in the text (fm-app does the same).
+     * Returns null when [rulesJson] is not a JSON object.
+     */
+    private fun echoRulesWithWriters(
+        rulesJson: String,
+        echoName: String,
+        writers: List<String>,
+        electWritersFrom: List<String>,
+        retractVote: Boolean,
+        retractVoteDays: Int,
+    ): String? {
+        val rules = runCatching { messageJson.parseToJsonElement(rulesJson).jsonObject }.getOrNull()
+            ?: return null
+        val parameters = (rules["parameters"] as? JsonObject)?.toMutableMap() ?: mutableMapOf()
+        if (writers.isNotEmpty()) {
+            parameters["writers"] = buildJsonArray { writers.forEach { add(JsonPrimitive(it)) } }
+        }
+        if (electWritersFrom.isNotEmpty()) {
+            parameters["elect_writers_from"] = buildJsonArray { electWritersFrom.forEach { add(JsonPrimitive(it)) } }
+        }
+        if (retractVote) {
+            parameters["retract_vote"] = JsonPrimitive("enable")
+            parameters["retract_vote_days"] = JsonPrimitive(retractVoteDays.toString())
+        }
+        val text = (rules["text"] as? JsonPrimitive)?.contentOrNull.orEmpty()
+            .replace("{echoname}", echoName)
+        return buildJsonObject {
+            put("text", text)
+            put("parameters", JsonObject(parameters))
+        }.toString()
     }
 
     // -------------------------------------------------------------------- blogs
@@ -3146,6 +3488,8 @@ class AppViewModel(
         val myName = opened.profile.displayName
         // target message -> sender -> (emoji, timestamp); last reaction wins.
         val reactions = mutableMapOf<String, MutableMap<String, Pair<String, Long>>>()
+        val votes = VoteMapping.collect(rows, messageJson)
+        val results = VoteMapping.results(rows, messageJson)
         val messageRows = mutableListOf<MessageRow>()
         for (row in rows) {
             val data = runCatching {
@@ -3162,13 +3506,19 @@ class AppViewModel(
                 }
                 continue
             }
+            // Votes and results are folded into the poster card; only the
+            // poster itself is a feed entry.
+            if (row.type == "vote") {
+                val voteType = VoteMapping.innerType(data)
+                if (voteType != "poster") continue
+            }
             // Attachment-only uploads without a body/echo context are not
             // conversation messages: they are rendered as file bundles (#9).
             if (row.isAttachmentOnly()) continue
             messageRows += row
         }
         val protocolTypes = setOf(
-            "vote", "election", "excommunicate", "change_policy", "change_rules",
+            "election", "excommunicate", "change_policy", "change_rules",
             "remove_echo", "refill", "merge", "conflict", "recover", "appeal",
             "remote_subscribe",
         )
@@ -3182,11 +3532,29 @@ class AppViewModel(
                 counts[pair.first] = (counts[pair.first] ?: 0) + 1
                 if (sender == me) mine = pair.first
             }
-            row.toUi(me, myName).copy(reactions = counts, myReaction = mine)
+            val ui = row.toUi(me, myName).copy(reactions = counts, myReaction = mine)
+            // Votes and results refer to the poster by its text.
+            val posterKey = VoteMapping.posterKey(VoteMapping.data(row, messageJson))
+            if (row.type == "vote" && posterKey.isNotEmpty()) {
+                ui.copy(
+                    vote = VoteMapping.card(
+                        poster = row,
+                        votes = votes[posterKey],
+                        result = results[posterKey],
+                        me = me,
+                        json = messageJson,
+                    ),
+                )
+            } else {
+                ui
+            }
         }
     }
 
-    private fun MessageRow.toProtocolUi(): ProtocolUi? {
+    private fun MessageRow.toProtocolUi(
+        votes: Map<String, Map<String, Pair<String, Long>>>? = null,
+        me: String = "",
+    ): ProtocolUi? {
         val data = runCatching {
             messageJson.parseToJsonElement(dataJson).jsonObject
         }.getOrNull() ?: return null
@@ -3204,6 +3572,11 @@ class AppViewModel(
             variants.isNotEmpty() -> variants.joinToString(", ")
             else -> ""
         }
+        val posterVotes = votes?.get(messageId)
+        val counts = mutableMapOf<String, Int>()
+        posterVotes?.values?.forEach { (variant, _) ->
+            counts[variant] = (counts[variant] ?: 0) + 1
+        }
         return ProtocolUi(
             messageId = messageId,
             type = type,
@@ -3220,6 +3593,9 @@ class AppViewModel(
             } else {
                 null
             },
+            variantCounts = counts,
+            myVote = posterVotes?.get(me)?.first,
+            totalVotes = posterVotes?.size ?: 0,
         )
     }
 
@@ -3285,6 +3661,7 @@ class AppViewModel(
             folderSlug = folderSlug,
             attachments = attachments,
             versions = versions,
+            echoName = echoName,
         )
     }
 

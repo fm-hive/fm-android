@@ -45,6 +45,8 @@ import lan.fmnode.android.storage.ProfileEntity
 @Composable
 fun SettingsScreen(
     profile: ProfileEntity?,
+    /** Network name from the accepted policy; shown instead of the node URL. */
+    networkName: String = "",
     onDeleteNetwork: () -> Unit,
     onEchoes: () -> Unit,
     onNetmail: () -> Unit,
@@ -126,7 +128,7 @@ fun SettingsScreen(
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.fillMaxWidth().padding(16.dp)) {
                     Text(
-                        text = profile.title,
+                        text = networkName.ifBlank { profile.title },
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                     )

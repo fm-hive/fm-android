@@ -260,12 +260,38 @@ private fun ProtocolCard(
             }
             if (protocol.isPoster) {
                 Spacer(Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column {
                     protocol.variants.forEach { variant ->
-                        OutlinedButton(onClick = { onVote(variant) }) { Text(variant) }
+                        val count = protocol.variantCounts[variant] ?: 0
+                        val mine = protocol.myVote == variant
+                        OutlinedButton(
+                            onClick = { onVote(variant) },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(
+                                text = if (count > 0) "$variant ($count)" else variant,
+                                fontWeight = if (mine) FontWeight.SemiBold else FontWeight.Normal,
+                                color = if (mine) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurface
+                                },
+                            )
+                        }
+                        Spacer(Modifier.height(4.dp))
                     }
-                    OutlinedButton(onClick = { onVote("") }) {
-                        Text(stringResource(R.string.vote_retract))
+                    if (protocol.totalVotes > 0) {
+                        Text(
+                            text = stringResource(R.string.vote_card_total, protocol.totalVotes),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.height(4.dp))
+                    }
+                    if (protocol.myVote != null) {
+                        OutlinedButton(onClick = { onVote("") }) {
+                            Text(stringResource(R.string.vote_retract))
+                        }
                     }
                 }
             }
@@ -669,12 +695,20 @@ fun CreateEchoDialog(
     type: CreateEchoType,
     rules: String,
     networkChannel: Boolean,
+    writers: String,
+    electWritersFrom: String,
+    retractVote: Boolean,
+    retractVoteDays: String,
     error: UiError?,
     onName: (String) -> Unit,
     onDescription: (String) -> Unit,
     onType: (CreateEchoType) -> Unit,
     onRules: (String) -> Unit,
     onNetworkChannel: (Boolean) -> Unit,
+    onWriters: (String) -> Unit,
+    onElectWritersFrom: (String) -> Unit,
+    onRetractVote: (Boolean) -> Unit,
+    onRetractVoteDays: (String) -> Unit,
     onCreate: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -682,16 +716,45 @@ fun CreateEchoDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.create_echo)) },
         text = {
-            Column(Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState())) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { onType(CreateEchoType.LocalEcho) }) {
-                        Text(stringResource(R.string.fm_createecho_local))
+            Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState())) {
+                // Conference kinds of fm-app: a local echo, an echo with rules,
+                // a channel (writers decide who may post) and a local blog.
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    OutlinedButton(
+                        onClick = { onType(CreateEchoType.LocalEcho) },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            text = stringResource(R.string.fm_createecho_local),
+                            fontWeight = if (type == CreateEchoType.LocalEcho) FontWeight.Bold else FontWeight.Normal,
+                        )
                     }
-                    OutlinedButton(onClick = { onType(CreateEchoType.WithRules) }) {
-                        Text(stringResource(R.string.create_echo_with_rules))
+                    OutlinedButton(
+                        onClick = { onType(CreateEchoType.WithRules) },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            text = stringResource(R.string.create_echo_with_rules),
+                            fontWeight = if (type == CreateEchoType.WithRules) FontWeight.Bold else FontWeight.Normal,
+                        )
                     }
-                    OutlinedButton(onClick = { onType(CreateEchoType.Blog) }) {
-                        Text(stringResource(R.string.fm_createecho_blog))
+                    OutlinedButton(
+                        onClick = { onType(CreateEchoType.Channel) },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            text = stringResource(R.string.create_echo_channel),
+                            fontWeight = if (type == CreateEchoType.Channel) FontWeight.Bold else FontWeight.Normal,
+                        )
+                    }
+                    OutlinedButton(
+                        onClick = { onType(CreateEchoType.Blog) },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            text = stringResource(R.string.fm_createecho_blog),
+                            fontWeight = if (type == CreateEchoType.Blog) FontWeight.Bold else FontWeight.Normal,
+                        )
                     }
                 }
                 Spacer(Modifier.height(8.dp))
@@ -721,6 +784,45 @@ fun CreateEchoDialog(
                         Text(
                             text = stringResource(R.string.create_echo_network_channel),
                             style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
+                if (type == CreateEchoType.WithRules || type == CreateEchoType.Channel) {
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = writers,
+                        onValueChange = onWriters,
+                        label = { Text(stringResource(R.string.create_echo_writers)) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text(
+                        text = stringResource(R.string.create_echo_writers_hint),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = electWritersFrom,
+                        onValueChange = onElectWritersFrom,
+                        label = { Text(stringResource(R.string.create_echo_elect_from)) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(checked = retractVote, onCheckedChange = onRetractVote)
+                        Text(
+                            text = stringResource(R.string.create_echo_retract_vote),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                    if (retractVote) {
+                        OutlinedTextField(
+                            value = retractVoteDays,
+                            onValueChange = onRetractVoteDays,
+                            label = { Text(stringResource(R.string.create_echo_retract_days)) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
                         )
                     }
                 }
@@ -805,56 +907,151 @@ fun RemoveEchoDialog(
 
 @Composable
 fun PolicyEditDialog(
-    text: String,
-    params: String,
-    allChunks: Boolean,
-    sending: Boolean,
-    status: String?,
-    error: UiError?,
+    state: PolicyEditUi,
     onText: (String) -> Unit,
-    onParams: (String) -> Unit,
+    onField: (String, String) -> Unit,
+    onRateLimit: (String, String) -> Unit,
     onAllChunks: (Boolean) -> Unit,
+    onPreview: () -> Unit,
     onSubmit: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { if (!state.sending) onDismiss() },
         title = { Text(stringResource(R.string.change_policy_title)) },
         text = {
-            Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState())) {
-                OutlinedTextField(
-                    value = text,
-                    onValueChange = onText,
-                    label = { Text(stringResource(R.string.change_policy_text)) },
+            Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState())) {
+                Text(
+                    text = stringResource(R.string.policy_edit_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
-                    value = params,
-                    onValueChange = onParams,
-                    label = { Text(stringResource(R.string.change_policy_params)) },
+                    value = state.text,
+                    onValueChange = onText,
+                    label = { Text(stringResource(R.string.change_policy_text)) },
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp),
                 )
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Switch(checked = allChunks, onCheckedChange = onAllChunks)
-                    Spacer(Modifier.width(8.dp))
-                    Text(stringResource(R.string.change_policy_all_chunks))
+                    Checkbox(checked = state.allChunksOnly, onCheckedChange = onAllChunks)
+                    Text(
+                        text = stringResource(R.string.change_policy_all_chunks),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
                 }
-                status?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
-                error?.let { Text(errorText(it), color = MaterialTheme.colorScheme.error) }
-                if (sending) {
+                // One field per policy parameter, grouped like fm-app does.
+                state.fields.forEach { field ->
+                    PolicyParamRow(field = field, onChange = { onField(field.key, it) })
+                }
+                if (state.rateLimits.isNotEmpty()) {
+                    Text(
+                        text = stringResource(R.string.policy_edit_rate_limit),
+                        style = MaterialTheme.typography.labelLarge,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                    state.rateLimits.forEach { (key, value) ->
+                        OutlinedTextField(
+                            value = value,
+                            onValueChange = { onRateLimit(key, it) },
+                            label = { Text("rate_limit.$key") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Spacer(Modifier.height(4.dp))
+                    }
+                }
+                if (state.showDiff) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = stringResource(R.string.policy_edit_diff),
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                    if (state.changes.isEmpty()) {
+                        Text(
+                            text = stringResource(R.string.policy_edit_no_changes),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else {
+                        state.changes.forEach { change ->
+                            Text(
+                                text = change,
+                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                            )
+                        }
+                    }
+                }
+                state.status?.let {
+                    Spacer(Modifier.height(8.dp))
+                    Text(it, color = MaterialTheme.colorScheme.primary)
+                }
+                state.error?.let {
+                    Spacer(Modifier.height(8.dp))
+                    Text(errorText(it), color = MaterialTheme.colorScheme.error)
+                }
+                if (state.sending) {
                     Spacer(Modifier.height(8.dp))
                     CircularProgressIndicator(modifier = Modifier.width(24.dp).height(24.dp))
                 }
             }
         },
         confirmButton = {
-            TextButton(onClick = onSubmit, enabled = !sending) {
-                Text(stringResource(R.string.change_policy_submit))
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                TextButton(onClick = onPreview, enabled = !state.sending) {
+                    Text(stringResource(R.string.policy_edit_preview))
+                }
+                TextButton(onClick = onSubmit, enabled = !state.sending) {
+                    Text(stringResource(R.string.change_policy_submit))
+                }
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
+            TextButton(onClick = onDismiss, enabled = !state.sending) { Text(stringResource(R.string.cancel)) }
         },
     )
+}
+
+/** One policy parameter: a text/number/duration field or a set of choices. */
+@Composable
+private fun PolicyParamRow(field: PolicyParamFieldUi, onChange: (String) -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+        Text(
+            text = field.key,
+            style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        when (field.kind) {
+            PolicyParamKind.Select -> Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                field.options.forEach { option ->
+                    OutlinedButton(
+                        onClick = { onChange(option) },
+                    ) {
+                        Text(
+                            text = option,
+                            fontWeight = if (field.value == option) FontWeight.Bold else FontWeight.Normal,
+                            color = if (field.value == option) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurface
+                            },
+                        )
+                    }
+                }
+            }
+            PolicyParamKind.Number, PolicyParamKind.Duration, PolicyParamKind.Text -> OutlinedTextField(
+                value = field.value,
+                onValueChange = onChange,
+                singleLine = true,
+                placeholder = {
+                    if (field.kind == PolicyParamKind.Duration) {
+                        Text(stringResource(R.string.policy_edit_duration_hint))
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
 }
 
 @Composable
