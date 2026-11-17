@@ -90,6 +90,7 @@ import lan.fmnode.android.ui.theme.FmTheme
 fun FmRoot(
     state: UiState,
     onUnlock: (String) -> Unit = {},
+    onRememberPassword: (Boolean) -> Unit = {},
     onLock: () -> Unit = {},
     onRequestLogout: () -> Unit = {},
     onConfirmLogout: () -> Unit = {},
@@ -100,6 +101,7 @@ fun FmRoot(
     onDisplayNameChange: (String) -> Unit = {},
     onPasswordChange: (String) -> Unit = {},
     onPasswordConfirmChange: (String) -> Unit = {},
+    onAddRememberPassword: (Boolean) -> Unit = {},
     onFetchPolicy: () -> Unit = {},
     onRegister: () -> Unit = {},
     onSelectProfile: (String) -> Unit = {},
@@ -464,7 +466,12 @@ fun FmRoot(
         )
     }
     when (state.screen) {
-        AppScreen.Unlock -> UnlockScreen(state.unlockError, onUnlock)
+        AppScreen.Unlock -> UnlockScreen(
+            error = state.unlockError,
+            remember = state.rememberPassword,
+            onRemember = onRememberPassword,
+            onUnlock = onUnlock,
+        )
         AppScreen.Networks -> NetworksScreen(
             profiles = state.profiles,
             activeId = state.activeId,
@@ -481,6 +488,7 @@ fun FmRoot(
             onDisplayNameChange = onDisplayNameChange,
             onPasswordChange = onPasswordChange,
             onPasswordConfirmChange = onPasswordConfirmChange,
+            onRememberPassword = onAddRememberPassword,
             onFetchPolicy = onFetchPolicy,
             onRegister = onRegister,
             onImportKeys = onImportKeys,
@@ -789,7 +797,12 @@ fun RecoveryDialog(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun UnlockScreen(error: UiError?, onUnlock: (String) -> Unit) {
+fun UnlockScreen(
+    error: UiError?,
+    remember: Boolean = false,
+    onRemember: (Boolean) -> Unit = {},
+    onUnlock: (String) -> Unit,
+) {
     var password by remember { mutableStateOf("") }
     Scaffold(
         topBar = { CenterAlignedTopAppBar(title = { Text(stringResource(R.string.app_name)) }) },
@@ -812,6 +825,16 @@ fun UnlockScreen(error: UiError?, onUnlock: (String) -> Unit) {
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                 modifier = Modifier.fillMaxWidth(),
             )
+            Row(
+                modifier = Modifier.fillMaxWidth().clickable { onRemember(!remember) },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Checkbox(checked = remember, onCheckedChange = onRemember)
+                Text(
+                    text = stringResource(R.string.remember_password),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
             if (error != null) {
                 Spacer(Modifier.height(8.dp))
                 Text(errorText(error), color = MaterialTheme.colorScheme.error)
@@ -953,6 +976,7 @@ fun AddNetworkScreen(
     onDisplayNameChange: (String) -> Unit,
     onPasswordChange: (String) -> Unit,
     onPasswordConfirmChange: (String) -> Unit,
+    onRememberPassword: (Boolean) -> Unit = {},
     onFetchPolicy: () -> Unit,
     onRegister: () -> Unit,
     onImportKeys: () -> Unit,
@@ -1056,6 +1080,21 @@ fun AddNetworkScreen(
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                             modifier = Modifier.fillMaxWidth(),
                         )
+                        Row(
+                            modifier = Modifier.fillMaxWidth().clickable {
+                                onRememberPassword(!state.rememberPassword)
+                            },
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Checkbox(
+                                checked = state.rememberPassword,
+                                onCheckedChange = onRememberPassword,
+                            )
+                            Text(
+                                text = stringResource(R.string.remember_password),
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                        }
                     }
                     if (state.imported) {
                         Spacer(Modifier.height(8.dp))

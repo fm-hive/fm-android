@@ -3,6 +3,8 @@ package lan.fmnode.android
 import android.app.Application
 import lan.fmnode.android.network.NetworkManager
 import lan.fmnode.android.session.Session
+import lan.fmnode.android.storage.KeystorePasswordStore
+import lan.fmnode.android.storage.PasswordStore
 import lan.fmnode.android.storage.Vault
 
 /**
@@ -19,6 +21,9 @@ class AppContainer(application: Application) {
     val networkManager: NetworkManager = NetworkManager(vault)
 
     val session: Session = Session()
+
+    /** "Save password" storage backed by the Android Keystore (#22). */
+    val passwordStore: PasswordStore = KeystorePasswordStore(application)
 }
 
 class FmApplication : Application() {

@@ -13,6 +13,7 @@
     <string name="register">Принять и зарегистрироваться</string>
     <string name="unlock_title">Разблокировать</string>
     <string name="unlock">Разблокировать</string>
+    <string name="remember_password">Сохранить пароль</string>
     <string name="delete">Удалить</string>
     <string name="active">Активна</string>
     <string name="back">Назад</string>

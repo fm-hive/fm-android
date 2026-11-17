@@ -34,7 +34,11 @@ class MainActivity : ComponentActivity() {
         setContent {
             FmTheme {
                 val viewModel: AppViewModel = viewModel(
-                    factory = AppViewModel.factory(container.networkManager, container.session),
+                    factory = AppViewModel.factory(
+                        container.networkManager,
+                        container.session,
+                        container.passwordStore,
+                    ),
                 )
                 val state by viewModel.state.collectAsStateWithLifecycle()
 
@@ -84,6 +88,7 @@ class MainActivity : ComponentActivity() {
                 FmRoot(
                     state = state,
                     onUnlock = viewModel::unlock,
+                    onRememberPassword = viewModel::setRememberPassword,
                     onLock = viewModel::lock,
                     onRequestLogout = viewModel::requestLogout,
                     onConfirmLogout = viewModel::confirmLogout,
@@ -94,6 +99,7 @@ class MainActivity : ComponentActivity() {
                     onDisplayNameChange = viewModel::setDisplayName,
                     onPasswordChange = viewModel::setAddPassword,
                     onPasswordConfirmChange = viewModel::setAddPasswordConfirm,
+                    onAddRememberPassword = viewModel::setAddRememberPassword,
                     onFetchPolicy = viewModel::fetchPolicy,
                     onRegister = viewModel::register,
                     onSelectProfile = viewModel::selectProfile,
