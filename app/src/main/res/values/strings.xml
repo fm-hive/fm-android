@@ -198,6 +198,7 @@
     <string name="policy_edit_no_changes">No changes yet</string>
     <string name="policy_edit_preview">Preview</string>
     <string name="policy_edit_duration_hint">e.g. 30m, 24h, 7d</string>
+    <string name="policy_edit_duration_invalid">Use days (3, 0.5) or d/h/m/s groups: 12h, 1d12h, 30m.</string>
     <string name="create_echo_rules">Rules (JSON)</string>
     <string name="create_echo_network_channel">Keep local (do not announce)</string>
     <string name="node_clients">Users</string>

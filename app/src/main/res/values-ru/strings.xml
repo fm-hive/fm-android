@@ -198,6 +198,7 @@
     <string name="policy_edit_no_changes">Изменений пока нет</string>
     <string name="policy_edit_preview">Предпросмотр</string>
     <string name="policy_edit_duration_hint">напр. 30m, 24h, 7d</string>
+    <string name="policy_edit_duration_invalid">Укажите дни (3, 0.5) или группы d/h/m/s: 12h, 1d12h, 30m.</string>
     <string name="create_echo_rules">Правила (JSON)</string>
     <string name="create_echo_network_channel">Не анонсировать в сети</string>
     <string name="node_clients">Пользователи</string>

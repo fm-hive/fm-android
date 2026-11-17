@@ -146,6 +146,7 @@ data class PolicyParamFieldUi(
     val maxLength: Int? = null,
 ) {
     val changed: Boolean get() = value.trim() != original.trim()
+    val invalid: Boolean get() = kind == PolicyParamKind.Duration && !PolicyDuration.isValid(value)
 }
 
 /**
@@ -167,6 +168,9 @@ data class PolicyEditUi(
     val error: UiError? = null,
 ) {
     val textChanged: Boolean get() = text != originalText
+
+    /** The editor refuses to submit while a duration value is malformed (#29). */
+    val hasInvalidFields: Boolean get() = fields.any { it.invalid }
 
     /** Changes to show in the diff preview, e.g. `voting_period: 1m → 2d`. */
     val changes: List<String>
@@ -2510,6 +2514,12 @@ class AppViewModel(
     fun submitPolicyEdit() {
         val opened = networkSession ?: return
         val edit = _state.value.policyEdit ?: return
+        if (edit.hasInvalidFields) {
+            _state.update {
+                it.copy(policyEdit = edit.copy(error = UiError.Failed("Invalid duration value in the policy")))
+            }
+            return
+        }
         viewModelScope.launch {
             _state.update { it.copy(policyEdit = edit.copy(sending = true, error = null, status = null)) }
             try {

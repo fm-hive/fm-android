@@ -4,6 +4,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -125,5 +126,39 @@ class PolicyParamsTest {
         )
 
         assertTrue(edit.changes.isEmpty())
+    }
+
+    /** The editor refuses malformed node durations instead of letting the node reject them (#29). */
+    @Test
+    fun `duration values are validated with the node syntax`() {
+        val valid = listOf("3", "0.5", "0.5d", "12h", "30m", "45s", "1d12h", "1.5h30m", "0")
+        valid.forEach { assertTrue("$it must be valid", PolicyDuration.isValid(it)) }
+
+        val invalid = listOf("foo", "-1h", "1x", "12h-", "1..2h", "1h 2m", ".", "1h30")
+        invalid.forEach { assertFalse("$it must be invalid", PolicyDuration.isValid(it)) }
+
+        // Blank means "do not send this parameter" and is allowed by the editor.
+        assertTrue(PolicyDuration.isValid(""))
+        assertTrue(PolicyDuration.isValid("   "))
+    }
+
+    @Test
+    fun `an invalid duration blocks the policy submission`() {
+        val edit = PolicyEditUi(
+            text = "text",
+            originalText = "text",
+            fields = listOf(
+                PolicyParamFieldUi("voting_period", PolicyParamKind.Duration, "1x", "1h"),
+                PolicyParamFieldUi("min_candidates", PolicyParamKind.Number, "2", "2"),
+            ),
+            rateLimits = emptyMap(),
+            originalRateLimits = emptyMap(),
+            preserved = JsonObject(emptyMap()),
+        )
+
+        assertTrue(edit.hasInvalidFields)
+        edit.fields.first().copy(value = "2h").let { fixed ->
+            assertFalse(fixed.invalid)
+        }
     }
 }

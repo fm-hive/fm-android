@@ -7,6 +7,38 @@ import kotlinx.serialization.json.contentOrNull
 /** Kind of input a policy parameter needs in the editor. */
 enum class PolicyParamKind { Text, Number, Duration, Select }
 
+/**
+ * The duration syntax the node accepts in policy parameters (#29).
+ *
+ * Mirrors `parsePolicyDuration` in fm-go: a bare number means days (fractions
+ * allowed), otherwise one or more `<number><unit>` groups with `d`, `h`, `m`
+ * or `s` (`12h`, `1d12h`, `1.5h30m`). Empty is allowed by the editor and means
+ * "do not send this parameter"; the node itself rejects empty values.
+ */
+object PolicyDuration {
+    fun isValid(raw: String): Boolean {
+        val value = raw.trim()
+        if (value.isEmpty()) return true
+        // A bare number is days, exactly like the node's parser.
+        if (!value.any { it in "dhms" }) {
+            val days = value.toDoubleOrNull() ?: return false
+            return days >= 0 && days.isFinite()
+        }
+        var pos = 0
+        while (pos < value.length) {
+            val start = pos
+            while (pos < value.length && (value[pos].isDigit() || value[pos] == '.')) pos++
+            if (start == pos || pos >= value.length) return false
+            val number = value.substring(start, pos).toDoubleOrNull() ?: return false
+            if (number < 0 || !number.isFinite()) return false
+            val unit = value[pos]
+            pos++
+            if (unit !in "dhms") return false
+        }
+        return true
+    }
+}
+
 /** One editable policy parameter. */
 data class PolicyParamDef(
     val key: String,
