@@ -13,6 +13,7 @@
     <string name="register">Accept and register</string>
     <string name="unlock_title">Unlock</string>
     <string name="unlock">Unlock</string>
+    <string name="remember_password">Save password</string>
     <string name="delete">Delete</string>
     <string name="active">Active</string>
     <string name="back">Back</string>
@@ -36,7 +37,7 @@
     <string name="no_netmail">No messages</string>
     <string name="recipient">Recipient</string>
     <string name="no_subject">(no subject)</string>
-    <string name="key_requested">Recipient key requested. Send again when it arrives.</string>
+    <string name="key_requested">Message saved to the outbox; it will be sent automatically when the recipient key arrives.</string>
     <string name="address_label">Address</string>
     <string name="network_label">Network</string>
     <string name="node_key_label">Node public key</string>
@@ -172,6 +173,9 @@
     <string name="echo_groups_move_to">Move to</string>
     <string name="echo_groups_ungrouped">Ungrouped</string>
     <string name="echo_groups_empty">No groups yet</string>
+    <string name="echo_groups_hint">Select conferences, then tap a group to move them into it.</string>
+    <string name="echo_groups_move_selected">Move selected here</string>
+    <string name="echo_groups_empty_members">No conferences in this group yet</string>
     <string name="display_name_change">Change display name</string>
     <string name="voucher_type">Voucher type</string>
     <string name="voucher_type_invite">Single-use invite</string>
@@ -198,6 +202,7 @@
     <string name="policy_edit_no_changes">No changes yet</string>
     <string name="policy_edit_preview">Preview</string>
     <string name="policy_edit_duration_hint">e.g. 30m, 24h, 7d</string>
+    <string name="policy_edit_duration_invalid">Use days (3, 0.5) or d/h/m/s groups: 12h, 1d12h, 30m.</string>
     <string name="create_echo_rules">Rules (JSON)</string>
     <string name="create_echo_network_channel">Keep local (do not announce)</string>
     <string name="node_clients">Users</string>

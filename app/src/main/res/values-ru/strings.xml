@@ -13,6 +13,7 @@
     <string name="register">Принять и зарегистрироваться</string>
     <string name="unlock_title">Разблокировать</string>
     <string name="unlock">Разблокировать</string>
+    <string name="remember_password">Сохранить пароль</string>
     <string name="delete">Удалить</string>
     <string name="active">Активна</string>
     <string name="back">Назад</string>
@@ -36,7 +37,7 @@
     <string name="no_netmail">Нет сообщений</string>
     <string name="recipient">Получатель</string>
     <string name="no_subject">(без темы)</string>
-    <string name="key_requested">Ключ получателя запрошен. Отправьте снова, когда он придёт.</string>
+    <string name="key_requested">Сообщение сохранено в outbox и уйдёт автоматически, когда появится ключ получателя.</string>
     <string name="address_label">Адрес</string>
     <string name="network_label">Сеть</string>
     <string name="node_key_label">Публичный ключ узла</string>
@@ -172,6 +173,9 @@
     <string name="echo_groups_move_to">Переместить в</string>
     <string name="echo_groups_ungrouped">Без группы</string>
     <string name="echo_groups_empty">Групп пока нет</string>
+    <string name="echo_groups_hint">Выберите конференции, затем нажмите группу, чтобы переместить их в неё.</string>
+    <string name="echo_groups_move_selected">Переместить выбранные сюда</string>
+    <string name="echo_groups_empty_members">В этой группе пока нет конференций</string>
     <string name="display_name_change">Изменить имя</string>
     <string name="voucher_type">Тип ваучера</string>
     <string name="voucher_type_invite">Одноразовое приглашение</string>
@@ -198,6 +202,7 @@
     <string name="policy_edit_no_changes">Изменений пока нет</string>
     <string name="policy_edit_preview">Предпросмотр</string>
     <string name="policy_edit_duration_hint">напр. 30m, 24h, 7d</string>
+    <string name="policy_edit_duration_invalid">Укажите дни (3, 0.5) или группы d/h/m/s: 12h, 1d12h, 30m.</string>
     <string name="create_echo_rules">Правила (JSON)</string>
     <string name="create_echo_network_channel">Не анонсировать в сети</string>
     <string name="node_clients">Пользователи</string>

@@ -340,6 +340,9 @@ class NetworkSession(
         if (clientSyncEnabled) {
             processClientContainers(obj["client_container_entries"] as? JsonArray, incoming)
         }
+        // A key delivered in this very response may unblock queued netmail, so
+        // the outbox is flushed again after the incoming messages are stored.
+        flushOutbox()
         return SyncOutcome(received, acknowledged, errors)
     }
 
@@ -439,7 +442,10 @@ class NetworkSession(
             if (settingsFlag(META_AUTO_REQUEST_PUBKEYS, default = false)) {
                 runCatching { requestPublicKey(recipient) }
             }
-            return SendResult(queued = false, needsKey = true)
+            // Keep the message until the key arrives; sync() retries the outbox
+            // and sends it as soon as a pubkey_response is stored (#27).
+            queueOutbox("netmail", null, recipient, data, FmApiException(0, "recipient key is unknown"))
+            return SendResult(queued = true, needsKey = true)
         }
         return try {
             sendMessages(listOf(message))

@@ -44,6 +44,8 @@ import lan.fmnode.android.storage.KeyVault
 import lan.fmnode.android.storage.KeystoreExportCodec
 import lan.fmnode.android.storage.MessageRow
 import lan.fmnode.android.storage.NetmailFolderEntity
+import lan.fmnode.android.storage.NoopPasswordStore
+import lan.fmnode.android.storage.PasswordStore
 import lan.fmnode.android.storage.ProfileEntity
 import lan.fmnode.android.crypto.CryptoService
 import lan.fmnode.android.crypto.Encoding
@@ -146,6 +148,7 @@ data class PolicyParamFieldUi(
     val maxLength: Int? = null,
 ) {
     val changed: Boolean get() = value.trim() != original.trim()
+    val invalid: Boolean get() = kind == PolicyParamKind.Duration && !PolicyDuration.isValid(value)
 }
 
 /**
@@ -167,6 +170,9 @@ data class PolicyEditUi(
     val error: UiError? = null,
 ) {
     val textChanged: Boolean get() = text != originalText
+
+    /** The editor refuses to submit while a duration value is malformed (#29). */
+    val hasInvalidFields: Boolean get() = fields.any { it.invalid }
 
     /** Changes to show in the diff preview, e.g. `voting_period: 1m → 2d`. */
     val changes: List<String>
@@ -395,6 +401,8 @@ data class AddNetworkState(
     val password: String = "",
     val passwordConfirm: String = "",
     val createPassword: Boolean = false,
+    /** "Save password" checkbox while creating the first network (#22). */
+    val rememberPassword: Boolean = false,
     val isLoading: Boolean = false,
     val error: UiError? = null,
     val awaitingImportPassword: Boolean = false,
@@ -421,9 +429,20 @@ internal fun networkNameFromPolicyJson(policyJson: String): String {
     }.getOrDefault("FM")
 }
 
-/** Boolean network policy parameter of the accepted policy (default when absent). */
-internal fun policyFlag(policyJson: String, key: String, default: Boolean): Boolean {
+/** Network news conference name from the accepted policy (interactive posts are node-only). */
+internal fun networkNewsEchoName(policyJson: String): String {
     val json = Json { ignoreUnknownKeys = true }
+    return runCatching {
+        val root = json.parseToJsonElement(policyJson).jsonObject
+        val groups = root["policy"]?.jsonObject?.get("parameters")?.jsonObject
+            ?.get("special_echogroups")?.jsonObject
+        groups?.get("network_news")?.jsonPrimitive?.contentOrNull?.trim()
+            ?.takeIf { it.isNotEmpty() } ?: "Network news"
+    }.getOrDefault("Network news")
+}
+
+/** Boolean network policy parameter of the accepted policy (default when absent). */
+internal fun policyFlag(policyJson: String, key: String, default: Boolean): Boolean {    val json = Json { ignoreUnknownKeys = true }
     return runCatching {
         val root = json.parseToJsonElement(policyJson).jsonObject
         val parameters = root["policy"]?.jsonObject?.get("parameters")?.jsonObject
@@ -575,6 +594,8 @@ data class UiState(
     val moderationError: UiError? = null,
     val add: AddNetworkState = AddNetworkState(),
     val unlockError: UiError? = null,
+    /** "Save password" checkbox of the unlock screen (#22). */
+    val rememberPassword: Boolean = false,
     val syncError: UiError? = null,
     val syncing: Boolean = false,
     /** Reason the node rejected a message, shown until dismissed (#14). */
@@ -599,6 +620,7 @@ private fun slugifyNetmailFolder(name: String): String =
 class AppViewModel(
     private val manager: NetworkManager,
     private val session: Session,
+    private val passwordStore: PasswordStore = NoopPasswordStore,
 ) : ViewModel() {
     private val prettyJson = Json { prettyPrint = true }
     private val messageJson = Json { ignoreUnknownKeys = true }
@@ -644,9 +666,25 @@ class AppViewModel(
                 )
             }
         }
+        // "Save password" support: try the Keystore-protected password before
+        // showing the unlock form (#22).
+        viewModelScope.launch {
+            if (session.isUnlocked || !manager.vaultExists()) return@launch
+            val saved = passwordStore.load() ?: return@launch
+            if (!manager.openVault(saved)) {
+                passwordStore.clear()
+                _state.update { it.copy(unlockError = UiError.WrongPassword) }
+                return@launch
+            }
+            _state.update { it.copy(rememberPassword = true) }
+            completeUnlock(saved)
+        }
     }
 
     // ------------------------------------------------------------ vault/session
+
+    fun setRememberPassword(value: Boolean) =
+        _state.update { it.copy(rememberPassword = value) }
 
     fun unlock(password: String) {
         viewModelScope.launch {
@@ -654,23 +692,29 @@ class AppViewModel(
                 _state.update { it.copy(unlockError = UiError.WrongPassword) }
                 return@launch
             }
-            session.setPassword(password)
-            val profile = manager.activeProfile() ?: manager.firstProfile()
-            if (profile == null) {
-                _state.update {
-                    it.copy(unlocked = true, unlockError = null, screen = AppScreen.Networks, activeProfile = null)
-                }
-                return@launch
-            }
-            _state.update {
-                it.copy(
-                    unlocked = true, unlockError = null, activeId = profile.id,
-                    activeProfile = profile,
-                    networkName = networkNameFromPolicyJson(profile.policyJson),
-                )
-            }
-            openActiveSession()
+            if (_state.value.rememberPassword) passwordStore.save(password) else passwordStore.clear()
+            completeUnlock(password)
         }
+    }
+
+    /** Opens the active profile after the vault accepted [password]. */
+    private suspend fun completeUnlock(password: String) {
+        session.setPassword(password)
+        val profile = manager.activeProfile() ?: manager.firstProfile()
+        if (profile == null) {
+            _state.update {
+                it.copy(unlocked = true, unlockError = null, screen = AppScreen.Networks, activeProfile = null)
+            }
+            return
+        }
+        _state.update {
+            it.copy(
+                unlocked = true, unlockError = null, activeId = profile.id,
+                activeProfile = profile,
+                networkName = networkNameFromPolicyJson(profile.policyJson),
+            )
+        }
+        openActiveSession()
     }
 
     fun lock() = lockVault()
@@ -690,6 +734,7 @@ class AppViewModel(
         closeSession()
         manager.closeVault()
         session.lock()
+        passwordStore.clear()
         _state.update {
             clearDecryptedState(
                 it.copy(
@@ -697,6 +742,7 @@ class AppViewModel(
                     screen = if (manager.vaultExists()) AppScreen.Unlock else AppScreen.Networks,
                     unlockError = null,
                     activeId = null,
+                    rememberPassword = false,
                 ),
             )
         }
@@ -1293,6 +1339,7 @@ class AppViewModel(
             if (manager.profileCount() == 0) {
                 manager.clearVault()
                 session.lock()
+                passwordStore.clear()
                 _state.update {
                     clearDecryptedState(
                         it.copy(
@@ -1301,6 +1348,7 @@ class AppViewModel(
                             activeProfile = null,
                             screen = AppScreen.Networks,
                             unlockError = null,
+                            rememberPassword = false,
                         ),
                     )
                 }
@@ -1532,6 +1580,9 @@ class AppViewModel(
     fun setAddPasswordConfirm(value: String) =
         _state.update { it.copy(add = it.add.copy(passwordConfirm = value, error = null)) }
 
+    fun setAddRememberPassword(value: Boolean) =
+        _state.update { it.copy(add = it.add.copy(rememberPassword = value)) }
+
     fun fetchPolicy() {
         val current = _state.value.add
         val invite = InviteParser.parse(current.url)
@@ -1595,8 +1646,9 @@ class AppViewModel(
                 )
                 importedSeed = null
                 session.setPassword(password)
+                if (add.rememberPassword) passwordStore.save(password) else passwordStore.clear()
                 _state.update {
-                    it.copy(add = AddNetworkState(), unlocked = true)
+                    it.copy(add = AddNetworkState(), unlocked = true, rememberPassword = add.rememberPassword)
                 }
                 openActiveSession()
             } catch (e: Exception) {
@@ -2146,10 +2198,17 @@ class AppViewModel(
     }
 
     private fun persistEchoGroups(groups: List<EchoGroupUi>, extra: (UiState) -> UiState = { it }) {
+        // Update the UI first: assignment must be visible immediately even while
+        // the database write is in flight (#28).
+        _state.update { extra(it.copy(echoGroups = groups)) }
         val opened = networkSession ?: return
         viewModelScope.launch {
             runCatching { opened.saveEchoGroups(groups.map { NetworkSession.EchoGroup(it.id, it.name, it.echoes) }) }
-            _state.update { extra(it.copy(echoGroups = groups)) }
+                .onFailure { error ->
+                    _state.update {
+                        it.copy(echoGroupError = UiError.Failed(error.message ?: "Failed to save groups"))
+                    }
+                }
         }
     }
 
@@ -2510,6 +2569,12 @@ class AppViewModel(
     fun submitPolicyEdit() {
         val opened = networkSession ?: return
         val edit = _state.value.policyEdit ?: return
+        if (edit.hasInvalidFields) {
+            _state.update {
+                it.copy(policyEdit = edit.copy(error = UiError.Failed("Invalid duration value in the policy")))
+            }
+            return
+        }
         viewModelScope.launch {
             _state.update { it.copy(policyEdit = edit.copy(sending = true, error = null, status = null)) }
             try {
@@ -3420,6 +3485,9 @@ class AppViewModel(
                     title = null,
                 )
                 session.setPassword(appPassword)
+                // The imported identity may use another password; a saved one
+                // would only cause a failed auto-unlock on the next start.
+                passwordStore.clear()
                 importedSeed = seed
                 importJsonText = null
                 importFull = null
@@ -3704,11 +3772,15 @@ class AppViewModel(
         /** Starter rules for a conference created with rules. */
         private const val DEFAULT_ECHO_RULES = "{\n  \"text\": \"\",\n  \"parameters\": {}\n}"
 
-        fun factory(manager: NetworkManager, session: Session): ViewModelProvider.Factory =
+        fun factory(
+            manager: NetworkManager,
+            session: Session,
+            passwordStore: PasswordStore = NoopPasswordStore,
+        ): ViewModelProvider.Factory =
             object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                    AppViewModel(manager, session) as T
+                    AppViewModel(manager, session, passwordStore) as T
             }
     }
 }

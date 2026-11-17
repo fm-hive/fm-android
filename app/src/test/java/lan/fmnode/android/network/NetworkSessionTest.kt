@@ -765,4 +765,58 @@ class NetworkSessionTest {
             )
         }
     }
+
+    @Test
+    fun `reaction retraction keeps the target id and an empty emoji`() = runBlocking {
+        session.postReaction("target-message", "", "General")
+
+        val message = sentMessages.last()
+        assertEquals("echomail", message["type"]!!.jsonPrimitive.content)
+        assertEquals("General", message["echo_name"]!!.jsonPrimitive.content)
+        val payload = CryptoService.jwsPayload(message["jws"]!!.jsonPrimitive.content)!!
+        val data = Json.parseToJsonElement(payload).jsonObject
+        assertEquals("", data["reaction"]!!.jsonPrimitive.content)
+        assertEquals("target-message", data["reactionMessageId"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun `netmail without a key is queued and sent when the key arrives`() = runBlocking {
+        val result = session.sendNetmail(":0:9", "Subject", "Body")
+        assertTrue(result.queued)
+        assertTrue(result.needsKey)
+        assertEquals(1, db.outboxDao().getAll().size)
+
+        // Still no key: the queued message stays in the outbox.
+        sendReceiveResponse = emptySendReceive()
+        session.sync()
+        assertEquals(1, db.outboxDao().getAll().size)
+
+        // The node delivers the key in this sync; the outbox is flushed again
+        // after processing, so the netmail goes out immediately (#27).
+        val pubkey = data(
+            "type" to "pubkey_response",
+            "address" to ":0:9",
+            "sign_public_key" to Encoding.base64Encode(otherPublicKey),
+        )
+        sendReceiveResponse = buildJsonObject {
+            put("messages", buildJsonArray { add(incomingNetmail("k9", pubkey)) })
+            put("local_packet_ids", buildJsonArray {})
+        }
+        session.sync()
+
+        assertTrue(db.outboxDao().getAll().isEmpty())
+        val sent = sentMessages.last { it["recipient_address"]?.jsonPrimitive?.content == ":0:9" }
+        assertEquals("netmail", sent["type"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun `echo groups survive a database round trip`() = runBlocking {
+        val groups = listOf(
+            NetworkSession.EchoGroup("g1", "Group 1", listOf("General", "Tech")),
+            NetworkSession.EchoGroup("g2", "Group 2", listOf("General")),
+        )
+        session.saveEchoGroups(groups)
+        assertEquals(groups, session.echoGroups())
+    }
+
 }

@@ -1001,7 +1001,7 @@ fun PolicyEditDialog(
                 TextButton(onClick = onPreview, enabled = !state.sending) {
                     Text(stringResource(R.string.policy_edit_preview))
                 }
-                TextButton(onClick = onSubmit, enabled = !state.sending) {
+                TextButton(onClick = onSubmit, enabled = !state.sending && !state.hasInvalidFields) {
                     Text(stringResource(R.string.change_policy_submit))
                 }
             }
@@ -1039,17 +1039,27 @@ private fun PolicyParamRow(field: PolicyParamFieldUi, onChange: (String) -> Unit
                     }
                 }
             }
-            PolicyParamKind.Number, PolicyParamKind.Duration, PolicyParamKind.Text -> OutlinedTextField(
-                value = field.value,
-                onValueChange = onChange,
-                singleLine = true,
-                placeholder = {
-                    if (field.kind == PolicyParamKind.Duration) {
-                        Text(stringResource(R.string.policy_edit_duration_hint))
-                    }
-                },
-                modifier = Modifier.fillMaxWidth(),
-            )
+            PolicyParamKind.Number, PolicyParamKind.Duration, PolicyParamKind.Text -> Column {
+                OutlinedTextField(
+                    value = field.value,
+                    onValueChange = onChange,
+                    singleLine = true,
+                    isError = field.invalid,
+                    placeholder = {
+                        if (field.kind == PolicyParamKind.Duration) {
+                            Text(stringResource(R.string.policy_edit_duration_hint))
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                if (field.invalid) {
+                    Text(
+                        text = stringResource(R.string.policy_edit_duration_invalid),
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
         }
     }
 }

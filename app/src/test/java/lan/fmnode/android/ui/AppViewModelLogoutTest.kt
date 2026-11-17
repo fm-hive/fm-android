@@ -11,6 +11,7 @@ import kotlinx.coroutines.test.setMain
 import lan.fmnode.android.network.NetworkManager
 import lan.fmnode.android.session.Session
 import lan.fmnode.android.storage.AppDatabase
+import lan.fmnode.android.storage.PasswordStore
 import lan.fmnode.android.storage.Vault
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -62,7 +63,9 @@ class AppViewModelLogoutTest {
 
     @Test
     fun logoutConfirmationClearsSessionAndShowsUnlock() {
-        val viewModel = AppViewModel(NetworkManager(vault), session)
+        val store = MemoryPasswordStore()
+        val viewModel = AppViewModel(NetworkManager(vault), session, store)
+        store.saved = "secret"
 
         viewModel.requestLogout()
         assertTrue(viewModel.state.value.logoutDialog)
@@ -72,5 +75,21 @@ class AppViewModelLogoutTest {
         assertFalse(viewModel.state.value.unlocked)
         assertFalse(session.isUnlocked)
         assertEquals(AppScreen.Unlock, viewModel.state.value.screen)
+        // A saved password must not survive an explicit lock/logout (#22).
+        assertEquals(null, store.saved)
+    }
+
+    @Test
+    fun rememberPasswordCheckboxIsPartOfTheUnlockState() {
+        val viewModel = AppViewModel(NetworkManager(vault), session, MemoryPasswordStore())
+        assertFalse(viewModel.state.value.rememberPassword)
+        viewModel.setRememberPassword(true)
+        assertTrue(viewModel.state.value.rememberPassword)
+    }
+
+    private class MemoryPasswordStore(var saved: String? = null) : PasswordStore {
+        override fun load(): String? = saved
+        override fun save(password: String) { saved = password }
+        override fun clear() { saved = null }
     }
 }

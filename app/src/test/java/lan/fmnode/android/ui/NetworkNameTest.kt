@@ -23,6 +23,14 @@ class NetworkNameTest {
         assertEquals(UNNAMED_NETWORK, networkNameFromPolicyJson("not json"))
     }
 
+    @Test
+    fun `network news name comes from special echogroups`() {
+        val policy = """{"policy":{"parameters":{"special_echogroups":{"network_news":"News"}}}}"""
+        assertEquals("News", networkNewsEchoName(policy))
+        assertEquals("Network news", networkNewsEchoName("""{"policy":{"parameters":{}}}"""))
+        assertEquals("Network news", networkNewsEchoName("not json"))
+    }
+
     private fun group(name: String) = NetworkGroupUi(
         profileId = "p",
         networkName = name,
