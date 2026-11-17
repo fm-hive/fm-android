@@ -36,7 +36,7 @@
     <string name="no_netmail">Нет сообщений</string>
     <string name="recipient">Получатель</string>
     <string name="no_subject">(без темы)</string>
-    <string name="key_requested">Ключ получателя запрошен. Отправьте снова, когда он придёт.</string>
+    <string name="key_requested">Сообщение сохранено в outbox и уйдёт автоматически, когда появится ключ получателя.</string>
     <string name="address_label">Адрес</string>
     <string name="network_label">Сеть</string>
     <string name="node_key_label">Публичный ключ узла</string>

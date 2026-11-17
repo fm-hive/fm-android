@@ -377,7 +377,7 @@ fun NetmailComposeScreen(
                     IconButton(onClick = { showEmoji = true }) {
                         Icon(Icons.Default.EmojiEmotions, contentDescription = stringResource(R.string.emoji_title))
                     }
-                    TextButton(onClick = onSend, enabled = !state.sending) {
+                    TextButton(onClick = onSend, enabled = !state.sending && !state.keyRequested) {
                         Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null)
                         Spacer(Modifier.width(4.dp))
                         Text(stringResource(R.string.send))

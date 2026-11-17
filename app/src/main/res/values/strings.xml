@@ -36,7 +36,7 @@
     <string name="no_netmail">No messages</string>
     <string name="recipient">Recipient</string>
     <string name="no_subject">(no subject)</string>
-    <string name="key_requested">Recipient key requested. Send again when it arrives.</string>
+    <string name="key_requested">Message saved to the outbox; it will be sent automatically when the recipient key arrives.</string>
     <string name="address_label">Address</string>
     <string name="network_label">Network</string>
     <string name="node_key_label">Node public key</string>
