@@ -44,12 +44,6 @@ object BackupService {
         val warning: String? = null,
     )
 
-    private val protocolTypes = setOf(
-        "vote", "election", "excommunicate", "change_policy", "change_rules",
-        "remove_echo", "refill", "merge", "conflict", "recover", "appeal",
-        "remote_subscribe",
-    )
-
     private fun JsonObject.str(name: String): String? =
         (this[name] as? JsonPrimitive)?.contentOrNull
 
@@ -116,7 +110,7 @@ object BackupService {
     }
 
     suspend fun exportSettings(db: ProfileDatabase, profile: ProfileEntity): String {
-        val data = settingsData(db) ?: JsonObject(emptyMap())
+        val data = EmojiDefaults.settingsWithoutDefaultEmojis(settingsData(db) ?: JsonObject(emptyMap()))
         return json.encodeToString(
             JsonObject.serializer(),
             buildJsonObject {
@@ -159,11 +153,15 @@ object BackupService {
     suspend fun exportFull(db: ProfileDatabase, profile: ProfileEntity): String {
         val echoes = db.echoDao().getAll()
         val folders = db.netmailFolderDao().getAll()
-        val messages = db.messageDao().getAll().filter { it.type !in protocolTypes }
+        val messages = db.messageDao().getAll()
         val blogs = db.blogDao().getAll()
         val posts = db.blogPostDao().getAll()
         val names = db.nameDao().getAll()
         val subscribed = echoes.filter { it.subscribed }.map { it.name }
+        val echoIds = echoes.mapNotNull { echo -> echo.serverId?.let { echo.name to it } }.toMap()
+        val (settings, emojis) = EmojiDefaults.settingsForFullExport(
+            settingsData(db) ?: JsonObject(emptyMap()),
+        )
 
         val messagesByEcho = messages.groupBy { it.echoName }
         val baseNetmail = messagesByEcho[NetworkSessionConstants.NETMAIL_ECHO].orEmpty()
@@ -188,11 +186,18 @@ object BackupService {
             buildJsonObject {
                 put("version", "2.0")
                 put("exportedAt", Instant.now().toString())
-                settingsData(db)?.let { put("settings", it) }
+                // A full export is self-sufficient on a fresh install: the app
+                // URL is where the node key and endpoint are derived from, as
+                // in fm-app (fullExportAppUrl).
+                put("appUrl", profile.appUrl)
+                put("settings", settings)
+                emojis?.let { put("emojis", it) }
                 put("keys", keys)
                 put("user", buildJsonObject {
                     put("address", profile.address)
                     put("name", profile.displayName)
+                    // fm-app stores the public key as hex here; fmclient checks it.
+                    put("publicKey", Encoding.toHex(Encoding.base64Decode(profile.publicKeyB64)))
                 })
                 put("subscriptions", buildJsonArray { subscribed.forEach { add(JsonPrimitive(it)) } })
                 put("structure", buildJsonObject {
@@ -206,7 +211,9 @@ object BackupService {
                 })
                 put("messages", buildJsonObject {
                     messagesByEcho.filterKeys { it != NetworkSessionConstants.NETMAIL_ECHO }.forEach { (echo, rows) ->
-                        put("echo_$echo", buildJsonArray { rows.forEach { add(messageJson(it)) } })
+                        put("echo_$echo", buildJsonArray {
+                            rows.forEach { add(messageJson(it, echoName = echo, echoId = echoIds[echo])) }
+                        })
                     }
                     if (baseNetmail.isNotEmpty()) {
                         put("__netmail__", buildJsonArray { baseNetmail.forEach { add(messageJson(it)) } })
@@ -240,7 +247,9 @@ object BackupService {
         }
         warning = nodeKeyWarning(keys?.str("nodePublicKey"), profile)
 
-        (root["settings"] as? JsonObject)?.let { data ->
+        (root["settings"] as? JsonObject)?.let { raw ->
+            val emojis = root["emojis"] as? JsonArray
+            val data = if (emojis != null) EmojiDefaults.withEmojis(raw, emojis) else raw
             db.metaDao().put(MetaEntity(SETTINGS_META, data.toString()))
             applyPrivacy(db, data)
         }
@@ -345,16 +354,21 @@ object BackupService {
         )
     }
 
-    private fun messageJson(m: MessageEntity): JsonObject = buildJsonObject {
-        put("message_id", m.messageId)
-        put("type", m.type)
-        put("sender_address", m.senderAddress)
-        m.recipientAddress?.let { put("recipient_address", it) }
-        put("timestamp", m.timestamp)
-        put("data", m.dataJson)
-        m.jws?.let { put("jws", it) }
-        m.jwe?.let { put("jwe", it) }
-    }
+    private fun messageJson(m: MessageEntity, echoName: String? = null, echoId: Int? = null): JsonObject =
+        buildJsonObject {
+            put("message_id", m.messageId)
+            put("type", m.type)
+            put("sender_address", m.senderAddress)
+            m.recipientAddress?.let { put("recipient_address", it) }
+            // fm-app message rows carry the conference too; the web client uses
+            // it for actions and search after an import.
+            echoName?.let { put("echo_name", it) }
+            echoId?.let { put("echo_id", it) }
+            put("timestamp", m.timestamp)
+            put("data", m.dataJson)
+            m.jws?.let { put("jws", it) }
+            m.jwe?.let { put("jwe", it) }
+        }
 
     private fun blogJson(b: BlogEntity): JsonObject = buildJsonObject {
         put("id", b.id)

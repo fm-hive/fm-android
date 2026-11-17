@@ -46,10 +46,11 @@ Work in progress. Implemented so far:
   add-network flow.
 - `fm_settings` v1.0 export/import is supported.
 - Full `fm-app` v2.0 backups include settings, keys, subscriptions, echoes,
-  netmail folders/messages, blogs/posts and learned sender names. Import targets
-  the active network profile; for a new device add the network by invite first,
-  then import the full backup. The export of the active profile is accepted by
-  `fm-app`.
+  netmail folders/messages, blogs/posts and learned sender names. The exported
+  file carries `appUrl`, so it is self-sufficient on a new device: import it in
+  the add-network flow without typing the URL. It is accepted by `fm-app` and
+  by `fmclient settings import` (the Android export has the same shape as an
+  fm-app full export).
 
 ## CI/CD
 
