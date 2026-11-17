@@ -37,7 +37,7 @@ Work in progress. Implemented so far:
   (single and multi-select); message edit history (plain updates are folded
   into the original);
 - all fm-app translations generated into fm_strings.xml;
-- 65 unit tests (crypto vectors, policy, sync, DAO, backups, markdown, i18n
+- unit tests (crypto vectors, policy, sync, DAO, backups, markdown, i18n
   parity).
 
 ## Backup compatibility
