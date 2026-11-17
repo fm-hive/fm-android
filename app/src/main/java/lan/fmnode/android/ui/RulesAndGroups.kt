@@ -10,8 +10,12 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -26,6 +30,70 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import lan.fmnode.android.R
+
+/** Draft of a new vote poster: a question and at least two options. */
+@Composable
+fun VoteComposeDialog(
+    state: VoteComposeState,
+    onQuestion: (String) -> Unit,
+    onVariant: (Int, String) -> Unit,
+    onAddVariant: () -> Unit,
+    onRemoveVariant: (Int) -> Unit,
+    onSubmit: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = { if (!state.sending) onDismiss() },
+        title = { Text(stringResource(R.string.vote_create_title)) },
+        text = {
+            Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState())) {
+                OutlinedTextField(
+                    value = state.question,
+                    onValueChange = onQuestion,
+                    label = { Text(stringResource(R.string.vote_create_question)) },
+                    enabled = !state.sending,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 90.dp),
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = stringResource(R.string.vote_create_options),
+                    style = MaterialTheme.typography.labelLarge,
+                )
+                state.variants.forEachIndexed { index, value ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedTextField(
+                            value = value,
+                            onValueChange = { onVariant(index, it) },
+                            enabled = !state.sending,
+                            singleLine = true,
+                            modifier = Modifier.weight(1f),
+                        )
+                        if (state.variants.size > 2) {
+                            IconButton(onClick = { onRemoveVariant(index) }, enabled = !state.sending) {
+                                Icon(Icons.Default.Close, contentDescription = stringResource(R.string.delete))
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(4.dp))
+                }
+                TextButton(onClick = onAddVariant, enabled = !state.sending) {
+                    Text(stringResource(R.string.vote_create_add_option))
+                }
+                state.error?.let {
+                    Text(errorText(it), color = MaterialTheme.colorScheme.error)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onSubmit, enabled = !state.sending) {
+                Text(stringResource(R.string.vote_create_submit))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !state.sending) { Text(stringResource(R.string.cancel)) }
+        },
+    )
+}
 
 /**
  * Shown before subscribing to a conference that has rules: joining requires the

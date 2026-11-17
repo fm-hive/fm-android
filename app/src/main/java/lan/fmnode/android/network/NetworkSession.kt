@@ -357,6 +357,24 @@ class NetworkSession(
     }
 
     /**
+     * Creates a vote poster in [echoName] (vote protocol): the question and the
+     * variants other users choose from.
+     */
+    suspend fun postVotePoster(echoName: String, question: String, variants: List<String>): SendResult {
+        val data = buildJsonObject {
+            put("echo", echoName)
+            put("proto", "vote")
+            put("type", "poster")
+            put("from", profile.address)
+            put("to", "all")
+            put("message", question)
+            put("variants", buildJsonArray { variants.forEach { add(JsonPrimitive(it)) } })
+            put("date", java.time.Instant.now().toString())
+        }.toString()
+        return postProtocol(echoName, "vote", data)
+    }
+
+    /**
      * Casts (or retracts with an empty [variant]) a vote on a poster (vote
      * protocol, matching fm-app's vote message shape).
      */
@@ -598,14 +616,47 @@ class NetworkSession(
         api.post("voucher", data, auth)
     }
 
-    /** Creates a local conference (blog-like channel stored by the node). */
-    suspend fun createLocalEcho(name: String, description: String) {
+    /**
+     * Creates a local conference (admin only).
+     *
+     * [writers] and [electWritersFrom] become the conference rules on the node:
+     * an echo created with writers is a channel where only the listed addresses
+     * (or `all`) may post. [retractVote] enables vote retraction with
+     * [retractVoteDays] as its window.
+     */
+    suspend fun createLocalEcho(
+        name: String,
+        description: String,
+        writers: List<String> = emptyList(),
+        electWritersFrom: List<String> = emptyList(),
+        retractVote: Boolean = false,
+        retractVoteDays: Int? = null,
+    ) {
         val data = buildJsonObject {
             put("name", name)
             put("description", description)
             put("user_address", profile.address)
+            putWriters(writers, electWritersFrom, retractVote, retractVoteDays)
         }
         api.post("create_local_echo", data.toString(), auth)
+    }
+
+    private fun kotlinx.serialization.json.JsonObjectBuilder.putWriters(
+        writers: List<String>,
+        electWritersFrom: List<String>,
+        retractVote: Boolean,
+        retractVoteDays: Int?,
+    ) {
+        if (writers.isNotEmpty()) {
+            put("writers", buildJsonArray { writers.forEach { add(JsonPrimitive(it)) } })
+        }
+        if (electWritersFrom.isNotEmpty()) {
+            put("elect_writers_from", buildJsonArray { electWritersFrom.forEach { add(JsonPrimitive(it)) } })
+        }
+        if (retractVote) {
+            put("retract_vote", "enable")
+            put("retract_vote_days", (retractVoteDays ?: 1).toString())
+        }
     }
 
     /**
