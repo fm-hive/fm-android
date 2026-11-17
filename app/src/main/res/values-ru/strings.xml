@@ -172,6 +172,9 @@
     <string name="echo_groups_move_to">Переместить в</string>
     <string name="echo_groups_ungrouped">Без группы</string>
     <string name="echo_groups_empty">Групп пока нет</string>
+    <string name="echo_groups_hint">Выберите конференции, затем нажмите группу, чтобы переместить их в неё.</string>
+    <string name="echo_groups_move_selected">Переместить выбранные сюда</string>
+    <string name="echo_groups_empty_members">В этой группе пока нет конференций</string>
     <string name="display_name_change">Изменить имя</string>
     <string name="voucher_type">Тип ваучера</string>
     <string name="voucher_type_invite">Одноразовое приглашение</string>

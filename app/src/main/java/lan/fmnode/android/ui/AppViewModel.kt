@@ -2161,10 +2161,17 @@ class AppViewModel(
     }
 
     private fun persistEchoGroups(groups: List<EchoGroupUi>, extra: (UiState) -> UiState = { it }) {
+        // Update the UI first: assignment must be visible immediately even while
+        // the database write is in flight (#28).
+        _state.update { extra(it.copy(echoGroups = groups)) }
         val opened = networkSession ?: return
         viewModelScope.launch {
             runCatching { opened.saveEchoGroups(groups.map { NetworkSession.EchoGroup(it.id, it.name, it.echoes) }) }
-            _state.update { extra(it.copy(echoGroups = groups)) }
+                .onFailure { error ->
+                    _state.update {
+                        it.copy(echoGroupError = UiError.Failed(error.message ?: "Failed to save groups"))
+                    }
+                }
         }
     }
 

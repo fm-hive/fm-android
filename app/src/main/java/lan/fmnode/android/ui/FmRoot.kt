@@ -504,6 +504,7 @@ fun FmRoot(
             onProtocols = onOpenProtocols,
             onBrowseEchoes = onOpenEchoBrowser,
             networks = state.networks,
+            activeId = state.activeId,
             sendErrors = state.sendErrors,
             addressNotice = state.addressNotice,
             onSelectEchoInNetwork = onSelectEchoInNetwork,
@@ -1110,6 +1111,7 @@ fun EchoesListScreen(
     onProtocols: () -> Unit,
     onBrowseEchoes: () -> Unit,
     networks: List<NetworkGroupUi> = emptyList(),
+    activeId: String? = null,
     sendErrors: List<String> = emptyList(),
     addressNotice: AddressNoticeUi? = null,
     onSelectEchoInNetwork: (String, String) -> Unit = { _, _ -> },
@@ -1179,10 +1181,12 @@ fun EchoesListScreen(
             }
             // Several networks of the vault are listed as separate groups (#15).
             val groups = if (networks.size > 1) networks else emptyList()
+            val activeGroup = networks.firstOrNull { it.profileId == activeId }
             // With one network the list stays flat; its group may be filled
-            // before the active-session flow emits, so use it as the source.
+            // before the active-session flow emits, so use the active profile's
+            // cache first and only then the live echo list (#28).
             val flat = if (groups.isEmpty()) {
-                networks.firstOrNull()?.echoes ?: echoes
+                activeGroup?.echoes ?: networks.firstOrNull()?.echoes ?: echoes
             } else {
                 emptyList()
             }
@@ -1204,7 +1208,6 @@ fun EchoesListScreen(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 if (groups.isEmpty()) {
-                    val activeId = groups.firstOrNull()?.profileId
                     EchoItems(
                         echoes = flat,
                         echoGroups = echoGroups,
@@ -1219,8 +1222,8 @@ fun EchoesListScreen(
                         }
                         EchoItems(
                             echoes = group.echoes,
-                            // Groups belong to the active network profile only.
-                            echoGroups = if (group.isActive) echoGroups else emptyList(),
+                            // User groups belong to the active network profile only.
+                            echoGroups = if (group.profileId == activeId) echoGroups else emptyList(),
                             keyPrefix = group.profileId,
                             onSelect = { onSelectEchoInNetwork(group.profileId, it.name) },
                         )
@@ -1249,7 +1252,6 @@ private fun LazyListScope.EchoItems(
     val grouped = echoGroups.flatMap { it.echoes }.toSet()
     echoGroups.forEach { group ->
         val members = echoes.filter { it.name in group.echoes }
-        if (members.isEmpty()) return@forEach
         item(key = "$keyPrefix:ug:${group.id}") {
             Text(
                 text = group.name,
@@ -1258,8 +1260,19 @@ private fun LazyListScope.EchoItems(
                 modifier = Modifier.padding(top = 4.dp),
             )
         }
-        items(members, key = { "$keyPrefix:${group.id}:${it.name}" }) { echo ->
-            EchoCard(echo = echo, onClick = { onSelect(echo) })
+        if (members.isEmpty()) {
+            item(key = "$keyPrefix:ug:${group.id}:empty") {
+                Text(
+                    text = stringResource(R.string.echo_groups_empty_members),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 4.dp, bottom = 4.dp),
+                )
+            }
+        } else {
+            items(members, key = { "$keyPrefix:${group.id}:${it.name}" }) { echo ->
+                EchoCard(echo = echo, onClick = { onSelect(echo) })
+            }
         }
     }
     val rest = echoes.filterNot { it.name in grouped }

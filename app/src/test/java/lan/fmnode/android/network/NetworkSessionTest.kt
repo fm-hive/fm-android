@@ -809,4 +809,14 @@ class NetworkSessionTest {
         assertEquals("netmail", sent["type"]!!.jsonPrimitive.content)
     }
 
+    @Test
+    fun `echo groups survive a database round trip`() = runBlocking {
+        val groups = listOf(
+            NetworkSession.EchoGroup("g1", "Group 1", listOf("General", "Tech")),
+            NetworkSession.EchoGroup("g2", "Group 2", listOf("General")),
+        )
+        session.saveEchoGroups(groups)
+        assertEquals(groups, session.echoGroups())
+    }
+
 }

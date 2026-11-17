@@ -172,6 +172,9 @@
     <string name="echo_groups_move_to">Move to</string>
     <string name="echo_groups_ungrouped">Ungrouped</string>
     <string name="echo_groups_empty">No groups yet</string>
+    <string name="echo_groups_hint">Select conferences, then tap a group to move them into it.</string>
+    <string name="echo_groups_move_selected">Move selected here</string>
+    <string name="echo_groups_empty_members">No conferences in this group yet</string>
     <string name="display_name_change">Change display name</string>
     <string name="voucher_type">Voucher type</string>
     <string name="voucher_type_invite">Single-use invite</string>

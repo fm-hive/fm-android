@@ -1,7 +1,10 @@
 package lan.fmnode.android.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -184,6 +187,7 @@ fun RulesEditDialog(
  * User-defined groups of conferences (#366): create groups, pick conferences and
  * move them into a group (or out of every group).
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun EchoGroupsDialog(
     groups: List<EchoGroupUi>,
@@ -222,20 +226,38 @@ fun EchoGroupsDialog(
                     )
                 } else {
                     groups.forEach { group ->
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = "${group.name} (${group.echoes.size})",
-                                modifier = Modifier.weight(1f),
-                                fontWeight = FontWeight.SemiBold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
+                        Row(
+                            modifier = Modifier.fillMaxWidth().clickable(enabled = selection.isNotEmpty()) {
+                                onAssign(group.id)
+                            },
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    text = "${group.name} (${group.echoes.size})",
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                if (selection.isNotEmpty()) {
+                                    Text(
+                                        text = stringResource(R.string.echo_groups_move_selected),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary,
+                                    )
+                                }
+                            }
                             TextButton(onClick = { onDelete(group.id) }) { Text("✕") }
                         }
                     }
                 }
                 Spacer(Modifier.height(8.dp))
                 Text(stringResource(R.string.echo_groups_select), fontWeight = FontWeight.SemiBold)
+                Text(
+                    text = stringResource(R.string.echo_groups_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 echoes.forEach { echo ->
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Checkbox(
@@ -247,7 +269,12 @@ fun EchoGroupsDialog(
                 }
                 if (selection.isNotEmpty()) {
                     Text(stringResource(R.string.echo_groups_move_to), fontWeight = FontWeight.SemiBold)
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    // A plain Row clipped the last groups; FlowRow keeps every
+                    // target reachable with many or long group names (#28).
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
                         OutlinedButton(onClick = { onAssign(null) }) {
                             Text(stringResource(R.string.echo_groups_ungrouped))
                         }
