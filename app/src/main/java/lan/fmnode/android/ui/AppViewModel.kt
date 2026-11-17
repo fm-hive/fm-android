@@ -425,9 +425,20 @@ internal fun networkNameFromPolicyJson(policyJson: String): String {
     }.getOrDefault("FM")
 }
 
-/** Boolean network policy parameter of the accepted policy (default when absent). */
-internal fun policyFlag(policyJson: String, key: String, default: Boolean): Boolean {
+/** Network news conference name from the accepted policy (interactive posts are node-only). */
+internal fun networkNewsEchoName(policyJson: String): String {
     val json = Json { ignoreUnknownKeys = true }
+    return runCatching {
+        val root = json.parseToJsonElement(policyJson).jsonObject
+        val groups = root["policy"]?.jsonObject?.get("parameters")?.jsonObject
+            ?.get("special_echogroups")?.jsonObject
+        groups?.get("network_news")?.jsonPrimitive?.contentOrNull?.trim()
+            ?.takeIf { it.isNotEmpty() } ?: "Network news"
+    }.getOrDefault("Network news")
+}
+
+/** Boolean network policy parameter of the accepted policy (default when absent). */
+internal fun policyFlag(policyJson: String, key: String, default: Boolean): Boolean {    val json = Json { ignoreUnknownKeys = true }
     return runCatching {
         val root = json.parseToJsonElement(policyJson).jsonObject
         val parameters = root["policy"]?.jsonObject?.get("parameters")?.jsonObject

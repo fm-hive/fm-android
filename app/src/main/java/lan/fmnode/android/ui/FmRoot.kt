@@ -82,6 +82,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import lan.fmnode.android.R
+import lan.fmnode.android.network.EchoPermissions
 import lan.fmnode.android.storage.ProfileEntity
 import lan.fmnode.android.ui.theme.FmTheme
 
@@ -511,32 +512,43 @@ fun FmRoot(
             echoGroups = state.echoGroups,
             onOpenEchoGroups = onOpenEchoGroups,
         )
-        AppScreen.Echo -> EchoConversationScreen(
-            echoName = state.selectedEcho?.name ?: "",
-            messages = state.messages,
-            syncing = state.syncing,
-            canModerate = state.activeProfile?.let { it.isAdmin || it.isModerator } == true,
-            selectionMode = state.selectionMode,
-            selectedMessages = state.selectedMessages,
-            onToggleSelection = onToggleSelection,
-            onToggleMessageSelection = onToggleMessageSelection,
-            onForwardSelected = onForwardSelected,
-            onBack = onBackFromEcho,
-            onRefresh = onRefresh,
-            onCompose = onOpenCompose,
-            onRefill = onOpenRefillDialog,
-            onReact = onReactMessage,
-            onModerate = onOpenModeration,
-            onForward = onForwardMessage,
-            messageView = state.messageView,
-            onChangeMessageView = onChangeMessageView,
-            onOpenMessage = onOpenMessage,
-            sendErrors = state.sendErrors,
-            onDismissSendErrors = onDismissSendErrors,
-            onOpenRules = onOpenRulesEditor,
-            onOpenVote = onOpenVoteCompose,
-            onVote = onFeedVote,
-        )
+        AppScreen.Echo -> {
+            val echo = state.selectedEcho
+            val networkNews = echo != null &&
+                echo.name.equals(networkNewsEchoName(state.activeProfile?.policyJson.orEmpty()), ignoreCase = true)
+            val canWrite = echo == null || EchoPermissions.canWriteToEcho(
+                echo.rulesText,
+                state.activeProfile?.address.orEmpty(),
+                networkNews,
+            )
+            EchoConversationScreen(
+                echoName = echo?.name ?: "",
+                messages = state.messages,
+                syncing = state.syncing,
+                canModerate = state.activeProfile?.let { it.isAdmin || it.isModerator } == true,
+                canWrite = canWrite,
+                selectionMode = state.selectionMode,
+                selectedMessages = state.selectedMessages,
+                onToggleSelection = onToggleSelection,
+                onToggleMessageSelection = onToggleMessageSelection,
+                onForwardSelected = onForwardSelected,
+                onBack = onBackFromEcho,
+                onRefresh = onRefresh,
+                onCompose = onOpenCompose,
+                onRefill = onOpenRefillDialog,
+                onReact = onReactMessage,
+                onModerate = onOpenModeration,
+                onForward = onForwardMessage,
+                messageView = state.messageView,
+                onChangeMessageView = onChangeMessageView,
+                onOpenMessage = onOpenMessage,
+                sendErrors = state.sendErrors,
+                onDismissSendErrors = onDismissSendErrors,
+                onOpenRules = onOpenRulesEditor,
+                onOpenVote = onOpenVoteCompose,
+                onVote = onFeedVote,
+            )
+        }
         AppScreen.MessageDetail -> MessageDetailScreen(
             message = state.selectedMessage,
             onBack = onBackFromMessage,
@@ -544,6 +556,16 @@ fun FmRoot(
             onForward = onForwardMessage,
             onModerate = onOpenModeration,
             canModerate = state.activeProfile?.let { it.isAdmin || it.isModerator } == true,
+            canReact = state.selectedEcho?.let { echo ->
+                EchoPermissions.canWriteToEcho(
+                    echo.rulesText,
+                    state.activeProfile?.address.orEmpty(),
+                    echo.name.equals(
+                        networkNewsEchoName(state.activeProfile?.policyJson.orEmpty()),
+                        ignoreCase = true,
+                    ),
+                )
+            } ?: true,
         )
         AppScreen.Blog -> state.selectedBlog?.let { blog ->
             BlogScreen(
@@ -1386,6 +1408,7 @@ fun EchoConversationScreen(
     messages: List<MessageUi>,
     syncing: Boolean,
     canModerate: Boolean,
+    canWrite: Boolean = true,
     selectionMode: Boolean,
     selectedMessages: Set<String>,
     onToggleSelection: () -> Unit,
@@ -1454,13 +1477,15 @@ fun EchoConversationScreen(
                             Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.more))
                         }
                         DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.vote_create_title)) },
-                                onClick = {
-                                    menuExpanded = false
-                                    onOpenVote()
-                                },
-                            )
+                            if (canWrite) {
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.vote_create_title)) },
+                                    onClick = {
+                                        menuExpanded = false
+                                        onOpenVote()
+                                    },
+                                )
+                            }
                             DropdownMenuItem(
                                 text = { Text(stringResource(R.string.rules_edit_title)) },
                                 onClick = {
@@ -1474,8 +1499,10 @@ fun EchoConversationScreen(
             )
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = onCompose) {
-                Icon(Icons.Default.Edit, contentDescription = stringResource(R.string.compose))
+            if (canWrite) {
+                FloatingActionButton(onClick = onCompose) {
+                    Icon(Icons.Default.Edit, contentDescription = stringResource(R.string.compose))
+                }
             }
         },
     ) { padding ->
@@ -1521,6 +1548,7 @@ fun EchoConversationScreen(
                 messageView = messageView,
                 padding = padding,
                 canModerate = canModerate,
+                canReact = canWrite,
                 selectionMode = selectionMode,
                 selectedMessages = selectedMessages,
                 onToggleMessageSelection = onToggleMessageSelection,
@@ -1542,6 +1570,7 @@ private fun ConversationList(
     messageView: EchoMessageView,
     padding: androidx.compose.foundation.layout.PaddingValues,
     canModerate: Boolean,
+    canReact: Boolean = true,
     selectionMode: Boolean,
     selectedMessages: Set<String>,
     onToggleMessageSelection: (String) -> Unit,
@@ -1566,6 +1595,7 @@ private fun ConversationList(
             MessageCard(
                 message = message,
                 canModerate = canModerate,
+                canReact = canReact,
                 selectionMode = selectionMode,
                 selected = message.messageId in selectedMessages,
                 onToggleSelected = { onToggleMessageSelection(message.messageId) },
@@ -1683,6 +1713,7 @@ private fun VoteBallot(vote: VoteCardUi, onVote: (String) -> Unit) {
 private fun MessageCard(
     message: MessageUi,
     canModerate: Boolean,
+    canReact: Boolean = true,
     selectionMode: Boolean,
     selected: Boolean,
     onToggleSelected: () -> Unit,
@@ -1749,24 +1780,26 @@ private fun MessageCard(
                     AttachmentsRow(message.attachments)
                 }
             }
-            val quick = listOf("👍", "❤️", "😂")
-            Spacer(Modifier.height(2.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                quick.forEach { emoji ->
-                    val count = message.reactions[emoji] ?: 0
-                    TextButton(onClick = { onReact(message, emoji) }) {
-                        Text(
-                            text = if (count > 0) "$emoji $count" else emoji,
-                            color = if (message.myReaction == emoji) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
-                        )
+            if (canReact) {
+                val quick = listOf("👍", "❤️", "😂")
+                Spacer(Modifier.height(2.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    quick.forEach { emoji ->
+                        val count = message.reactions[emoji] ?: 0
+                        TextButton(onClick = { onReact(message, emoji) }) {
+                            Text(
+                                text = if (count > 0) "$emoji $count" else emoji,
+                                color = if (message.myReaction == emoji) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                            )
+                        }
                     }
-                }
-                message.reactions.filterKeys { it !in quick }.forEach { (emoji, count) ->
-                    AssistChip(onClick = { onReact(message, emoji) }, label = { Text("$emoji $count") })
+                    message.reactions.filterKeys { it !in quick }.forEach { (emoji, count) ->
+                        AssistChip(onClick = { onReact(message, emoji) }, label = { Text("$emoji $count") })
+                    }
                 }
             }
         }
@@ -1933,6 +1966,7 @@ fun MessageDetailScreen(
     onForward: (MessageUi) -> Unit,
     onModerate: (MessageUi) -> Unit,
     canModerate: Boolean,
+    canReact: Boolean = true,
 ) {
     Scaffold(
         topBar = {
@@ -1995,20 +2029,25 @@ fun MessageDetailScreen(
                     Spacer(Modifier.height(12.dp))
                 }
             }
-            val quick = listOf("👍", "❤️", "😂")
-            Spacer(Modifier.height(4.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                quick.forEach { emoji ->
-                    val count = message.reactions[emoji] ?: 0
-                    TextButton(onClick = { onReact(message, emoji) }) {
-                        Text(
-                            text = if (count > 0) "$emoji $count" else emoji,
-                            color = if (message.myReaction == emoji) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
-                        )
+            if (canReact) {
+                val quick = listOf("👍", "❤️", "😂")
+                Spacer(Modifier.height(4.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    quick.forEach { emoji ->
+                        val count = message.reactions[emoji] ?: 0
+                        TextButton(onClick = { onReact(message, emoji) }) {
+                            Text(
+                                text = if (count > 0) "$emoji $count" else emoji,
+                                color = if (message.myReaction == emoji) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                            )
+                        }
+                    }
+                    message.reactions.filterKeys { it !in quick }.forEach { (emoji, count) ->
+                        AssistChip(onClick = { onReact(message, emoji) }, label = { Text("$emoji $count") })
                     }
                 }
             }
