@@ -243,9 +243,12 @@ fun SettingsScreen(
                             text = stringResource(R.string.voucher_type),
                             style = MaterialTheme.typography.labelLarge,
                         )
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        // Russian labels ("Одноразовое приглашение" and
+                        // "Многоразовый (на время)") do not fit side by side.
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             OutlinedButton(
                                 onClick = { onVoucherType(NetworkSession.VOUCHER_INVITE) },
+                                modifier = Modifier.fillMaxWidth(),
                             ) {
                                 Text(
                                     text = stringResource(R.string.voucher_type_invite),
@@ -261,6 +264,7 @@ fun SettingsScreen(
                             OutlinedButton(
                                 onClick = { onVoucherType(NetworkSession.VOUCHER_INVITE_TIME) },
                                 enabled = profile.isAdmin,
+                                modifier = Modifier.fillMaxWidth(),
                             ) {
                                 Text(
                                     text = stringResource(R.string.voucher_type_time),

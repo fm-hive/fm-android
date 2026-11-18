@@ -33,7 +33,7 @@
     <string name="echoes_tab">Эхи</string>
     <string name="netmail_tab">Личные</string>
     <string name="settings_tab">Настройки</string>
-    <string name="netmail_compose">Новое личное сообщение</string>
+    <string name="netmail_compose">Личное сообщение</string>
     <string name="inbox">Входящие</string>
     <string name="sent">Отправленные</string>
     <string name="no_netmail">Нет сообщений</string>
