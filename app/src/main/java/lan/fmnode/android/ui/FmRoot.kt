@@ -674,6 +674,7 @@ fun FmRoot(
             onVote = onCastVote,
             onRespondRefill = onRespondRefill,
             onVoteElection = onVoteElection,
+            refillStatus = state.refillRespondStatus,
         )
         AppScreen.Netmail -> NetmailScreen(
             messages = state.netmail,

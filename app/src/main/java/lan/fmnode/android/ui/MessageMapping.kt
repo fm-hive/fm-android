@@ -70,6 +70,20 @@ internal object MessageMapping {
 }
 
 /**
+ * Requester and `before` date of a refill request, or null when the payload is
+ * not one. The date is what the responder filters its stored history by.
+ */
+internal fun refillRequestOf(dataJson: String): Pair<String, String>? {
+    val data = runCatching { Json.parseToJsonElement(dataJson).jsonObject }.getOrNull() ?: return null
+    if ((data["proto"] as? JsonPrimitive)?.contentOrNull != "refill") return null
+    val refill = data["refill"] as? JsonObject ?: return null
+    val from = (refill["from"] as? JsonPrimitive)?.contentOrNull.orEmpty()
+    val before = (refill["before"] as? JsonPrimitive)?.contentOrNull.orEmpty()
+    if (from.isEmpty() || before.isEmpty()) return null
+    return from to before
+}
+
+/**
  * Moderation fields of a warning/punishment echomail, if it is one.
  *
  * [senderAddress] is the author of the notice — the moderator. It cannot be read

@@ -156,13 +156,40 @@
 из-за чего node2 не мог доставить очередь, и фаза 2 отклонялась). Клиентская
 часть — уведомление о слиянии и принятие нового адреса — проверена и работает.
 
+### Проверено после обнуления стенда
+
+Стенд пересоздан (`reset_nodes.sh` + `seed_clients.sh --force`), на node1 включён
+`client_synchronize`, на node2 — `recover_enabled`. Приложение заново
+зарегистрировано на node1 (ключ узла сменился).
+
+| Сценарий | Что сделано | Подтверждение | Итог |
+| --- | --- | --- | --- |
+| `refill.md` (ответ из приложения) | :0:1 запросил refill → в Protocols «Respond» | узел: `refill type=response from=:0:2`, `processed refill messages count=4`; :0:1 получил `history1..3` | PASS (после фикса) |
+| `recover.md` | Settings → Recovery mode → инвайт node2 | node2: `recover client registered address=:0:2`, `is_recover_client=1`, создан Emergency | PASS |
+| recover: RO-доступ | после recover приложение показывает только Emergency | список эх = Emergency, обычные конференции недоступны | PASS |
+| recover: смена эндпоинта | профиль ушёл на `:0:2:2` / 8445 | Settings: URL 8445, ключ узла node2 | PASS (после фикса) |
+| `merge.md` целиком | node1⇄node2, голоса админов в фазах | `Network1: :0: → :0:1:, Network2: :0: → :0:2:`, `Merge execution completed`; обе ноды видят `:0:1:0`, `:0:2:0` | PASS |
+| клиент после merge | перерегистрация адреса | баннер «Network merged: (:0:2) address is now :0:2:2», node2: users `:0:2:2` | PASS |
+| `remote_subscribe.md` | канал `RemoteChannel` на node1, подписка из приложения на `:0:1:0` | node1: `Remote subscribe approved: requester=:0:2:2 echo=RemoteChannel`; канал появился в списке эх | PASS |
+| `client_synchronize` (регистрация) | node2 с `client_synchronize: true` | узел: `client_container_entries` = `{op:add, client:<uuid>}` | PASS |
+| `client_synchronize` (upload) | сообщение из Emergency → второе устройство | приложение записало `{op:message, …Emergency…}` в `outbound_client_<второй клиент>` | PASS |
+| `client_synchronize` (download) | `{op:blog}` в контейнер приложения | блог «Synced Blog» появился в UI, запись удалена после ack | PASS |
+
+Второй Android-клиент не поднимался: вместо второго эмулятора контейнеры
+наполнялись по тому же протоколу (`client_synchronize`), что использует второе
+устройство с теми же ключами; криптоформат 1:1 с `CryptoService` (JWE:
+`ephemeral_public`/`nonce`/`ciphertext`, X25519 + ChaCha20-Poly1305).
+
+### Найдено на стороне узла (не клиента)
+
+`remote_subscribe` регистрирует подписку, но новые сообщения канала до
+удалённого подписчика не доходят: хост-узел логирует
+`echomail queued … remote_nodes=0 local_users=0`, очередь в `outbound` не растёт.
+Клиент показывает канал и получает по нему только то, что придёт через
+NEW_ECHO/синхронизацию.
+
 ### Не проверено в этой сессии
-| `merge.md` полное завершение | см. выше: фазы и адреса проверены, но стенд загрязнился и финальное голосование не прошло | `reset_nodes.sh` + чистый merge по сценарию `test_network` |
-| `recover.md` | нужен узел в режиме recover и подписанный запрос | `recover_enabled` + `fmclient recover` на node2, затем экран Recovery |
-| `refill.md` ответ | запрос уходит, но ответить должен другой пользователь (👍 на запрос) | второй клиент в той же эхе |
-| `remote_subscribe.md` | нужны объединённые узлы; merge не завершён | сначала чистый merge, затем «Remote» в браузере эх |
-| `conflict.md` | нужны разошедшиеся данные на двух узлах | два узла с разными голосами |
-| `client_synchronize.md` | нужны два Android-клиента с одними ключами | второй эмулятор/профиль |
+| `conflict.md` | нужны разошедшиеся данные по одному голосованию на двух узлах (после merge данные общие) | разорвать связь, проголосовать по-разному на каждом узле, затем переподключить и дождаться обмена |
 
 ### Замечания по стенду
 
@@ -251,6 +278,28 @@
 current and proposed rules». UI при этом сначала пишет «Proposal queued»
 (сообщение уходит в outbox), а отказ появляется позже баннером — ожидаемо, но
 можно предупреждать сразу, сравнив rules до отправки.
+
+### Кнопка «Respond» у refill ничего не отправляла
+
+`respondRefill` во ViewModel ставил 👍-реакцию на запрос. Узел обрабатывает
+реакции только для одобрения новичков в Newcomers (`processReactionMessage`
+выходит, если эхо не Newcomers), а refill-ответ — это отдельное сообщение
+`proto:"refill"`, `type:"response"` с массивом `refill.messages` и их JWS.
+
+Исправление: `NetworkSession.respondRefill(echo, requester, before)` собирает
+подписанные сообщения из локальной БД (`MessageDao.getSignedBefore`) и
+отправляет настоящий ответ; статус «Sent N message(s)» виден в Protocols.
+Тесты: `NetworkSessionTest` (payload и пустой случай), `RefillRequestTest`.
+
+### После recover приложение продолжало работать со старым узлом
+
+`submitRecovery` обновлял профиль (URL, ключ узла), но `sessionFor` возвращает
+закэшированную сессию по `profile.id`, а та держит старый API-клиент. В итоге
+recover формально проходил, Settings показывал новый адрес, а весь трафик шёл
+на мёртвый узел.
+
+Исправление: `forgetSession(profileId)` сбрасывает сессию перед повторным
+открытием; после recover приложение сразу работает с recovery-узлом.
 
 ### Ограничения стороны узла (не клиента)
 

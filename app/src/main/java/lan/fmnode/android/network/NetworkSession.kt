@@ -613,6 +613,65 @@ class NetworkSession(
         return postProtocol(echoName, "refill", data)
     }
 
+    /**
+     * Answers a refill request by relaying our stored messages of [echoName]
+     * older than [beforeIso] (refill protocol, `type:"response"`).
+     *
+     * The node does not treat a thumbs-up reaction as an answer: only a
+     * `refill` response carrying the messages (`refill.messages`, each with its
+     * original JWS) makes it deliver history to the requester.
+     *
+     * Returns the number of relayed messages, or 0 when we have none.
+     */
+    suspend fun respondRefill(echoName: String, requester: String, beforeIso: String): Int {
+        val before = parseRefillDate(beforeIso)
+            ?: throw IllegalArgumentException("invalid refill date: $beforeIso")
+        val stored = database.messageDao().getSignedBefore(echoName, before)
+        val wire = stored.mapNotNull { row ->
+            val jws = row.jws?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            buildJsonObject {
+                put("type", row.type)
+                put("sender_address", row.senderAddress)
+                put("timestamp", row.timestamp)
+                put("message_id", row.messageId)
+                put("jws", jws)
+                row.recipientAddress?.let { put("recipient_address", it) }
+            }
+        }
+        if (wire.isEmpty()) return 0
+        val data = buildJsonObject {
+            put("proto", "refill")
+            put("type", "response")
+            put("echo", echoName)
+            put("date", java.time.Instant.now().toString())
+            put(
+                "refill",
+                buildJsonObject {
+                    put("echo", echoName)
+                    put("to", requester)
+                    put("messages", buildJsonArray { wire.forEach { add(it) } })
+                },
+            )
+        }.toString()
+        postProtocol(echoName, "refill", data)
+        return wire.size
+    }
+
+    /**
+     * Epoch seconds of a refill `before` value. Accepts the `YYYY-MM-DD` the
+     * dialog sends and a full ISO timestamp, like the console client does.
+     */
+    private fun parseRefillDate(raw: String): Long? {
+        val text = raw.trim()
+        if (text.isEmpty()) return null
+        runCatching { return java.time.LocalDate.parse(text).atStartOfDay(java.time.ZoneOffset.UTC).toEpochSecond() }
+        runCatching { return java.time.Instant.parse(text).epochSecond }
+        runCatching {
+            return java.time.OffsetDateTime.parse(text).toEpochSecond()
+        }
+        return null
+    }
+
     /** Sends our public key to a user who requested it. */
     suspend fun respondToPubkeyRequest(requester: String, requestorPubkeyB64: String) {
         val requestorEd = Encoding.base64Decode(requestorPubkeyB64)

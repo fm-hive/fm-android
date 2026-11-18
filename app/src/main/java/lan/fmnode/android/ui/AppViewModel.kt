@@ -575,6 +575,8 @@ data class UiState(
     val refillDate: String = "",
     val refillSending: Boolean = false,
     val refillError: UiError? = null,
+    /** Outcome of answering somebody else's refill request. */
+    val refillRespondStatus: String? = null,
     /** Remote subscription to a channel hosted on another node. */
     val remoteSubscribeDialog: Boolean = false,
     val remoteSubscribeEcho: String = "",
@@ -1023,6 +1025,18 @@ class AppViewModel(
         sessions[profile.id] = opened
         startGroupCollector(opened)
         return opened
+    }
+
+    /**
+     * Drops the cached session of [profileId] so the next open builds a new one
+     * from the stored profile. Needed when the endpoint changes (recovery): the
+     * cached session keeps its old API client and would talk to the old node.
+     */
+    private fun forgetSession(profileId: String) {
+        groupJobs.remove(profileId)?.cancel()
+        groupEchoes.remove(profileId)
+        val opened = sessions.remove(profileId) ?: return
+        if (networkSession === opened) networkSession = null
     }
 
     /** Keeps the echo group of one network up to date (#15). */
@@ -2010,10 +2024,38 @@ class AppViewModel(
         }
     }
 
+    /**
+     * Answers a refill request with our own history of that conference.
+     *
+     * A thumbs-up reaction does nothing here: the node only delivers history for
+     * a `refill` response that carries the messages themselves.
+     */
     fun respondRefill(protocol: ProtocolUi) {
         val opened = networkSession ?: return
         viewModelScope.launch {
-            runCatching { opened.postReaction(protocol.messageId, "👍", protocol.echoName) }
+            _state.update { it.copy(refillRespondStatus = null) }
+            val row = runCatching {
+                opened.database.messageDao().getByEchoAndId(protocol.echoName, protocol.messageId)
+            }.getOrNull()
+            val request: Pair<String, String>? = row?.let { refillRequestOf(it.dataJson) }
+            if (request == null) {
+                _state.update { it.copy(sendErrors = (listOf("Refill request has no date") + it.sendErrors).take(MAX_SEND_ERRORS)) }
+                return@launch
+            }
+            val sent = runCatching { opened.respondRefill(protocol.echoName, request.first, request.second) }
+            sent.onSuccess { count ->
+                if (count == 0) {
+                    _state.update {
+                        it.copy(sendErrors = (listOf("No stored messages to send for ${protocol.echoName}") + it.sendErrors).take(MAX_SEND_ERRORS))
+                    }
+                } else {
+                    _state.update { it.copy(refillRespondStatus = "Sent $count message(s)") }
+                }
+            }.onFailure { err ->
+                _state.update {
+                    it.copy(sendErrors = (listOf(err.message ?: "Refill response failed") + it.sendErrors).take(MAX_SEND_ERRORS))
+                }
+            }
             syncOnce(opened)
         }
     }
@@ -2601,6 +2643,9 @@ class AppViewModel(
             _state.update { it.copy(recoveryLoading = true, recoveryError = null) }
             try {
                 manager.recover(invite, profile, password)
+                // The profile now points at the recovery node; a cached session
+                // would keep the old endpoint and keep hitting the dead node.
+                forgetSession(profile.id)
                 _state.update { it.copy(recoveryDialog = false, recoveryLoading = false) }
                 openActiveSession()
             } catch (e: Exception) {

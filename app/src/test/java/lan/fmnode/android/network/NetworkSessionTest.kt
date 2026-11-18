@@ -1015,6 +1015,56 @@ class NetworkSessionTest {
         assertTrue(session.profile.isModerator)
     }
 
+    /**
+     * Answering a refill request is a `refill` response carrying our stored
+     * messages with their original JWS. A thumbs-up reaction does nothing on the
+     * node, so this payload is the only thing that delivers history.
+     */
+    @Test
+    fun `refill response relays stored signed messages before the cutoff`() = runBlocking {
+        val signed = MessageEntity(
+            messageId = "m-old",
+            echoName = "General",
+            type = "echomail",
+            senderAddress = ":0:1",
+            recipientAddress = null,
+            timestamp = 1_000,
+            dataJson = """{"subject":"old","body":"old"}""",
+            jws = "jws-old",
+            jwe = null,
+            receivedAt = 1_000,
+        )
+        val unsigned = signed.copy(messageId = "m-nosig", jws = null)
+        val tooNew = signed.copy(messageId = "m-new", timestamp = 9_999_999_999)
+        db.messageDao().upsertAll(listOf(signed, unsigned, tooNew))
+
+        val count = session.respondRefill("General", ":0:9", "2026-11-18")
+
+        assertEquals(1, count)
+        val message = sentMessages.last()
+        assertEquals("refill", message["type"]!!.jsonPrimitive.content)
+        val payload = Json.parseToJsonElement(
+            CryptoService.jwsPayload(message["jws"]!!.jsonPrimitive.content)!!,
+        ).jsonObject
+        assertEquals("response", payload["type"]!!.jsonPrimitive.content)
+        val refill = payload["refill"]!!.jsonObject
+        assertEquals(":0:9", refill["to"]!!.jsonPrimitive.content)
+        val messages = refill["messages"]!!.jsonArray
+        assertEquals(1, messages.size)
+        assertEquals("m-old", messages[0].jsonObject["message_id"]!!.jsonPrimitive.content)
+        assertEquals("jws-old", messages[0].jsonObject["jws"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun `refill response with nothing stored sends nothing`() = runBlocking {
+        val before = sentMessages.size
+
+        val count = session.respondRefill("Empty", ":0:9", "2026-11-18")
+
+        assertEquals(0, count)
+        assertEquals(before, sentMessages.size)
+    }
+
     @Test
     fun `role update without a change keeps the profile`() {
         val before = session.profile
