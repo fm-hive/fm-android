@@ -132,11 +132,13 @@ fun AdminScreen(
             excommError?.let { Text(errorText(it), color = MaterialTheme.colorScheme.error) }
 
             Spacer(Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = onOpenRemoveEcho) {
+            // Both labels are long in Russian; side by side the policy button
+            // stretched to three lines. Full-width rows keep them even.
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = onOpenRemoveEcho, modifier = Modifier.fillMaxWidth()) {
                     Text(stringResource(R.string.remove_echo_title))
                 }
-                OutlinedButton(onClick = onOpenPolicyEdit) {
+                OutlinedButton(onClick = onOpenPolicyEdit, modifier = Modifier.fillMaxWidth()) {
                     Text(stringResource(R.string.change_policy_title))
                 }
             }

@@ -33,7 +33,7 @@
     <string name="echoes_tab">Echoes</string>
     <string name="netmail_tab">Netmail</string>
     <string name="settings_tab">Settings</string>
-    <string name="netmail_compose">New private message</string>
+    <string name="netmail_compose">Private message</string>
     <string name="inbox">Inbox</string>
     <string name="sent">Sent</string>
     <string name="no_netmail">No messages</string>

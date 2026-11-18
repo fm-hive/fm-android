@@ -56,6 +56,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import lan.fmnode.android.R
 
@@ -364,7 +365,16 @@ fun NetmailComposeScreen(
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text(stringResource(R.string.netmail_compose)) },
+                // The long Russian title wrapped to three lines next to the
+                // text send action; a single-line title and an icon action
+                // keep the top bar height stable.
+                title = {
+                    Text(
+                        text = stringResource(R.string.netmail_compose),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
@@ -377,10 +387,11 @@ fun NetmailComposeScreen(
                     IconButton(onClick = { showEmoji = true }) {
                         Icon(Icons.Default.EmojiEmotions, contentDescription = stringResource(R.string.emoji_title))
                     }
-                    TextButton(onClick = onSend, enabled = !state.sending && !state.keyRequested) {
-                        Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null)
-                        Spacer(Modifier.width(4.dp))
-                        Text(stringResource(R.string.send))
+                    IconButton(onClick = onSend, enabled = !state.sending && !state.keyRequested) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.Send,
+                            contentDescription = stringResource(R.string.send),
+                        )
                     }
                 },
             )

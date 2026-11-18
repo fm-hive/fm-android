@@ -76,6 +76,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import java.text.SimpleDateFormat
@@ -1231,7 +1232,7 @@ fun EchoesListScreen(
         },
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text(title, maxLines = 1) },
+                title = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 actions = {
                     if (syncing) {
                         CircularProgressIndicator(modifier = Modifier.width(20.dp).height(20.dp))
@@ -1566,7 +1567,7 @@ fun EchoConversationScreen(
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text(echoName, maxLines = 1) },
+                title = { Text(echoName, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
@@ -1970,7 +1971,7 @@ fun EchoComposeScreen(
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text(echoName, maxLines = 1) },
+                title = { Text(echoName, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
@@ -2127,7 +2128,7 @@ fun MessageDetailScreen(
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text(stringResource(R.string.message_title), maxLines = 1) },
+                title = { Text(stringResource(R.string.message_title), maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))

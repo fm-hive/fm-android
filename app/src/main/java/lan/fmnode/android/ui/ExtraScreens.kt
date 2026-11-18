@@ -30,7 +30,9 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.CircularProgressIndicator
@@ -497,17 +499,30 @@ fun EchoBrowserScreen(
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text(stringResource(R.string.browse_echoes)) },
+                // Two text actions left the title less than a character wide in
+                // Russian ("Эхо-конференции"); icon actions keep it readable.
+                title = {
+                    Text(
+                        text = stringResource(R.string.browse_echoes),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
                     }
                 },
                 actions = {
-                    TextButton(onClick = onRemoteSubscribe) {
-                        Text(stringResource(R.string.remote_subscribe_short))
+                    IconButton(onClick = onRemoteSubscribe) {
+                        Icon(
+                            Icons.Default.Public,
+                            contentDescription = stringResource(R.string.remote_subscribe_title),
+                        )
                     }
-                    TextButton(onClick = onCreateLocal) { Text(stringResource(R.string.create_echo)) }
+                    IconButton(onClick = onCreateLocal) {
+                        Icon(Icons.Default.Add, contentDescription = stringResource(R.string.create_echo))
+                    }
                 },
             )
         },
