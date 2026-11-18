@@ -481,6 +481,7 @@ fun EchoBrowserScreen(
     onBack: () -> Unit,
     onToggle: (String, Boolean) -> Unit,
     onCreateLocal: () -> Unit,
+    onRemoteSubscribe: () -> Unit = {},
 ) {
     Scaffold(
         topBar = {
@@ -492,6 +493,9 @@ fun EchoBrowserScreen(
                     }
                 },
                 actions = {
+                    TextButton(onClick = onRemoteSubscribe) {
+                        Text(stringResource(R.string.remote_subscribe_short))
+                    }
                     TextButton(onClick = onCreateLocal) { Text(stringResource(R.string.create_echo)) }
                 },
             )

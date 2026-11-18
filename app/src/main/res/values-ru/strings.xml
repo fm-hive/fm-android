@@ -13,6 +13,7 @@
     <string name="register">Принять и зарегистрироваться</string>
     <string name="unlock_title">Разблокировать</string>
     <string name="unlock">Разблокировать</string>
+    <string name="unlocking_saved_password">Разблокировка сохранённым паролем…</string>
     <string name="remember_password">Сохранить пароль</string>
     <string name="delete">Удалить</string>
     <string name="active">Активна</string>
@@ -26,6 +27,7 @@
     <string name="no_messages">Пока нет сообщений</string>
     <string name="compose">Написать</string>
     <string name="subject">Тема</string>
+    <string name="compose_announcement">Отправить как объявление</string>
     <string name="body">Сообщение</string>
     <string name="send">Отправить</string>
     <string name="echoes_tab">Эхи</string>
@@ -206,4 +208,18 @@
     <string name="create_echo_rules">Правила (JSON)</string>
     <string name="create_echo_network_channel">Не анонсировать в сети</string>
     <string name="node_clients">Пользователи</string>
+    <string name="remote_subscribe_short">Удалённо</string>
+    <string name="remote_subscribe_title">Удалённая подписка на канал</string>
+    <string name="remote_subscribe_hint">Подписка на канал, размещённый на другой ноде. Запрос идёт по маршрутам, нода-хостер подтверждает подписку.</string>
+    <string name="remote_subscribe_channel">Название канала</string>
+    <string name="remote_subscribe_host">Адрес ноды-хостера</string>
+    <string name="remote_subscribe_send">Подписаться</string>
+    <string name="appeal_title">Оспорить наказание</string>
+    <string name="appeal_hint">Апелляция публикуется в Admin council, сеть голосует за отмену или сохранение наказания.</string>
+    <string name="appeal_moderator">Модератор</string>
+    <string name="appeal_target">Наказанный</string>
+    <string name="appeal_echo">Конференция</string>
+    <string name="appeal_severity">Вид наказания</string>
+    <string name="appeal_reason">Причина</string>
+    <string name="appeal_submit">Подать апелляцию</string>
 </resources>

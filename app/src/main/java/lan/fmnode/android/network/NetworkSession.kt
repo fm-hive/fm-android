@@ -396,14 +396,19 @@ class NetworkSession(
         return postProtocol(echoName, "vote", data)
     }
 
-    /** Posts an echomail message; network failures queue it in the outbox. */
+    /**
+     * Posts an echomail message (or an announcement); network failures queue
+     * it in the outbox with the same message type.
+     */
     suspend fun postEcho(
         echoName: String,
         subject: String,
         body: String,
         replyToMessageId: String? = null,
         attachments: JsonArray? = null,
+        announcement: Boolean = false,
     ): SendResult {
+        val messageType = if (announcement) "announcement" else "echomail"
         val data = buildJsonObject {
             put("subject", subject)
             put("body", body)
@@ -413,10 +418,10 @@ class NetworkSession(
             if (attachments != null && attachments.isNotEmpty()) put("attachments", attachments)
         }.toString()
         return try {
-            sendMessages(listOf(signMessage("echomail", data, echoName = echoName)))
+            sendMessages(listOf(signMessage(messageType, data, echoName = echoName)))
             SendResult(queued = false)
         } catch (e: Exception) {
-            queueOutbox("echomail", echoName, null, data, e)
+            queueOutbox(messageType, echoName, null, data, e)
             SendResult(queued = true)
         }
     }
@@ -483,6 +488,25 @@ class NetworkSession(
         } ?: false
     }
 
+    /**
+     * Sends a `remote_subscribe` request for a channel hosted on another node
+     * (docs/proto/remote_subscribe.md). The node routes it hop-by-hop.
+     */
+    suspend fun postRemoteSubscribe(echoName: String, hostNode: String): SendResult {
+        val data = buildJsonObject {
+            put("proto", "remote_subscribe")
+            put("type", "request")
+            put("from", profile.address)
+            put("to", "all")
+            put("message", "Remote subscribe to $echoName")
+            put("date", java.time.Instant.now().toString())
+            put("echo", echoName)
+            put("host_node", hostNode)
+            put("requester", profile.address)
+        }.toString()
+        return postProtocol(echoName, "remote_subscribe", data)
+    }
+
     /** Adds or retracts ([emoji] empty) a reaction to a message. */
     suspend fun postReaction(targetMessageId: String, emoji: String, echoName: String): SendResult {
         val data = buildJsonObject {
@@ -506,6 +530,39 @@ class NetworkSession(
             put("date", java.time.Instant.now().toString())
         }.toString()
         return postProtocol(echoName, "election", data)
+    }
+
+    /**
+     * Appeals a moderator warning/punishment in the Admin council
+     * (docs/proto/appeal.md). The node validates the referenced punishment and
+     * opens the network vote.
+     */
+    suspend fun postAppeal(
+        echoName: String,
+        moderator: String,
+        punishmentMessageId: String,
+        punishmentEcho: String,
+        severity: String,
+        targetAddress: String,
+        reason: String,
+        attachments: JsonArray? = null,
+    ): SendResult {
+        val data = buildJsonObject {
+            put("proto", "appeal")
+            put("type", "poster")
+            put("from", profile.address)
+            put("to", "all")
+            put("message", reason)
+            put("date", java.time.Instant.now().toString())
+            put("echo", echoName)
+            put("protoAddress", moderator)
+            put("punishmentMessageId", punishmentMessageId)
+            put("punishmentEcho", punishmentEcho)
+            put("severity", severity)
+            put("targetAddress", targetAddress)
+            if (attachments != null && attachments.isNotEmpty()) put("attachments", attachments)
+        }.toString()
+        return postProtocol(echoName, "appeal", data)
     }
 
     /** Requests old messages of an echo before [beforeIso] (refill protocol). */
@@ -1133,7 +1190,7 @@ class NetworkSession(
             val message = try {
                 when (entry.type) {
                     "netmail" -> entry.recipientAddress?.let { buildNetmailMessage(it, entry.dataJson) }
-                    else -> entry.echoName?.let { signMessage("echomail", entry.dataJson, echoName = it) }
+                    else -> entry.echoName?.let { signMessage(entry.type, entry.dataJson, echoName = it) }
                 }
             } catch (_: Exception) {
                 null

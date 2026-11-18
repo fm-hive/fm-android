@@ -124,6 +124,7 @@ fun FmRoot(
     onBackFromCompose: () -> Unit = {},
     onComposeSubject: (String) -> Unit = {},
     onComposeBody: (String) -> Unit = {},
+    onComposeAnnouncement: (Boolean) -> Unit = {},
     onSendCompose: () -> Unit = {},
     onOpenNetmail: () -> Unit = {},
     onOpenSettings: () -> Unit = {},
@@ -228,6 +229,15 @@ fun FmRoot(
     onRetryOutbox: () -> Unit = {},
     onDeleteOutbox: (Long) -> Unit = {},
     onOpenRefillDialog: () -> Unit = {},
+    onOpenRemoteSubscribe: () -> Unit = {},
+    onRemoteSubscribeEcho: (String) -> Unit = {},
+    onRemoteSubscribeHost: (String) -> Unit = {},
+    onSendRemoteSubscribe: () -> Unit = {},
+    onCloseRemoteSubscribe: () -> Unit = {},
+    onOpenAppeal: (MessageUi) -> Unit = {},
+    onAppealReason: (String) -> Unit = {},
+    onSubmitAppeal: () -> Unit = {},
+    onCloseAppeal: () -> Unit = {},
     onCloseRefillDialog: () -> Unit = {},
     onRefillDate: (String) -> Unit = {},
     onSendRefill: () -> Unit = {},
@@ -458,6 +468,31 @@ fun FmRoot(
             onDismiss = onCloseRefillDialog,
         )
     }
+    if (state.remoteSubscribeDialog) {
+        RemoteSubscribeDialog(
+            echo = state.remoteSubscribeEcho,
+            host = state.remoteSubscribeHost,
+            sending = state.remoteSubscribeSending,
+            status = state.remoteSubscribeStatus,
+            error = state.remoteSubscribeError,
+            onEcho = onRemoteSubscribeEcho,
+            onHost = onRemoteSubscribeHost,
+            onSubmit = onSendRemoteSubscribe,
+            onDismiss = onCloseRemoteSubscribe,
+        )
+    }
+    state.appealTarget?.let { target ->
+        AppealDialog(
+            message = target,
+            reason = state.appealReason,
+            sending = state.appealSending,
+            status = state.appealStatus,
+            error = state.appealError,
+            onReason = onAppealReason,
+            onSubmit = onSubmitAppeal,
+            onDismiss = onCloseAppeal,
+        )
+    }
     if (state.showPolicyResign) {
         PolicyResignDialog(
             policyText = state.policyResignText,
@@ -469,6 +504,7 @@ fun FmRoot(
         AppScreen.Unlock -> UnlockScreen(
             error = state.unlockError,
             remember = state.rememberPassword,
+            unlocking = state.autoUnlocking,
             onRemember = onRememberPassword,
             onUnlock = onUnlock,
         )
@@ -536,6 +572,7 @@ fun FmRoot(
                 syncing = state.syncing,
                 canModerate = state.activeProfile?.let { it.isAdmin || it.isModerator } == true,
                 canWrite = canWrite,
+                canAppeal = state.activeProfile?.isAdmin == true,
                 selectionMode = state.selectionMode,
                 selectedMessages = state.selectedMessages,
                 onToggleSelection = onToggleSelection,
@@ -547,6 +584,7 @@ fun FmRoot(
                 onRefill = onOpenRefillDialog,
                 onReact = onReactMessage,
                 onModerate = onOpenModeration,
+                onAppeal = onOpenAppeal,
                 onForward = onForwardMessage,
                 messageView = state.messageView,
                 onChangeMessageView = onChangeMessageView,
@@ -565,6 +603,8 @@ fun FmRoot(
             onForward = onForwardMessage,
             onModerate = onOpenModeration,
             canModerate = state.activeProfile?.let { it.isAdmin || it.isModerator } == true,
+            canAppeal = state.activeProfile?.isAdmin == true,
+            onAppeal = onOpenAppeal,
             canReact = state.selectedEcho?.let { echo ->
                 EchoPermissions.canWriteToEcho(
                     echo.rulesText,
@@ -599,9 +639,13 @@ fun FmRoot(
         AppScreen.Compose -> EchoComposeScreen(
             echoName = state.selectedEcho?.name ?: "",
             state = state.compose,
+            announcementAllowed = state.selectedEcho?.let {
+                EchoPermissions.announcementsEnabled(it.rulesText)
+            } == true,
             onBack = onBackFromCompose,
             onSubject = onComposeSubject,
             onBody = onComposeBody,
+            onAnnouncement = onComposeAnnouncement,
             onSend = onSendCompose,
             onAttachFiles = onAttachFiles,
             onRemoveAttachment = onRemoveAttachment,
@@ -674,6 +718,7 @@ fun FmRoot(
             onBack = onCloseEchoBrowser,
             onToggle = onToggleSubscription,
             onCreateLocal = onCreateEchoDialog,
+            onRemoteSubscribe = onOpenRemoteSubscribe,
         )
         AppScreen.Admin -> AdminScreen(
             nodes = state.adminNodes,
@@ -800,6 +845,7 @@ fun RecoveryDialog(
 fun UnlockScreen(
     error: UiError?,
     remember: Boolean = false,
+    unlocking: Boolean = false,
     onRemember: (Boolean) -> Unit = {},
     onUnlock: (String) -> Unit,
 ) {
@@ -816,32 +862,40 @@ fun UnlockScreen(
         ) {
             Text(stringResource(R.string.unlock_title), style = MaterialTheme.typography.headlineSmall)
             Spacer(Modifier.height(16.dp))
-            OutlinedTextField(
-                value = password,
-                onValueChange = { password = it },
-                label = { Text(stringResource(R.string.password)) },
-                singleLine = true,
-                visualTransformation = PasswordVisualTransformation(),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Row(
-                modifier = Modifier.fillMaxWidth().clickable { onRemember(!remember) },
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Checkbox(checked = remember, onCheckedChange = onRemember)
-                Text(
-                    text = stringResource(R.string.remember_password),
-                    style = MaterialTheme.typography.bodyMedium,
+            if (unlocking) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(modifier = Modifier.width(24.dp).height(24.dp))
+                    Spacer(Modifier.width(12.dp))
+                    Text(stringResource(R.string.unlocking_saved_password))
+                }
+            } else {
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    label = { Text(stringResource(R.string.password)) },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    modifier = Modifier.fillMaxWidth(),
                 )
-            }
-            if (error != null) {
-                Spacer(Modifier.height(8.dp))
-                Text(errorText(error), color = MaterialTheme.colorScheme.error)
-            }
-            Spacer(Modifier.height(16.dp))
-            Button(onClick = { onUnlock(password) }, modifier = Modifier.fillMaxWidth()) {
-                Text(stringResource(R.string.unlock))
+                Row(
+                    modifier = Modifier.fillMaxWidth().clickable { onRemember(!remember) },
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Checkbox(checked = remember, onCheckedChange = onRemember)
+                    Text(
+                        text = stringResource(R.string.remember_password),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+                if (error != null) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(errorText(error), color = MaterialTheme.colorScheme.error)
+                }
+                Spacer(Modifier.height(16.dp))
+                Button(onClick = { onUnlock(password) }, modifier = Modifier.fillMaxWidth()) {
+                    Text(stringResource(R.string.unlock))
+                }
             }
         }
     }
@@ -1461,6 +1515,7 @@ fun EchoConversationScreen(
     syncing: Boolean,
     canModerate: Boolean,
     canWrite: Boolean = true,
+    canAppeal: Boolean = false,
     selectionMode: Boolean,
     selectedMessages: Set<String>,
     onToggleSelection: () -> Unit,
@@ -1472,6 +1527,7 @@ fun EchoConversationScreen(
     onRefill: () -> Unit,
     onReact: (MessageUi, String) -> Unit,
     onModerate: (MessageUi) -> Unit,
+    onAppeal: (MessageUi) -> Unit = {},
     onForward: (MessageUi) -> Unit,
     messageView: EchoMessageView = EchoMessageView.All,
     onChangeMessageView: (EchoMessageView) -> Unit = {},
@@ -1601,6 +1657,8 @@ fun EchoConversationScreen(
                 padding = padding,
                 canModerate = canModerate,
                 canReact = canWrite,
+                canAppeal = canAppeal,
+                onAppeal = onAppeal,
                 selectionMode = selectionMode,
                 selectedMessages = selectedMessages,
                 onToggleMessageSelection = onToggleMessageSelection,
@@ -1623,6 +1681,8 @@ private fun ConversationList(
     padding: androidx.compose.foundation.layout.PaddingValues,
     canModerate: Boolean,
     canReact: Boolean = true,
+    canAppeal: Boolean = false,
+    onAppeal: (MessageUi) -> Unit = {},
     selectionMode: Boolean,
     selectedMessages: Set<String>,
     onToggleMessageSelection: (String) -> Unit,
@@ -1648,6 +1708,8 @@ private fun ConversationList(
                 message = message,
                 canModerate = canModerate,
                 canReact = canReact,
+                canAppeal = canAppeal,
+                onAppeal = onAppeal,
                 selectionMode = selectionMode,
                 selected = message.messageId in selectedMessages,
                 onToggleSelected = { onToggleMessageSelection(message.messageId) },
@@ -1766,6 +1828,8 @@ private fun MessageCard(
     message: MessageUi,
     canModerate: Boolean,
     canReact: Boolean = true,
+    canAppeal: Boolean = false,
+    onAppeal: (MessageUi) -> Unit = {},
     selectionMode: Boolean,
     selected: Boolean,
     onToggleSelected: () -> Unit,
@@ -1799,6 +1863,11 @@ private fun MessageCard(
                 if (canModerate && !message.own) {
                     IconButton(onClick = { onModerate(message) }) {
                         Icon(Icons.Default.Gavel, contentDescription = stringResource(R.string.moderate))
+                    }
+                }
+                if (canAppeal && message.moderation != null && !message.own) {
+                    IconButton(onClick = { onAppeal(message) }) {
+                        Icon(Icons.Default.Gavel, contentDescription = stringResource(R.string.appeal_title))
                     }
                 }
                 Text(
@@ -1863,9 +1932,11 @@ private fun MessageCard(
 fun EchoComposeScreen(
     echoName: String,
     state: ComposeState,
+    announcementAllowed: Boolean = false,
     onBack: () -> Unit,
     onSubject: (String) -> Unit,
     onBody: (String) -> Unit,
+    onAnnouncement: (Boolean) -> Unit = {},
     onSend: () -> Unit,
     onAttachFiles: () -> Unit,
     onRemoveAttachment: (Int) -> Unit,
@@ -1915,6 +1986,18 @@ fun EchoComposeScreen(
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
+            if (announcementAllowed) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(
+                        checked = state.announcement,
+                        onCheckedChange = onAnnouncement,
+                    )
+                    Text(
+                        text = stringResource(R.string.compose_announcement),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+            }
             Spacer(Modifier.height(8.dp))
             OutlinedTextField(
                 value = state.body,
@@ -2019,6 +2102,8 @@ fun MessageDetailScreen(
     onModerate: (MessageUi) -> Unit,
     canModerate: Boolean,
     canReact: Boolean = true,
+    canAppeal: Boolean = false,
+    onAppeal: (MessageUi) -> Unit = {},
 ) {
     Scaffold(
         topBar = {
@@ -2037,6 +2122,11 @@ fun MessageDetailScreen(
                         if (canModerate && !message.own) {
                             IconButton(onClick = { onModerate(message) }) {
                                 Icon(Icons.Default.Gavel, contentDescription = stringResource(R.string.moderate))
+                            }
+                        }
+                        if (canAppeal && message.moderation != null && !message.own) {
+                            IconButton(onClick = { onAppeal(message) }) {
+                                Icon(Icons.Default.Gavel, contentDescription = stringResource(R.string.appeal_title))
                             }
                         }
                     }

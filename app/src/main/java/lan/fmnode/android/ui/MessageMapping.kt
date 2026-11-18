@@ -1,9 +1,11 @@
 package lan.fmnode.android.ui
 
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
 
 /**
  * Pure mapping rules shared by echomail rendering.
@@ -65,4 +67,23 @@ internal object MessageMapping {
             (att["name"] as? JsonPrimitive)?.contentOrNull.orEmpty().ifBlank { null }
         }
     }
+}
+
+/** Moderation fields of a warning/punishment echomail, if it is one. */
+internal fun moderationOf(data: JsonObject?): ModerationUi? {
+    if (data == null || data.containsKey("event")) return null
+    val severity = (data["severity"] as? JsonPrimitive)?.contentOrNull.orEmpty()
+    if (severity != "warning" && severity != "punishment") return null
+    val punished = (data["to"] as? JsonPrimitive)?.contentOrNull.orEmpty()
+    if (punished.isEmpty()) return null
+    val original = data["originalMessage"]
+    val originalId = when (original) {
+        is JsonObject -> (original["message_id"] as? JsonPrimitive)?.contentOrNull.orEmpty()
+        is JsonPrimitive -> runCatching {
+            val parsed = Json.parseToJsonElement(original.content).jsonObject
+            (parsed["message_id"] as? JsonPrimitive)?.contentOrNull.orEmpty()
+        }.getOrDefault("")
+        else -> ""
+    }
+    return ModerationUi(severity, punished, originalId)
 }
