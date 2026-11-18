@@ -125,12 +125,13 @@
 | `excommunicate.md` | «Excommunicate a node» → `:0:1:0` | узел: `Excommunicate poster from :0:2 targeting :0:1:0` | PASS |
 | права на совет | не модератор в Moderators council | узел: `only moderators may post to Moderators council` | PASS (отказ) |
 | баннер ошибки отправки | тот же отказ | UI: «Message not sent — only moderators may post…» | PASS |
+| `change_rules.md` (отправка) | «Rules and name» → Send proposal | узел сохранил `change_rules` (proto/from/node1/echo/all_chunks_only), UI «Proposal queued» | PASS |
 
 ### Не проверено в этой сессии
 | `merge.md` фазы и переназначение адресов | нужен QR/камера либо `fmadmin merge`; стенд из 5 несвязанных узлов; на узле сейчас нет второго реального узла для merge | `fmadmin merge` по сценарию `test_network`, Android — только отображение |
 | `recover.md` | нужен второй узел и подписанный запрос | `fmclient`/`curl` на node2, затем экран Recovery в приложении |
 | `refill.md` ответ | диалог запроса есть, но ответить должен другой пользователь | второй клиент в той же эхе |
-| `appeal.md` | нужен пакет наказаний (punishment) | модерация в ModeratedEcho по сценарию стенда |
+| `appeal.md` | нужен пакет наказаний (punishment) и исходное сообщение; UI апелляции доступен только админу | модерация в ModeratedEcho по сценарию стенда, затем «Appeal» на сообщении |
 | `remote_subscribe.md` | нужны объединённые узлы | сначала merge, затем «Remote» в браузере эх |
 | `conflict.md` | нужны разошедшиеся данные на двух узлах | два узла с разными голосами |
 | `client_synchronize.md` | нужны два Android-клиента с одними ключами | второй эмулятор/профиль |
