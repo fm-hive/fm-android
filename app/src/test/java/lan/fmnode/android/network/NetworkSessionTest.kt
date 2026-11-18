@@ -843,7 +843,8 @@ class NetworkSessionTest {
 
         val message = sentMessages.last()
         assertEquals("remote_subscribe", message["type"]!!.jsonPrimitive.content)
-        assertEquals("MyChannel", message["echo_name"]!!.jsonPrimitive.content)
+        // The channel is remote: it must not be in the envelope.
+        assertFalse(message.containsKey("echo_name"))
         val payload = CryptoService.jwsPayload(message["jws"]!!.jsonPrimitive.content)!!
         val data = Json.parseToJsonElement(payload).jsonObject
         assertEquals("request", data["type"]!!.jsonPrimitive.content)

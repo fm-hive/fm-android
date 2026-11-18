@@ -504,7 +504,10 @@ class NetworkSession(
             put("host_node", hostNode)
             put("requester", profile.address)
         }.toString()
-        return postProtocol(echoName, "remote_subscribe", data)
+        // The channel is hosted elsewhere, so it may not exist locally: the
+        // request carries it in the signed payload (`echo`), not in the
+        // envelope (an unknown echo_name would be rejected with "echo not found").
+        return postProtocol("", "remote_subscribe", data)
     }
 
     /** Adds or retracts ([emoji] empty) a reaction to a message. */
@@ -1176,7 +1179,7 @@ class NetworkSession(
         put("type", type)
         put("timestamp", nowSeconds())
         put("sender_address", profile.address)
-        if (echoName != null) put("echo_name", echoName)
+        if (!echoName.isNullOrBlank()) put("echo_name", echoName)
         put("jws", CryptoService.createJws(seed, dataJson, publicKey))
     }
 
