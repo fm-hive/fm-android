@@ -464,6 +464,18 @@ internal fun adminCouncilName(policyJson: String): String {
     }.getOrDefault("Admin council")
 }
 
+/** Moderators council echo name from the accepted policy. */
+internal fun moderatorsCouncilName(policyJson: String): String {
+    val json = Json { ignoreUnknownKeys = true }
+    return runCatching {
+        val root = json.parseToJsonElement(policyJson).jsonObject
+        val groups = root["policy"]?.jsonObject?.get("parameters")?.jsonObject
+            ?.get("special_echogroups")?.jsonObject
+        groups?.get("moderators")?.jsonPrimitive?.contentOrNull?.trim()
+            ?.takeIf { it.isNotEmpty() } ?: "Moderators council"
+    }.getOrDefault("Moderators council")
+}
+
 /** Boolean network policy parameter of the accepted policy (default when absent). */
 internal fun policyFlag(policyJson: String, key: String, default: Boolean): Boolean {    val json = Json { ignoreUnknownKeys = true }
     return runCatching {
@@ -2586,6 +2598,7 @@ class AppViewModel(
         val opened = networkSession ?: return
         val target = _state.value.excommTarget.trim()
         val reason = _state.value.excommReason.trim()
+        val council = adminCouncilName(_state.value.activeProfile?.policyJson.orEmpty())
         if (target.isEmpty()) {
             _state.update { it.copy(excommError = UiError.Failed("Target address is required")) }
             return
@@ -2594,7 +2607,7 @@ class AppViewModel(
             _state.update { it.copy(excommSending = true, excommError = null, excommStatus = null) }
             try {
                 val data = buildJsonObject {
-                    put("echo", "Admin council")
+                    put("echo", council)
                     put("proto", "excommunicate")
                     put("type", "poster")
                     put("from", opened.profile.address)
@@ -2607,7 +2620,7 @@ class AppViewModel(
                     })
                     put("date", java.time.Instant.now().toString())
                 }.toString()
-                opened.postProtocol("Admin council", "excommunicate", data)
+                opened.postProtocol(council, "excommunicate", data)
                 _state.update { it.copy(excommSending = false, excommStatus = "Proposal submitted") }
                 syncOnce(opened)
             } catch (e: Exception) {
@@ -2654,6 +2667,7 @@ class AppViewModel(
     fun submitRemoveEcho() {
         val opened = networkSession ?: return
         val target = _state.value.removeEchoName.trim()
+        val council = moderatorsCouncilName(_state.value.activeProfile?.policyJson.orEmpty())
         if (target.isEmpty()) {
             _state.update { it.copy(removeEchoError = UiError.Failed("Echo name is required")) }
             return
@@ -2668,7 +2682,7 @@ class AppViewModel(
                     put("to", "all")
                     put("message", _state.value.removeEchoReason.trim().ifBlank { "Remove echo: $target" })
                     put("date", java.time.Instant.now().toString())
-                    put("echo", "Moderators council")
+                    put("echo", council)
                     put("node1", opened.profile.address)
                     put("subject", "Remove echo: $target")
                     put("variants", kotlinx.serialization.json.buildJsonArray {
@@ -2677,7 +2691,7 @@ class AppViewModel(
                     })
                     put("echo_name", target)
                 }.toString()
-                opened.postProtocol("Moderators council", "remove_echo", data)
+                opened.postProtocol(council, "remove_echo", data)
                 _state.update { it.copy(removeEchoSending = false, removeEchoStatus = "Proposal submitted") }
                 syncOnce(opened)
             } catch (e: Exception) {
@@ -2805,6 +2819,7 @@ class AppViewModel(
                     }
                     edit.preserved.forEach { (key, value) -> put(key, value) }
                 }
+                val council = adminCouncilName(_state.value.activeProfile?.policyJson.orEmpty())
                 val data = buildJsonObject {
                     put("proto", "change_policy")
                     put("from", opened.profile.address)
@@ -2822,7 +2837,7 @@ class AppViewModel(
                         },
                     )
                 }.toString()
-                opened.postProtocol("Admin council", "change_policy", data)
+                opened.postProtocol(council, "change_policy", data)
                 _state.update {
                     it.copy(policyEdit = it.policyEdit?.copy(sending = false, status = "Proposal submitted"))
                 }

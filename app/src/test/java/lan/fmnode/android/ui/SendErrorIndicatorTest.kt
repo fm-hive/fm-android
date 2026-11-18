@@ -201,6 +201,9 @@ class SendErrorIndicatorTest {
             vm.state.value.sendErrors.contains("echomail requires subject"),
         )
 
+        // The refresh that produced the error may still be finishing; a
+        // running sync re-adds the same node error after dismiss.
+        withTimeout(10_000) { vm.state.first { !it.syncing } }
         vm.dismissSendErrors()
         assertTrue(vm.state.value.sendErrors.isEmpty())
     }
