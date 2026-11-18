@@ -13,6 +13,7 @@
     <string name="register">Accept and register</string>
     <string name="unlock_title">Unlock</string>
     <string name="unlock">Unlock</string>
+    <string name="unlocking_saved_password">Unlocking with the saved password…</string>
     <string name="remember_password">Save password</string>
     <string name="delete">Delete</string>
     <string name="active">Active</string>
@@ -26,6 +27,7 @@
     <string name="no_messages">No messages yet</string>
     <string name="compose">Compose</string>
     <string name="subject">Subject</string>
+    <string name="compose_announcement">Post as announcement</string>
     <string name="body">Message</string>
     <string name="send">Send</string>
     <string name="echoes_tab">Echoes</string>
@@ -74,6 +76,10 @@
     <string name="scan_hint">Point the camera at an invite QR code</string>
     <string name="camera_permission_required">Camera permission is required to scan QR codes</string>
     <string name="show_invite_qr">Show invite QR</string>
+    <string name="privacy_title">Private messages</string>
+    <string name="privacy_auto_request_pubkeys">Request missing keys</string>
+    <string name="privacy_auto_request_pubkeys_hint">Ask the node for a recipient key so a private message can be encrypted and sent</string>
+    <string name="privacy_auto_send_pubkey">Answer key requests</string>
     <string name="invite_qr_title">Invite QR</string>
     <string name="close">Close</string>
     <string name="emoji_title">Emoji</string>
@@ -206,4 +212,19 @@
     <string name="create_echo_rules">Rules (JSON)</string>
     <string name="create_echo_network_channel">Keep local (do not announce)</string>
     <string name="node_clients">Users</string>
+    <string name="remote_subscribe_short">Remote</string>
+    <string name="remote_subscribe_title">Remote channel subscription</string>
+    <string name="remote_subscribe_hint">Subscribe to a channel hosted on another node. The request travels hop-by-hop; the host node confirms it.</string>
+    <string name="remote_subscribe_channel">Channel name</string>
+    <string name="remote_subscribe_host">Host node address</string>
+    <string name="remote_subscribe_send">Subscribe</string>
+    <string name="appeal_title">Appeal a moderation action</string>
+    <string name="appeal_hint">The appeal is posted to the Admin council and the network votes to annul or uphold the punishment.</string>
+    <string name="appeal_moderator">Moderator</string>
+    <string name="appeal_target">Target</string>
+    <string name="appeal_echo">Conference</string>
+    <string name="appeal_severity">Severity</string>
+    <string name="appeal_reason">Reason</string>
+    <string name="appeal_submit">Submit appeal</string>
+    <string name="election_start">Start election</string>
 </resources>

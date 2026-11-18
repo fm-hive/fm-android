@@ -290,6 +290,12 @@ class NetworkSession(
         profile = profile.copy(displayName = name)
     }
 
+    /** Adopts the rights the node reports (granted or revoked on the node). */
+    fun applyRoleChange(isAdmin: Boolean, isModerator: Boolean) {
+        if (isAdmin == profile.isAdmin && isModerator == profile.isModerator) return
+        profile = profile.copy(isAdmin = isAdmin, isModerator = isModerator)
+    }
+
     // -------------------------------------------------------------------- sync
 
     /** Pulls new messages, sends queued outbox entries, confirms delivered packets. */
@@ -396,14 +402,19 @@ class NetworkSession(
         return postProtocol(echoName, "vote", data)
     }
 
-    /** Posts an echomail message; network failures queue it in the outbox. */
+    /**
+     * Posts an echomail message (or an announcement); network failures queue
+     * it in the outbox with the same message type.
+     */
     suspend fun postEcho(
         echoName: String,
         subject: String,
         body: String,
         replyToMessageId: String? = null,
         attachments: JsonArray? = null,
+        announcement: Boolean = false,
     ): SendResult {
+        val messageType = if (announcement) "announcement" else "echomail"
         val data = buildJsonObject {
             put("subject", subject)
             put("body", body)
@@ -413,10 +424,10 @@ class NetworkSession(
             if (attachments != null && attachments.isNotEmpty()) put("attachments", attachments)
         }.toString()
         return try {
-            sendMessages(listOf(signMessage("echomail", data, echoName = echoName)))
+            sendMessages(listOf(signMessage(messageType, data, echoName = echoName)))
             SendResult(queued = false)
         } catch (e: Exception) {
-            queueOutbox("echomail", echoName, null, data, e)
+            queueOutbox(messageType, echoName, null, data, e)
             SendResult(queued = true)
         }
     }
@@ -483,6 +494,28 @@ class NetworkSession(
         } ?: false
     }
 
+    /**
+     * Sends a `remote_subscribe` request for a channel hosted on another node
+     * (docs/proto/remote_subscribe.md). The node routes it hop-by-hop.
+     */
+    suspend fun postRemoteSubscribe(echoName: String, hostNode: String): SendResult {
+        val data = buildJsonObject {
+            put("proto", "remote_subscribe")
+            put("type", "request")
+            put("from", profile.address)
+            put("to", "all")
+            put("message", "Remote subscribe to $echoName")
+            put("date", java.time.Instant.now().toString())
+            put("echo", echoName)
+            put("host_node", hostNode)
+            put("requester", profile.address)
+        }.toString()
+        // The channel is hosted elsewhere, so it may not exist locally: the
+        // request carries it in the signed payload (`echo`), not in the
+        // envelope (an unknown echo_name would be rejected with "echo not found").
+        return postProtocol("", "remote_subscribe", data)
+    }
+
     /** Adds or retracts ([emoji] empty) a reaction to a message. */
     suspend fun postReaction(targetMessageId: String, emoji: String, echoName: String): SendResult {
         val data = buildJsonObject {
@@ -492,6 +525,20 @@ class NetworkSession(
             put("message", "")
         }.toString()
         return postProtocol(echoName, "echomail", data)
+    }
+
+    /** Starts a moderator election in [echoName] (docs/proto/election.md). */
+    suspend fun postElectionPoster(echoName: String): SendResult {
+        val data = buildJsonObject {
+            put("echo", echoName)
+            put("proto", "election")
+            put("type", "poster")
+            put("from", profile.address)
+            put("to", "all")
+            put("message", "Moderator election")
+            put("date", java.time.Instant.now().toString())
+        }.toString()
+        return postProtocol(echoName, "election", data)
     }
 
     /** Votes for a candidate ([candidate] empty retracts) in an election. */
@@ -506,6 +553,39 @@ class NetworkSession(
             put("date", java.time.Instant.now().toString())
         }.toString()
         return postProtocol(echoName, "election", data)
+    }
+
+    /**
+     * Appeals a moderator warning/punishment in the Admin council
+     * (docs/proto/appeal.md). The node validates the referenced punishment and
+     * opens the network vote.
+     */
+    suspend fun postAppeal(
+        echoName: String,
+        moderator: String,
+        punishmentMessageId: String,
+        punishmentEcho: String,
+        severity: String,
+        targetAddress: String,
+        reason: String,
+        attachments: JsonArray? = null,
+    ): SendResult {
+        val data = buildJsonObject {
+            put("proto", "appeal")
+            put("type", "poster")
+            put("from", profile.address)
+            put("to", "all")
+            put("message", reason)
+            put("date", java.time.Instant.now().toString())
+            put("echo", echoName)
+            put("protoAddress", moderator)
+            put("punishmentMessageId", punishmentMessageId)
+            put("punishmentEcho", punishmentEcho)
+            put("severity", severity)
+            put("targetAddress", targetAddress)
+            if (attachments != null && attachments.isNotEmpty()) put("attachments", attachments)
+        }.toString()
+        return postProtocol(echoName, "appeal", data)
     }
 
     /** Requests old messages of an echo before [beforeIso] (refill protocol). */
@@ -531,6 +611,65 @@ class NetworkSession(
             )
         }.toString()
         return postProtocol(echoName, "refill", data)
+    }
+
+    /**
+     * Answers a refill request by relaying our stored messages of [echoName]
+     * older than [beforeIso] (refill protocol, `type:"response"`).
+     *
+     * The node does not treat a thumbs-up reaction as an answer: only a
+     * `refill` response carrying the messages (`refill.messages`, each with its
+     * original JWS) makes it deliver history to the requester.
+     *
+     * Returns the number of relayed messages, or 0 when we have none.
+     */
+    suspend fun respondRefill(echoName: String, requester: String, beforeIso: String): Int {
+        val before = parseRefillDate(beforeIso)
+            ?: throw IllegalArgumentException("invalid refill date: $beforeIso")
+        val stored = database.messageDao().getSignedBefore(echoName, before)
+        val wire = stored.mapNotNull { row ->
+            val jws = row.jws?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            buildJsonObject {
+                put("type", row.type)
+                put("sender_address", row.senderAddress)
+                put("timestamp", row.timestamp)
+                put("message_id", row.messageId)
+                put("jws", jws)
+                row.recipientAddress?.let { put("recipient_address", it) }
+            }
+        }
+        if (wire.isEmpty()) return 0
+        val data = buildJsonObject {
+            put("proto", "refill")
+            put("type", "response")
+            put("echo", echoName)
+            put("date", java.time.Instant.now().toString())
+            put(
+                "refill",
+                buildJsonObject {
+                    put("echo", echoName)
+                    put("to", requester)
+                    put("messages", buildJsonArray { wire.forEach { add(it) } })
+                },
+            )
+        }.toString()
+        postProtocol(echoName, "refill", data)
+        return wire.size
+    }
+
+    /**
+     * Epoch seconds of a refill `before` value. Accepts the `YYYY-MM-DD` the
+     * dialog sends and a full ISO timestamp, like the console client does.
+     */
+    private fun parseRefillDate(raw: String): Long? {
+        val text = raw.trim()
+        if (text.isEmpty()) return null
+        runCatching { return java.time.LocalDate.parse(text).atStartOfDay(java.time.ZoneOffset.UTC).toEpochSecond() }
+        runCatching { return java.time.Instant.parse(text).epochSecond }
+        runCatching {
+            return java.time.OffsetDateTime.parse(text).toEpochSecond()
+        }
+        return null
     }
 
     /** Sends our public key to a user who requested it. */
@@ -766,6 +905,19 @@ class NetworkSession(
     suspend fun setAutoRequestPubkeys(enabled: Boolean) {
         database.metaDao().put(MetaEntity(META_AUTO_REQUEST_PUBKEYS, if (enabled) "1" else "0"))
     }
+
+    /**
+     * Whether a netmail to an unknown recipient asks the node for its key.
+     *
+     * With this off (the default, same as fm-app) a netmail to somebody we have
+     * never exchanged keys with stays in the outbox forever: keys only arrive in
+     * `pubkey_response`, and nothing requests them. The Settings screen exposes
+     * this switch so the queue is not a dead end.
+     */
+    suspend fun autoRequestPubkeys(): Boolean = settingsFlag(META_AUTO_REQUEST_PUBKEYS, default = false)
+
+    /** Whether a `pubkey_request` from another user is answered automatically. */
+    suspend fun autoSendPubkey(): Boolean = settingsFlag(META_AUTO_SEND_PUBKEY, default = false)
 
     // -------------------------------------------------------- client sync
 
@@ -1105,7 +1257,7 @@ class NetworkSession(
         put("type", type)
         put("timestamp", nowSeconds())
         put("sender_address", profile.address)
-        if (echoName != null) put("echo_name", echoName)
+        if (!echoName.isNullOrBlank()) put("echo_name", echoName)
         put("jws", CryptoService.createJws(seed, dataJson, publicKey))
     }
 
@@ -1133,7 +1285,7 @@ class NetworkSession(
             val message = try {
                 when (entry.type) {
                     "netmail" -> entry.recipientAddress?.let { buildNetmailMessage(it, entry.dataJson) }
-                    else -> entry.echoName?.let { signMessage("echomail", entry.dataJson, echoName = it) }
+                    else -> entry.echoName?.let { signMessage(entry.type, entry.dataJson, echoName = it) }
                 }
             } catch (_: Exception) {
                 null

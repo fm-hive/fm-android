@@ -31,7 +31,8 @@ Work in progress. Implemented so far:
   posts/attachments/edit/delete, search, protocols screen (vote/election
   voting, refill responses), outbox, settings (invite QR, vouchers, keys and
   settings import/export, full fm-app v2 backups), admin (nodelist, merge
-  initiation, excommunicate proposals);
+  initiation, excommunicate proposals), announcements, appeals of moderation
+  actions, remote channel subscriptions;
 - client_synchronize multi-device sync including local blog operations;
   automatic policy re-sign; composer drafts; netmail contacts; forwarding
   (single and multi-select); message edit history (plain updates are folded

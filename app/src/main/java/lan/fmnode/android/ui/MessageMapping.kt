@@ -1,9 +1,11 @@
 package lan.fmnode.android.ui
 
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
 
 /**
  * Pure mapping rules shared by echomail rendering.
@@ -65,4 +67,42 @@ internal object MessageMapping {
             (att["name"] as? JsonPrimitive)?.contentOrNull.orEmpty().ifBlank { null }
         }
     }
+}
+
+/**
+ * Requester and `before` date of a refill request, or null when the payload is
+ * not one. The date is what the responder filters its stored history by.
+ */
+internal fun refillRequestOf(dataJson: String): Pair<String, String>? {
+    val data = runCatching { Json.parseToJsonElement(dataJson).jsonObject }.getOrNull() ?: return null
+    if ((data["proto"] as? JsonPrimitive)?.contentOrNull != "refill") return null
+    val refill = data["refill"] as? JsonObject ?: return null
+    val from = (refill["from"] as? JsonPrimitive)?.contentOrNull.orEmpty()
+    val before = (refill["before"] as? JsonPrimitive)?.contentOrNull.orEmpty()
+    if (from.isEmpty() || before.isEmpty()) return null
+    return from to before
+}
+
+/**
+ * Moderation fields of a warning/punishment echomail, if it is one.
+ *
+ * [senderAddress] is the author of the notice — the moderator. It cannot be read
+ * from the payload, which only names the punished user in `to`.
+ */
+internal fun moderationOf(data: JsonObject?, senderAddress: String = ""): ModerationUi? {
+    if (data == null || data.containsKey("event")) return null
+    val severity = (data["severity"] as? JsonPrimitive)?.contentOrNull.orEmpty()
+    if (severity != "warning" && severity != "punishment") return null
+    val punished = (data["to"] as? JsonPrimitive)?.contentOrNull.orEmpty()
+    if (punished.isEmpty()) return null
+    val original = data["originalMessage"]
+    val originalId = when (original) {
+        is JsonObject -> (original["message_id"] as? JsonPrimitive)?.contentOrNull.orEmpty()
+        is JsonPrimitive -> runCatching {
+            val parsed = Json.parseToJsonElement(original.content).jsonObject
+            (parsed["message_id"] as? JsonPrimitive)?.contentOrNull.orEmpty()
+        }.getOrDefault("")
+        else -> ""
+    }
+    return ModerationUi(severity, punished, originalId, senderAddress)
 }

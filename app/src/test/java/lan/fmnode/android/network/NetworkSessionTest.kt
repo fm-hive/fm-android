@@ -30,6 +30,7 @@ import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.RecordedRequest
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -126,6 +127,12 @@ class NetworkSessionTest {
                                 )
                             }
                         }
+                    }
+                    "identity" -> buildJsonObject {
+                        put("address", ":0:1")
+                        put("name", "Ivan")
+                        put("is_admin", true)
+                        put("is_moderator", false)
                     }
                     "subscribe_echo", "unsubscribe_echo" -> JsonObject(emptyMap())
                     "client_synchronize" -> {
@@ -817,6 +824,254 @@ class NetworkSessionTest {
         )
         session.saveEchoGroups(groups)
         assertEquals(groups, session.echoGroups())
+    }
+
+
+    @Test
+    fun `postEcho can send an announcement`() = runBlocking {
+        session.postEcho("Announcements", "News", "Body", announcement = true)
+
+        val message = sentMessages.last()
+        assertEquals("announcement", message["type"]!!.jsonPrimitive.content)
+        assertEquals("Announcements", message["echo_name"]!!.jsonPrimitive.content)
+    }
+
+
+    @Test
+    fun `remote subscribe sends the documented request`() = runBlocking {
+        session.postRemoteSubscribe("MyChannel", ":0:2:0")
+
+        val message = sentMessages.last()
+        assertEquals("remote_subscribe", message["type"]!!.jsonPrimitive.content)
+        // The channel is remote: it must not be in the envelope.
+        assertFalse(message.containsKey("echo_name"))
+        val payload = CryptoService.jwsPayload(message["jws"]!!.jsonPrimitive.content)!!
+        val data = Json.parseToJsonElement(payload).jsonObject
+        assertEquals("request", data["type"]!!.jsonPrimitive.content)
+        assertEquals("MyChannel", data["echo"]!!.jsonPrimitive.content)
+        assertEquals(":0:2:0", data["host_node"]!!.jsonPrimitive.content)
+        assertEquals(":0:1", data["requester"]!!.jsonPrimitive.content)
+    }
+
+
+    @Test
+    fun `appeal sends the documented punishment fields`() = runBlocking {
+        session.postAppeal(
+            echoName = "Admin council",
+            moderator = ":0:5",
+            punishmentMessageId = "punishment-1",
+            punishmentEcho = "Newcomers",
+            severity = "punishment",
+            targetAddress = ":0:7",
+            reason = "unfair",
+        )
+
+        val message = sentMessages.last()
+        assertEquals("appeal", message["type"]!!.jsonPrimitive.content)
+        assertEquals("Admin council", message["echo_name"]!!.jsonPrimitive.content)
+        val payload = CryptoService.jwsPayload(message["jws"]!!.jsonPrimitive.content)!!
+        val data = Json.parseToJsonElement(payload).jsonObject
+        assertEquals("poster", data["type"]!!.jsonPrimitive.content)
+        assertEquals(":0:5", data["protoAddress"]!!.jsonPrimitive.content)
+        assertEquals("punishment-1", data["punishmentMessageId"]!!.jsonPrimitive.content)
+        assertEquals("Newcomers", data["punishmentEcho"]!!.jsonPrimitive.content)
+        assertEquals("punishment", data["severity"]!!.jsonPrimitive.content)
+        assertEquals(":0:7", data["targetAddress"]!!.jsonPrimitive.content)
+    }
+
+
+    @Test
+    fun `createEchoWithRules posts the rules and network flag`() = runBlocking {
+        session.createEchoWithRules(
+            name = "Channel",
+            description = "desc",
+            rulesJson = """{"text":"rules","parameters":{"writers":[":0:1"]}}""",
+            networkChannel = true,
+        )
+
+        val control = lastControl!!
+        assertEquals("create_echo_with_rules", control["request"]!!.jsonPrimitive.content)
+        val data = control["data"]!!.jsonObject
+        assertEquals("Channel", data["name"]!!.jsonPrimitive.content)
+        assertEquals(true, data["network_channel"]!!.jsonPrimitive.content.toBoolean())
+        assertEquals(":0:1", data["user_address"]!!.jsonPrimitive.content)
+        assertEquals("rules", data["rules"]!!.jsonObject["text"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun `proposeChangeRules sends the protocol payload`() = runBlocking {
+        session.proposeChangeRules(
+            echoName = "General",
+            rulesJson = """{"text":"new","parameters":{}}""",
+            allChunksOnly = true,
+            newName = "Renamed",
+        )
+
+        val message = sentMessages.last()
+        assertEquals("change_rules", message["type"]!!.jsonPrimitive.content)
+        val payload = CryptoService.jwsPayload(message["jws"]!!.jsonPrimitive.content)!!
+        val data = Json.parseToJsonElement(payload).jsonObject
+        assertEquals("change_rules", data["proto"]!!.jsonPrimitive.content)
+        assertEquals("Renamed", data["new_name"]!!.jsonPrimitive.content)
+        assertEquals("true", data["all_chunks_only"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun `setName posts the display name`() = runBlocking {
+        session.setName("New Name")
+        val control = lastControl!!
+        assertEquals("set_name", control["request"]!!.jsonPrimitive.content)
+        assertEquals("New Name", control["data"]!!.jsonObject["name"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun `vouchers are listed and revoked`() = runBlocking {
+        voucherResponse = buildJsonObject {
+            put("vouchers", buildJsonArray {
+                add(buildJsonObject {
+                    put("code", "v1")
+                    put("type", "invite")
+                    put("status", "active")
+                    put("reusable", false)
+                })
+            })
+        }
+        val vouchers = session.vouchers()
+        assertEquals(1, vouchers.size)
+        assertEquals("v1", vouchers[0].code)
+
+        session.revokeVoucher("v1")
+        val control = lastControl!!
+        assertEquals("voucher", control["request"]!!.jsonPrimitive.content)
+        assertEquals("revoke", control["data"]!!.jsonObject["action"]!!.jsonPrimitive.content)
+        assertEquals("v1", control["data"]!!.jsonObject["code"]!!.jsonPrimitive.content)
+    }
+
+
+    @Test
+    fun `identity reports the node fields`() = runBlocking {
+        val identity = session.identity()
+        assertEquals(":0:1", identity.address)
+        assertEquals("Ivan", identity.name)
+        assertTrue(identity.isAdmin)
+        assertFalse(identity.isModerator)
+    }
+
+    @Test
+    fun `acceptRules signs the canonical rules map`() = runBlocking {
+        echoList = buildJsonArray {
+            add(
+                buildJsonObject {
+                    put("id", 1)
+                    put("name", "Rules echo")
+                    put("subscribed", true)
+                    put("rules", buildJsonObject {
+                        put("text", "be nice")
+                        put("parameters", buildJsonObject { put("writers", buildJsonArray { add(JsonPrimitive("all")) }) })
+                    })
+                },
+            )
+        }
+        session.refreshEchoes()
+        session.acceptRules("Rules echo")
+
+        val control = lastControl!!
+        assertEquals("accept_rules", control["request"]!!.jsonPrimitive.content)
+        val data = control["data"]!!.jsonObject
+        assertEquals("Rules echo", data["echo_name"]!!.jsonPrimitive.content)
+        assertTrue(data["rules_id"]!!.jsonPrimitive.content.isNotEmpty())
+        val rules = Json.parseToJsonElement(
+            CryptoService.jwsPayload(data["rules_jws"]!!.jsonPrimitive.content)!!,
+        ).jsonObject["rules"]!!.jsonObject
+        assertEquals("be nice", rules["text"]!!.jsonPrimitive.content)
+    }
+
+
+    @Test
+    fun `election poster starts a moderator election`() = runBlocking {
+        session.postElectionPoster("General")
+
+        val message = sentMessages.last()
+        assertEquals("election", message["type"]!!.jsonPrimitive.content)
+        val payload = CryptoService.jwsPayload(message["jws"]!!.jsonPrimitive.content)!!
+        val data = Json.parseToJsonElement(payload).jsonObject
+        assertEquals("poster", data["type"]!!.jsonPrimitive.content)
+        assertEquals("General", data["echo"]!!.jsonPrimitive.content)
+    }
+
+    /**
+     * Rights are granted and revoked on the node. The cached registration
+     * response must not win, otherwise a demoted admin keeps the admin UI.
+     */
+    @Test
+    fun `session follows the roles the node reports`() {
+        assertFalse(session.profile.isAdmin)
+
+        session.applyRoleChange(isAdmin = true, isModerator = false)
+
+        assertTrue(session.profile.isAdmin)
+        session.applyRoleChange(isAdmin = false, isModerator = true)
+        assertFalse(session.profile.isAdmin)
+        assertTrue(session.profile.isModerator)
+    }
+
+    /**
+     * Answering a refill request is a `refill` response carrying our stored
+     * messages with their original JWS. A thumbs-up reaction does nothing on the
+     * node, so this payload is the only thing that delivers history.
+     */
+    @Test
+    fun `refill response relays stored signed messages before the cutoff`() = runBlocking {
+        val signed = MessageEntity(
+            messageId = "m-old",
+            echoName = "General",
+            type = "echomail",
+            senderAddress = ":0:1",
+            recipientAddress = null,
+            timestamp = 1_000,
+            dataJson = """{"subject":"old","body":"old"}""",
+            jws = "jws-old",
+            jwe = null,
+            receivedAt = 1_000,
+        )
+        val unsigned = signed.copy(messageId = "m-nosig", jws = null)
+        val tooNew = signed.copy(messageId = "m-new", timestamp = 9_999_999_999)
+        db.messageDao().upsertAll(listOf(signed, unsigned, tooNew))
+
+        val count = session.respondRefill("General", ":0:9", "2026-11-18")
+
+        assertEquals(1, count)
+        val message = sentMessages.last()
+        assertEquals("refill", message["type"]!!.jsonPrimitive.content)
+        val payload = Json.parseToJsonElement(
+            CryptoService.jwsPayload(message["jws"]!!.jsonPrimitive.content)!!,
+        ).jsonObject
+        assertEquals("response", payload["type"]!!.jsonPrimitive.content)
+        val refill = payload["refill"]!!.jsonObject
+        assertEquals(":0:9", refill["to"]!!.jsonPrimitive.content)
+        val messages = refill["messages"]!!.jsonArray
+        assertEquals(1, messages.size)
+        assertEquals("m-old", messages[0].jsonObject["message_id"]!!.jsonPrimitive.content)
+        assertEquals("jws-old", messages[0].jsonObject["jws"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun `refill response with nothing stored sends nothing`() = runBlocking {
+        val before = sentMessages.size
+
+        val count = session.respondRefill("Empty", ":0:9", "2026-11-18")
+
+        assertEquals(0, count)
+        assertEquals(before, sentMessages.size)
+    }
+
+    @Test
+    fun `role update without a change keeps the profile`() {
+        val before = session.profile
+
+        session.applyRoleChange(isAdmin = false, isModerator = false)
+
+        assertEquals(before, session.profile)
     }
 
 }

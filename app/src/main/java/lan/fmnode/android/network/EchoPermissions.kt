@@ -3,6 +3,7 @@ package lan.fmnode.android.network
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 
 /**
@@ -23,5 +24,13 @@ object EchoPermissions {
         val names = writers.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
         if (names.size == 1 && names[0] == "all") return true
         return address.isNotEmpty() && address in names
+    }
+
+    /** Whether the echo rules allow messages of type `announcement`. */
+    fun announcementsEnabled(rulesJson: String): Boolean {
+        val rules = RulesId.rulesMap(rulesJson) ?: return false
+        val parameters = rules["parameters"] as? JsonObject ?: return false
+        val value = parameters["announcements_enable"] as? JsonPrimitive ?: return false
+        return value.booleanOrNull == true || value.contentOrNull == "true"
     }
 }

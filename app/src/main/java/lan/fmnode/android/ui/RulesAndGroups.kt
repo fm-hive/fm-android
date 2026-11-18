@@ -332,3 +332,134 @@ fun DisplayNameDialog(
         },
     )
 }
+
+/** Remote subscription to a channel hosted on another node (docs/proto/remote_subscribe.md). */
+@Composable
+fun RemoteSubscribeDialog(
+    echo: String,
+    host: String,
+    sending: Boolean,
+    status: String?,
+    error: UiError?,
+    onEcho: (String) -> Unit,
+    onHost: (String) -> Unit,
+    onSubmit: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = { if (!sending) onDismiss() },
+        title = { Text(stringResource(R.string.remote_subscribe_title)) },
+        text = {
+            Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+                Text(
+                    text = stringResource(R.string.remote_subscribe_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = echo,
+                    onValueChange = onEcho,
+                    label = { Text(stringResource(R.string.remote_subscribe_channel)) },
+                    singleLine = true,
+                    enabled = !sending,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = host,
+                    onValueChange = onHost,
+                    label = { Text(stringResource(R.string.remote_subscribe_host)) },
+                    singleLine = true,
+                    enabled = !sending,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                status?.let {
+                    Spacer(Modifier.height(8.dp))
+                    Text(it, color = MaterialTheme.colorScheme.primary)
+                }
+                error?.let {
+                    Spacer(Modifier.height(8.dp))
+                    Text(errorText(it), color = MaterialTheme.colorScheme.error)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onSubmit, enabled = !sending) {
+                Text(stringResource(R.string.remote_subscribe_send))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !sending) {
+                Text(stringResource(R.string.close))
+            }
+        },
+    )
+}
+
+/** Admin appeal of a moderator warning/punishment (docs/proto/appeal.md). */
+@Composable
+fun AppealDialog(
+    message: MessageUi,
+    reason: String,
+    sending: Boolean,
+    status: String?,
+    error: UiError?,
+    onReason: (String) -> Unit,
+    onSubmit: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val moderation = message.moderation
+    AlertDialog(
+        onDismissRequest = { if (!sending) onDismiss() },
+        title = { Text(stringResource(R.string.appeal_title)) },
+        text = {
+            Column(Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState())) {
+                Text(
+                    text = stringResource(R.string.appeal_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(8.dp))
+                if (moderation != null) {
+                    // The moderator authored the notice; the punished message only
+                // names the victim, so showing its sender here labelled the victim
+                // as the moderator.
+                Text(
+                    "${stringResource(R.string.appeal_moderator)}: " +
+                        moderation.moderatorAddress.ifBlank { message.senderAddress },
+                )
+                    Text("${stringResource(R.string.appeal_target)}: ${moderation.targetAddress}")
+                    Text("${stringResource(R.string.appeal_echo)}: ${message.echoName}")
+                    Text("${stringResource(R.string.appeal_severity)}: ${moderation.severity}")
+                }
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = reason,
+                    onValueChange = onReason,
+                    label = { Text(stringResource(R.string.appeal_reason)) },
+                    enabled = !sending,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 100.dp),
+                )
+                status?.let {
+                    Spacer(Modifier.height(8.dp))
+                    Text(it, color = MaterialTheme.colorScheme.primary)
+                }
+                error?.let {
+                    Spacer(Modifier.height(8.dp))
+                    Text(errorText(it), color = MaterialTheme.colorScheme.error)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onSubmit, enabled = !sending) {
+                Text(stringResource(R.string.appeal_submit))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !sending) {
+                Text(stringResource(R.string.cancel))
+            }
+        },
+    )
+}

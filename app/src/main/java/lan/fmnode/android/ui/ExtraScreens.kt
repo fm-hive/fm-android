@@ -162,6 +162,8 @@ fun ProtocolsScreen(
     onVote: (ProtocolUi, String) -> Unit,
     onRespondRefill: (ProtocolUi) -> Unit,
     onVoteElection: (ProtocolUi, String) -> Unit,
+    /** Outcome of answering a refill request ("Sent N message(s)"). */
+    refillStatus: String? = null,
 ) {
     Scaffold(
         topBar = {
@@ -194,6 +196,15 @@ fun ProtocolsScreen(
             ),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            refillStatus?.let { status ->
+                item(key = "refill-status") {
+                    Text(
+                        text = status,
+                        color = MaterialTheme.colorScheme.primary,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
             items(protocols, key = { it.echoName + '\u0000' + it.messageId }) { protocol ->
                 ProtocolCard(
                     protocol = protocol,
@@ -481,6 +492,7 @@ fun EchoBrowserScreen(
     onBack: () -> Unit,
     onToggle: (String, Boolean) -> Unit,
     onCreateLocal: () -> Unit,
+    onRemoteSubscribe: () -> Unit = {},
 ) {
     Scaffold(
         topBar = {
@@ -492,6 +504,9 @@ fun EchoBrowserScreen(
                     }
                 },
                 actions = {
+                    TextButton(onClick = onRemoteSubscribe) {
+                        Text(stringResource(R.string.remote_subscribe_short))
+                    }
                     TextButton(onClick = onCreateLocal) { Text(stringResource(R.string.create_echo)) }
                 },
             )

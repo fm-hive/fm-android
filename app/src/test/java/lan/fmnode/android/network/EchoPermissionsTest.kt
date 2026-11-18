@@ -58,4 +58,21 @@ class EchoPermissionsTest {
             ),
         )
     }
+
+    @Test
+    fun `announcements are enabled only by the echo rule`() {
+        assertFalse(EchoPermissions.announcementsEnabled(""))
+        assertFalse(EchoPermissions.announcementsEnabled("""{"parameters":{}}"""))
+        assertTrue(
+            EchoPermissions.announcementsEnabled(
+                """{"parameters":{"announcements_enable":true}}""",
+            ),
+        )
+        assertTrue(
+            EchoPermissions.announcementsEnabled(
+                """{"parameters":{"announcements_enable":"true"}}""",
+            ),
+        )
+    }
+
 }

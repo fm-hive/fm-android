@@ -226,6 +226,8 @@ data class MessageUi(
     val echoName: String = "",
     /** Set for vote posters: the card replaces the plain message body. */
     val vote: VoteCardUi? = null,
+    /** Set for warnings/punishments that a node admin can appeal. */
+    val moderation: ModerationUi? = null,
 )
 
 data class ContactUi(
@@ -253,8 +255,7 @@ data class NetworkGroupUi(
      * not the HTTP endpoint (#20). An unnamed network keeps its profile title so
      * the header never degrades to a bare URL.
      */
-    val displayName: String
-        get() = networkName.takeIf { it.isNotBlank() && it != UNNAMED_NETWORK } ?: title
+    val displayName: String get() = networkName.ifBlank { title }
 }
 
 /** A voucher row shown in the settings list. */
@@ -330,6 +331,15 @@ data class NetmailComposeState(
     val keyRequested: Boolean = false,
 )
 
+/** Moderation action attached to a warning/punishment echomail (appeal protocol). */
+data class ModerationUi(
+    val severity: String,
+    val targetAddress: String,
+    val originalMessageId: String,
+    /** Who issued the action: the sender of the moderation notice, not the punished message. */
+    val moderatorAddress: String = "",
+)
+
 data class SearchResultUi(
     val messageId: String,
     val echoName: String,
@@ -387,6 +397,8 @@ data class ComposeState(
     val subject: String = "",
     val body: String = "",
     val attachments: List<AttachmentUi> = emptyList(),
+    /** Send as `announcement` instead of `echomail` (announcements-enabled echoes). */
+    val announcement: Boolean = false,
     val sending: Boolean = false,
     val error: UiError? = null,
 )
@@ -411,23 +423,48 @@ data class AddNetworkState(
 )
 
 /**
- * Name a network gets while its accepted policy carries no `net_name`.
+ * Network display name from an accepted policy.
  *
- * It is the product name, so the top bar always has a heading; callers that
- * would rather show the profile title compare against it.
+ * An empty string means the policy carries no `net_name`; callers decide what
+ * to show instead. A name that happens to equal the product name (`"FM"`) is a
+ * real name and is returned as is — it must not be confused with "no name".
  */
-internal const val UNNAMED_NETWORK = "FM"
-
-/** Network display name from an accepted policy; old policies fall back to FM. */
 internal fun networkNameFromPolicyJson(policyJson: String): String {
     val json = Json { ignoreUnknownKeys = true }
     return runCatching {
         val root = json.parseToJsonElement(policyJson).jsonObject
         val parameters = root["policy"]?.jsonObject?.get("parameters")?.jsonObject
         parameters?.get("net_name")?.jsonPrimitive?.contentOrNull?.trim()
-            ?.takeIf { it.isNotEmpty() } ?: UNNAMED_NETWORK
-    }.getOrDefault("FM")
+            ?.takeIf { it.isNotEmpty() } ?: ""
+    }.getOrDefault("")
 }
+
+/**
+ * Payload of a `remove_echo` proposal.
+ *
+ * The **node** owns the vote: it creates the `remove`/`keep` poster itself as
+ * soon as it sees a proposal without `variants` (fm-go checks
+ * `len(Variants) == 0`). Sending `variants` from the client made the node treat
+ * the message as a vote chunk and skip the proposal entirely, so this payload
+ * deliberately carries only the target and the reason.
+ */
+internal fun removeEchoPayload(
+    from: String,
+    echoName: String,
+    reason: String,
+    council: String,
+    date: String,
+): String = buildJsonObject {
+    put("proto", "remove_echo")
+    put("from", from)
+    put("to", "all")
+    put("message", reason.ifBlank { "Remove echo: $echoName" })
+    put("date", date)
+    put("echo", council)
+    put("node1", from)
+    put("subject", "Remove echo: $echoName")
+    put("echo_name", echoName)
+}.toString()
 
 /** Network news conference name from the accepted policy (interactive posts are node-only). */
 internal fun networkNewsEchoName(policyJson: String): String {
@@ -439,6 +476,30 @@ internal fun networkNewsEchoName(policyJson: String): String {
         groups?.get("network_news")?.jsonPrimitive?.contentOrNull?.trim()
             ?.takeIf { it.isNotEmpty() } ?: "Network news"
     }.getOrDefault("Network news")
+}
+
+/** Admin council echo name from the accepted policy. */
+internal fun adminCouncilName(policyJson: String): String {
+    val json = Json { ignoreUnknownKeys = true }
+    return runCatching {
+        val root = json.parseToJsonElement(policyJson).jsonObject
+        val groups = root["policy"]?.jsonObject?.get("parameters")?.jsonObject
+            ?.get("special_echogroups")?.jsonObject
+        groups?.get("admin")?.jsonPrimitive?.contentOrNull?.trim()
+            ?.takeIf { it.isNotEmpty() } ?: "Admin council"
+    }.getOrDefault("Admin council")
+}
+
+/** Moderators council echo name from the accepted policy. */
+internal fun moderatorsCouncilName(policyJson: String): String {
+    val json = Json { ignoreUnknownKeys = true }
+    return runCatching {
+        val root = json.parseToJsonElement(policyJson).jsonObject
+        val groups = root["policy"]?.jsonObject?.get("parameters")?.jsonObject
+            ?.get("special_echogroups")?.jsonObject
+        groups?.get("moderators")?.jsonPrimitive?.contentOrNull?.trim()
+            ?.takeIf { it.isNotEmpty() } ?: "Moderators council"
+    }.getOrDefault("Moderators council")
 }
 
 /** Boolean network policy parameter of the accepted policy (default when absent). */
@@ -475,7 +536,7 @@ data class UiState(
     val profiles: List<ProfileEntity> = emptyList(),
     val activeId: String? = null,
     val activeProfile: ProfileEntity? = null,
-    val networkName: String = UNNAMED_NETWORK,
+    val networkName: String = "",
     val unlocked: Boolean = false,
     val echoes: List<EchoUi> = emptyList(),
     /** Echoes of every unlocked network, grouped by network (#15). */
@@ -514,6 +575,21 @@ data class UiState(
     val refillDate: String = "",
     val refillSending: Boolean = false,
     val refillError: UiError? = null,
+    /** Outcome of answering somebody else's refill request. */
+    val refillRespondStatus: String? = null,
+    /** Remote subscription to a channel hosted on another node. */
+    val remoteSubscribeDialog: Boolean = false,
+    val remoteSubscribeEcho: String = "",
+    val remoteSubscribeHost: String = "",
+    val remoteSubscribeSending: Boolean = false,
+    val remoteSubscribeStatus: String? = null,
+    val remoteSubscribeError: UiError? = null,
+    /** Appeal of a moderator warning/punishment (admin only). */
+    val appealTarget: MessageUi? = null,
+    val appealReason: String = "",
+    val appealSending: Boolean = false,
+    val appealStatus: String? = null,
+    val appealError: UiError? = null,
     val showPolicyResign: Boolean = false,
     val policyResignText: String = "",
     val scanPurpose: ScanPurpose = ScanPurpose.AddNetwork,
@@ -528,6 +604,10 @@ data class UiState(
     val vouchersError: UiError? = null,
     /** Network policy switch; the create button hides when vouchers are off. */
     val voucherEnabled: Boolean = true,
+    /** Ask the node for a recipient key when netmail cannot be encrypted yet. */
+    val autoRequestPubkeys: Boolean = false,
+    /** Answer other users' `pubkey_request` messages automatically. */
+    val autoSendPubkey: Boolean = false,
     val voucherLoading: Boolean = false,
     val voucherError: UiError? = null,
     /** Rules of an echo the user is subscribing to; the dialog asks to accept. */
@@ -596,6 +676,8 @@ data class UiState(
     val unlockError: UiError? = null,
     /** "Save password" checkbox of the unlock screen (#22). */
     val rememberPassword: Boolean = false,
+    /** A saved password is being tried before the unlock form is shown (#22). */
+    val autoUnlocking: Boolean = false,
     val syncError: UiError? = null,
     val syncing: Boolean = false,
     /** Reason the node rejected a message, shown until dismissed (#14). */
@@ -644,7 +726,13 @@ class AppViewModel(
     init {
         // A vault exists but is locked: the password is required before any
         // profile or message data can be read (#3).
-        _state.update { it.copy(screen = if (manager.vaultExists()) AppScreen.Unlock else AppScreen.Networks) }
+        val hasVault = manager.vaultExists()
+        _state.update {
+            it.copy(
+                screen = if (hasVault) AppScreen.Unlock else AppScreen.Networks,
+                autoUnlocking = hasVault,
+            )
+        }
         viewModelScope.launch {
             manager.profiles.collect { profiles ->
                 _state.update { state -> rebuildNetworkGroups(state.copy(profiles = profiles)) }
@@ -662,21 +750,28 @@ class AppViewModel(
                 it.copy(
                     activeId = id,
                     activeProfile = profile,
-                    networkName = profile?.let { p -> networkNameFromPolicyJson(p.policyJson) } ?: UNNAMED_NETWORK,
+                    networkName = profile?.let { p -> networkNameFromPolicyJson(p.policyJson) }.orEmpty(),
                 )
             }
         }
         // "Save password" support: try the Keystore-protected password before
         // showing the unlock form (#22).
         viewModelScope.launch {
-            if (session.isUnlocked || !manager.vaultExists()) return@launch
-            val saved = passwordStore.load() ?: return@launch
-            if (!manager.openVault(saved)) {
-                passwordStore.clear()
-                _state.update { it.copy(unlockError = UiError.WrongPassword) }
+            if (session.isUnlocked || !manager.vaultExists()) {
+                _state.update { it.copy(autoUnlocking = false) }
                 return@launch
             }
-            _state.update { it.copy(rememberPassword = true) }
+            val saved = passwordStore.load()
+            if (saved == null) {
+                _state.update { it.copy(autoUnlocking = false) }
+                return@launch
+            }
+            if (!manager.openVault(saved)) {
+                passwordStore.clear()
+                _state.update { it.copy(autoUnlocking = false, unlockError = UiError.WrongPassword) }
+                return@launch
+            }
+            _state.update { it.copy(autoUnlocking = false, rememberPassword = true) }
             completeUnlock(saved)
         }
     }
@@ -686,8 +781,36 @@ class AppViewModel(
     fun setRememberPassword(value: Boolean) =
         _state.update { it.copy(rememberPassword = value) }
 
+    // --------------------------------------------------------------- privacy
+
+    /**
+     * Turns the node-side key request on for netmail. Without it a message to an
+     * unknown recipient stays in the outbox: only a `pubkey_response` can make
+     * it sendable, and nothing else asks for the key.
+     */
+    fun setAutoRequestPubkeys(value: Boolean) {
+        val opened = networkSession
+        _state.update { it.copy(autoRequestPubkeys = value) }
+        opened ?: return
+        viewModelScope.launch {
+            runCatching { opened.setAutoRequestPubkeys(value) }
+                .onFailure { _state.update { state -> state.copy(autoRequestPubkeys = !value) } }
+        }
+    }
+
+    fun setAutoSendPubkey(value: Boolean) {
+        val opened = networkSession
+        _state.update { it.copy(autoSendPubkey = value) }
+        opened ?: return
+        viewModelScope.launch {
+            runCatching { opened.setAutoSendPubkey(value) }
+                .onFailure { _state.update { state -> state.copy(autoSendPubkey = !value) } }
+        }
+    }
+
     fun unlock(password: String) {
         viewModelScope.launch {
+            _state.update { it.copy(autoUnlocking = false) }
             if (!manager.openVault(password)) {
                 _state.update { it.copy(unlockError = UiError.WrongPassword) }
                 return@launch
@@ -709,7 +832,7 @@ class AppViewModel(
         }
         _state.update {
             it.copy(
-                unlocked = true, unlockError = null, activeId = profile.id,
+                unlocked = true, unlockError = null, autoUnlocking = false, activeId = profile.id,
                 activeProfile = profile,
                 networkName = networkNameFromPolicyJson(profile.policyJson),
             )
@@ -743,6 +866,7 @@ class AppViewModel(
                     unlockError = null,
                     activeId = null,
                     rememberPassword = false,
+                    autoUnlocking = false,
                 ),
             )
         }
@@ -779,6 +903,17 @@ class AppViewModel(
         selectedMessages = emptySet(),
         outbox = emptyList(),
         refillDialog = false,
+        remoteSubscribeDialog = false,
+        remoteSubscribeEcho = "",
+        remoteSubscribeHost = "",
+        remoteSubscribeSending = false,
+        remoteSubscribeStatus = null,
+        remoteSubscribeError = null,
+        appealTarget = null,
+        appealReason = "",
+        appealSending = false,
+        appealStatus = null,
+        appealError = null,
         showPolicyResign = false,
         adminNodes = emptyList(),
         adminMergeStatus = null,
@@ -842,6 +977,13 @@ class AppViewModel(
             viewModelScope.launch { openOtherSessions(password, profile.id) }
             runCatching { opened.refreshEchoes() }
                 .onFailure { e -> _state.update { it.copy(syncError = UiError.Failed(e.message ?: "Failed")) } }
+            // Privacy switches live in the profile database, not in the vault.
+            _state.update {
+                it.copy(
+                    autoRequestPubkeys = runCatching { opened.autoRequestPubkeys() }.getOrDefault(false),
+                    autoSendPubkey = runCatching { opened.autoSendPubkey() }.getOrDefault(false),
+                )
+            }
             syncOnce(opened)
             startSyncLoop(opened)
             _state.update { it.copy(screen = AppScreen.Echoes) }
@@ -883,6 +1025,18 @@ class AppViewModel(
         sessions[profile.id] = opened
         startGroupCollector(opened)
         return opened
+    }
+
+    /**
+     * Drops the cached session of [profileId] so the next open builds a new one
+     * from the stored profile. Needed when the endpoint changes (recovery): the
+     * cached session keeps its old API client and would talk to the old node.
+     */
+    private fun forgetSession(profileId: String) {
+        groupJobs.remove(profileId)?.cancel()
+        groupEchoes.remove(profileId)
+        val opened = sessions.remove(profileId) ?: return
+        if (networkSession === opened) networkSession = null
     }
 
     /** Keeps the echo group of one network up to date (#15). */
@@ -1189,6 +1343,22 @@ class AppViewModel(
                 state.copy(activeProfile = updated)
             }
         }
+        // Rights are granted and revoked on the node: follow them like the name,
+        // otherwise a demoted admin keeps the admin UI forever.
+        if (identity.isAdmin != opened.profile.isAdmin || identity.isModerator != opened.profile.isModerator) {
+            manager.updateProfileRoles(opened.profile.id, identity.isAdmin, identity.isModerator)
+            opened.applyRoleChange(identity.isAdmin, identity.isModerator)
+            _state.update { state ->
+                val updated = state.activeProfile?.let { current ->
+                    if (current.id == opened.profile.id) {
+                        current.copy(isAdmin = identity.isAdmin, isModerator = identity.isModerator)
+                    } else {
+                        current
+                    }
+                }
+                state.copy(activeProfile = updated)
+            }
+        }
         val oldAddress = opened.profile.address
         val newAddress = identity.address
         if (newAddress.isEmpty() || newAddress == oldAddress) return
@@ -1459,6 +1629,9 @@ class AppViewModel(
     fun setComposeBody(value: String) =
         _state.update { it.copy(compose = it.compose.copy(body = value, error = null)) }
 
+    fun setComposeAnnouncement(value: Boolean) =
+        _state.update { it.copy(compose = it.compose.copy(announcement = value)) }
+
     /** Adds files (already read from the system picker) to the composer. */
     fun addAttachments(files: List<Triple<String, String, ByteArray>>) {
         val existing = _state.value.compose.attachments
@@ -1530,6 +1703,7 @@ class AppViewModel(
                     MessageMapping.subjectFor(current.compose.subject, current.compose.attachments.map { it.name }),
                     current.compose.body.trim(),
                     attachments = attachments,
+                    announcement = current.compose.announcement,
                 )
                 // The node can reject the message in the response to this very
                 // send; show why instead of leaving it as a silent no-op (#14).
@@ -1850,10 +2024,48 @@ class AppViewModel(
         }
     }
 
+    /**
+     * Answers a refill request with our own history of that conference.
+     *
+     * A thumbs-up reaction does nothing here: the node only delivers history for
+     * a `refill` response that carries the messages themselves.
+     */
     fun respondRefill(protocol: ProtocolUi) {
         val opened = networkSession ?: return
         viewModelScope.launch {
-            runCatching { opened.postReaction(protocol.messageId, "👍", protocol.echoName) }
+            _state.update { it.copy(refillRespondStatus = null) }
+            val row = runCatching {
+                opened.database.messageDao().getByEchoAndId(protocol.echoName, protocol.messageId)
+            }.getOrNull()
+            val request: Pair<String, String>? = row?.let { refillRequestOf(it.dataJson) }
+            if (request == null) {
+                _state.update { it.copy(sendErrors = (listOf("Refill request has no date") + it.sendErrors).take(MAX_SEND_ERRORS)) }
+                return@launch
+            }
+            val sent = runCatching { opened.respondRefill(protocol.echoName, request.first, request.second) }
+            sent.onSuccess { count ->
+                if (count == 0) {
+                    _state.update {
+                        it.copy(sendErrors = (listOf("No stored messages to send for ${protocol.echoName}") + it.sendErrors).take(MAX_SEND_ERRORS))
+                    }
+                } else {
+                    _state.update { it.copy(refillRespondStatus = "Sent $count message(s)") }
+                }
+            }.onFailure { err ->
+                _state.update {
+                    it.copy(sendErrors = (listOf(err.message ?: "Refill response failed") + it.sendErrors).take(MAX_SEND_ERRORS))
+                }
+            }
+            syncOnce(opened)
+        }
+    }
+
+    /** Starts a moderator election in the currently open echo (election poster). */
+    fun startElection() {
+        val echo = _state.value.selectedEcho ?: return
+        val opened = networkSession ?: return
+        viewModelScope.launch {
+            runCatching { opened.postElectionPoster(echo.name) }
             syncOnce(opened)
         }
     }
@@ -1955,6 +2167,142 @@ class AppViewModel(
             } catch (e: Exception) {
                 _state.update {
                     it.copy(refillSending = false, refillError = UiError.Failed(e.message ?: "Failed"))
+                }
+            }
+        }
+    }
+
+    // ------------------------------------------------------- remote subscribe
+
+    fun openRemoteSubscribeDialog() = _state.update {
+        it.copy(
+            remoteSubscribeDialog = true,
+            remoteSubscribeEcho = "",
+            remoteSubscribeHost = "",
+            remoteSubscribeStatus = null,
+            remoteSubscribeError = null,
+        )
+    }
+
+    fun closeRemoteSubscribeDialog() =
+        _state.update { it.copy(remoteSubscribeDialog = false) }
+
+    fun setRemoteSubscribeEcho(value: String) =
+        _state.update { it.copy(remoteSubscribeEcho = value, remoteSubscribeError = null) }
+
+    fun setRemoteSubscribeHost(value: String) =
+        _state.update { it.copy(remoteSubscribeHost = value, remoteSubscribeError = null) }
+
+    fun sendRemoteSubscribe() {
+        val echo = _state.value.remoteSubscribeEcho.trim()
+        val host = _state.value.remoteSubscribeHost.trim()
+        val opened = networkSession ?: return
+        if (echo.isEmpty() || host.isEmpty()) {
+            _state.update {
+                it.copy(remoteSubscribeError = UiError.Failed("Channel and host node are required"))
+            }
+            return
+        }
+        viewModelScope.launch {
+            _state.update { it.copy(remoteSubscribeSending = true, remoteSubscribeError = null) }
+            try {
+                opened.postRemoteSubscribe(echo, host)
+                _state.update {
+                    it.copy(
+                        remoteSubscribeSending = false,
+                        remoteSubscribeStatus = "Request sent to $host",
+                    )
+                }
+                syncOnce(opened)
+            } catch (e: Exception) {
+                _state.update {
+                    it.copy(
+                        remoteSubscribeSending = false,
+                        remoteSubscribeError = UiError.Failed(e.message ?: "Failed"),
+                    )
+                }
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ appeal
+
+    fun openAppeal(message: MessageUi) {
+        if (message.moderation == null) return
+        _state.update {
+            it.copy(
+                appealTarget = message,
+                appealReason = "",
+                appealSending = false,
+                appealStatus = null,
+                appealError = null,
+            )
+        }
+    }
+
+    fun closeAppeal() = _state.update { it.copy(appealTarget = null) }
+
+    fun setAppealReason(value: String) =
+        _state.update { it.copy(appealReason = value, appealError = null) }
+
+    fun submitAppeal() {
+        val message = _state.value.appealTarget ?: return
+        val moderation = message.moderation ?: return
+        val opened = networkSession ?: return
+        val policy = _state.value.activeProfile?.policyJson.orEmpty()
+        val council = adminCouncilName(policy)
+        val reason = _state.value.appealReason.trim().ifBlank { "Appeal: ${moderation.severity} in ${message.echoName}" }
+        viewModelScope.launch {
+            _state.update { it.copy(appealSending = true, appealError = null, appealStatus = null) }
+            try {
+                val bundle = buildJsonObject {
+                    put("type", "fm-selected-messages")
+                    put("version", 1)
+                    put("generated_at", System.currentTimeMillis() / 1000)
+                    put("messages", buildJsonArray {
+                        add(buildJsonObject {
+                            put("message_id", message.messageId)
+                            put("type", "echomail")
+                            put("sender_address", message.senderAddress)
+                            put("timestamp", message.timestamp)
+                            put("echo_name", message.echoName)
+                            put("data", buildJsonObject {
+                                put("subject", message.subject)
+                                put("body", message.body)
+                            }.toString())
+                        })
+                    })
+                }
+                val bundleJson = bundle.toString()
+                val attachments = buildJsonArray {
+                    add(buildJsonObject {
+                        put("name", message.messageId + ".json")
+                        put("type", "application/json")
+                        put("size", bundleJson.length)
+                        put(
+                            "data",
+                            "data:application/json;base64," +
+                                Encoding.base64Encode(bundleJson.toByteArray(Charsets.UTF_8)),
+                        )
+                    })
+                }
+                opened.postAppeal(
+                    echoName = council,
+                    moderator = message.senderAddress,
+                    punishmentMessageId = message.messageId,
+                    punishmentEcho = message.echoName,
+                    severity = moderation.severity,
+                    targetAddress = moderation.targetAddress,
+                    reason = reason,
+                    attachments = attachments,
+                )
+                _state.update {
+                    it.copy(appealSending = false, appealStatus = "Appeal submitted to $council")
+                }
+                syncOnce(opened)
+            } catch (e: Exception) {
+                _state.update {
+                    it.copy(appealSending = false, appealError = UiError.Failed(e.message ?: "Failed"))
                 }
             }
         }
@@ -2295,6 +2643,9 @@ class AppViewModel(
             _state.update { it.copy(recoveryLoading = true, recoveryError = null) }
             try {
                 manager.recover(invite, profile, password)
+                // The profile now points at the recovery node; a cached session
+                // would keep the old endpoint and keep hitting the dead node.
+                forgetSession(profile.id)
                 _state.update { it.copy(recoveryDialog = false, recoveryLoading = false) }
                 openActiveSession()
             } catch (e: Exception) {
@@ -2372,6 +2723,7 @@ class AppViewModel(
         val opened = networkSession ?: return
         val target = _state.value.excommTarget.trim()
         val reason = _state.value.excommReason.trim()
+        val council = adminCouncilName(_state.value.activeProfile?.policyJson.orEmpty())
         if (target.isEmpty()) {
             _state.update { it.copy(excommError = UiError.Failed("Target address is required")) }
             return
@@ -2380,7 +2732,7 @@ class AppViewModel(
             _state.update { it.copy(excommSending = true, excommError = null, excommStatus = null) }
             try {
                 val data = buildJsonObject {
-                    put("echo", "Admin council")
+                    put("echo", council)
                     put("proto", "excommunicate")
                     put("type", "poster")
                     put("from", opened.profile.address)
@@ -2393,7 +2745,7 @@ class AppViewModel(
                     })
                     put("date", java.time.Instant.now().toString())
                 }.toString()
-                opened.postProtocol("Admin council", "excommunicate", data)
+                opened.postProtocol(council, "excommunicate", data)
                 _state.update { it.copy(excommSending = false, excommStatus = "Proposal submitted") }
                 syncOnce(opened)
             } catch (e: Exception) {
@@ -2440,6 +2792,7 @@ class AppViewModel(
     fun submitRemoveEcho() {
         val opened = networkSession ?: return
         val target = _state.value.removeEchoName.trim()
+        val council = moderatorsCouncilName(_state.value.activeProfile?.policyJson.orEmpty())
         if (target.isEmpty()) {
             _state.update { it.copy(removeEchoError = UiError.Failed("Echo name is required")) }
             return
@@ -2447,23 +2800,14 @@ class AppViewModel(
         viewModelScope.launch {
             _state.update { it.copy(removeEchoSending = true, removeEchoError = null, removeEchoStatus = null) }
             try {
-                val data = buildJsonObject {
-                    put("proto", "remove_echo")
-                    put("type", "")
-                    put("from", opened.profile.address)
-                    put("to", "all")
-                    put("message", _state.value.removeEchoReason.trim().ifBlank { "Remove echo: $target" })
-                    put("date", java.time.Instant.now().toString())
-                    put("echo", "Moderators council")
-                    put("node1", opened.profile.address)
-                    put("subject", "Remove echo: $target")
-                    put("variants", kotlinx.serialization.json.buildJsonArray {
-                        add(JsonPrimitive("remove"))
-                        add(JsonPrimitive("keep"))
-                    })
-                    put("echo_name", target)
-                }.toString()
-                opened.postProtocol("Moderators council", "remove_echo", data)
+                val data = removeEchoPayload(
+                    from = opened.profile.address,
+                    echoName = target,
+                    reason = _state.value.removeEchoReason.trim(),
+                    council = council,
+                    date = java.time.Instant.now().toString(),
+                )
+                opened.postProtocol(council, "remove_echo", data)
                 _state.update { it.copy(removeEchoSending = false, removeEchoStatus = "Proposal submitted") }
                 syncOnce(opened)
             } catch (e: Exception) {
@@ -2591,6 +2935,7 @@ class AppViewModel(
                     }
                     edit.preserved.forEach { (key, value) -> put(key, value) }
                 }
+                val council = adminCouncilName(_state.value.activeProfile?.policyJson.orEmpty())
                 val data = buildJsonObject {
                     put("proto", "change_policy")
                     put("from", opened.profile.address)
@@ -2608,7 +2953,7 @@ class AppViewModel(
                         },
                     )
                 }.toString()
-                opened.postProtocol("Admin council", "change_policy", data)
+                opened.postProtocol(council, "change_policy", data)
                 _state.update {
                     it.copy(policyEdit = it.policyEdit?.copy(sending = false, status = "Proposal submitted"))
                 }
@@ -3558,6 +3903,7 @@ class AppViewModel(
         val reactions = mutableMapOf<String, MutableMap<String, Pair<String, Long>>>()
         val votes = VoteMapping.collect(rows, messageJson)
         val results = VoteMapping.results(rows, messageJson)
+        val moderationByMessage = mutableMapOf<String, ModerationUi>()
         val messageRows = mutableListOf<MessageRow>()
         for (row in rows) {
             val data = runCatching {
@@ -3583,6 +3929,14 @@ class AppViewModel(
             // Attachment-only uploads without a body/echo context are not
             // conversation messages: they are rendered as file bundles (#9).
             if (row.isAttachmentOnly()) continue
+            // A moderation message names the punished message in
+            // `originalMessage.message_id`; the badge and the appeal action
+            // belong to that message, not to the moderation notice itself.
+            moderationOf(data, row.senderAddress)?.let { moderation ->
+                if (moderation.originalMessageId.isNotBlank()) {
+                    moderationByMessage[moderation.originalMessageId] = moderation
+                }
+            }
             messageRows += row
         }
         val protocolTypes = setOf(
@@ -3600,7 +3954,11 @@ class AppViewModel(
                 counts[pair.first] = (counts[pair.first] ?: 0) + 1
                 if (sender == me) mine = pair.first
             }
-            val ui = row.toUi(me, myName).copy(reactions = counts, myReaction = mine)
+            val ui = row.toUi(me, myName).copy(
+                reactions = counts,
+                myReaction = mine,
+                moderation = moderationByMessage[row.messageId],
+            )
             // Votes and results refer to the poster by its text.
             val posterKey = VoteMapping.posterKey(VoteMapping.data(row, messageJson))
             if (row.type == "vote" && posterKey.isNotEmpty()) {

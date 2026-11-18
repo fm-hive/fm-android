@@ -257,6 +257,19 @@ interface MessageDao {
     @Query("SELECT * FROM messages WHERE messageId = :messageId LIMIT 1")
     suspend fun getById(messageId: String): MessageEntity?
 
+    /**
+     * Messages of [echo] older than [before] that still carry their JWS: only
+     * signed messages can be relayed to somebody else during a refill.
+     */
+    @Query(
+        """
+        SELECT * FROM messages
+        WHERE echoName = :echo AND timestamp < :before AND jws IS NOT NULL AND jws != ''
+        ORDER BY timestamp ASC, messageId ASC
+        """,
+    )
+    suspend fun getSignedBefore(echo: String, before: Long): List<MessageEntity>
+
     /** Exact lookup: a message id is only unique inside its echo. */
     @Query("SELECT * FROM messages WHERE echoName = :echo AND messageId = :messageId")
     suspend fun getByEchoAndId(echo: String, messageId: String): MessageEntity?
