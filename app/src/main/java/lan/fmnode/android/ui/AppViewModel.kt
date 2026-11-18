@@ -255,8 +255,7 @@ data class NetworkGroupUi(
      * not the HTTP endpoint (#20). An unnamed network keeps its profile title so
      * the header never degrades to a bare URL.
      */
-    val displayName: String
-        get() = networkName.takeIf { it.isNotBlank() && it != UNNAMED_NETWORK } ?: title
+    val displayName: String get() = networkName.ifBlank { title }
 }
 
 /** A voucher row shown in the settings list. */
@@ -422,22 +421,20 @@ data class AddNetworkState(
 )
 
 /**
- * Name a network gets while its accepted policy carries no `net_name`.
+ * Network display name from an accepted policy.
  *
- * It is the product name, so the top bar always has a heading; callers that
- * would rather show the profile title compare against it.
+ * An empty string means the policy carries no `net_name`; callers decide what
+ * to show instead. A name that happens to equal the product name (`"FM"`) is a
+ * real name and is returned as is — it must not be confused with "no name".
  */
-internal const val UNNAMED_NETWORK = "FM"
-
-/** Network display name from an accepted policy; old policies fall back to FM. */
 internal fun networkNameFromPolicyJson(policyJson: String): String {
     val json = Json { ignoreUnknownKeys = true }
     return runCatching {
         val root = json.parseToJsonElement(policyJson).jsonObject
         val parameters = root["policy"]?.jsonObject?.get("parameters")?.jsonObject
         parameters?.get("net_name")?.jsonPrimitive?.contentOrNull?.trim()
-            ?.takeIf { it.isNotEmpty() } ?: UNNAMED_NETWORK
-    }.getOrDefault("FM")
+            ?.takeIf { it.isNotEmpty() } ?: ""
+    }.getOrDefault("")
 }
 
 /** Network news conference name from the accepted policy (interactive posts are node-only). */
@@ -510,7 +507,7 @@ data class UiState(
     val profiles: List<ProfileEntity> = emptyList(),
     val activeId: String? = null,
     val activeProfile: ProfileEntity? = null,
-    val networkName: String = UNNAMED_NETWORK,
+    val networkName: String = "",
     val unlocked: Boolean = false,
     val echoes: List<EchoUi> = emptyList(),
     /** Echoes of every unlocked network, grouped by network (#15). */
@@ -718,7 +715,7 @@ class AppViewModel(
                 it.copy(
                     activeId = id,
                     activeProfile = profile,
-                    networkName = profile?.let { p -> networkNameFromPolicyJson(p.policyJson) } ?: UNNAMED_NETWORK,
+                    networkName = profile?.let { p -> networkNameFromPolicyJson(p.policyJson) }.orEmpty(),
                 )
             }
         }

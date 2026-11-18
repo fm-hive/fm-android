@@ -996,7 +996,7 @@ private fun ProfileCard(
                 // The network is named by its policy (#20), not by the HTTP host.
                 val networkName = networkNameFromPolicyJson(profile.policyJson)
                 Text(
-                    text = networkName.takeIf { it != UNNAMED_NETWORK } ?: profile.title,
+                    text = networkName.ifBlank { profile.title },
                     style = MaterialTheme.typography.titleMedium,
                 )
                 Text(

@@ -17,10 +17,22 @@ class NetworkNameTest {
     }
 
     @Test
-    fun `falls back to FM for missing, blank or broken policies`() {
-        assertEquals(UNNAMED_NETWORK, networkNameFromPolicyJson("""{"policy":{"parameters":{}}}"""))
-        assertEquals(UNNAMED_NETWORK, networkNameFromPolicyJson("""{"policy":{"parameters":{"net_name":"   "}}}"""))
-        assertEquals(UNNAMED_NETWORK, networkNameFromPolicyJson("not json"))
+    fun `an absent net_name yields an empty name`() {
+        assertEquals("", networkNameFromPolicyJson("""{"policy":{"parameters":{}}}"""))
+        assertEquals("", networkNameFromPolicyJson("""{"policy":{"parameters":{"net_name":"   "}}}"""))
+        assertEquals("", networkNameFromPolicyJson("not json"))
+    }
+
+    /**
+     * A network really named "FM" (the test stand's node1) must keep that name;
+     * it is not the "no name" case.
+     */
+    @Test
+    fun `a network named FM is a real name`() {
+        val policy = """{"policy":{"parameters":{"net_name":"FM"}}}"""
+
+        assertEquals("FM", networkNameFromPolicyJson(policy))
+        assertEquals("FM", group(networkNameFromPolicyJson(policy)).displayName)
     }
 
     @Test
@@ -48,8 +60,7 @@ class NetworkNameTest {
     }
 
     @Test
-    fun `an unnamed network keeps its profile title and not a bare FM`() {
-        assertEquals("https://localhost:8443", group(UNNAMED_NETWORK).displayName)
+    fun `an unnamed network keeps its profile title`() {
         assertEquals("https://localhost:8443", group("").displayName)
         assertEquals("https://localhost:8443", group("   ").displayName)
     }
