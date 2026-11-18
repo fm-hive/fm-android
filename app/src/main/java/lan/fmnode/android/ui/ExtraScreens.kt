@@ -1112,14 +1112,22 @@ fun ModerationDialog(
         title = { Text(stringResource(R.string.moderation_title)) },
         text = {
             Column {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { onSeverity("warning") }) {
+                // The dialog is narrow and the Russian labels are long, so the
+                // severity choices use full-width rows instead of one Row.
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = { onSeverity("warning") },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
                         Text(
                             stringResource(R.string.moderation_warning),
                             color = if (severity == "warning") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    OutlinedButton(onClick = { onSeverity("punishment") }) {
+                    OutlinedButton(
+                        onClick = { onSeverity("punishment") },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
                         Text(
                             stringResource(R.string.moderation_punishment),
                             color = if (severity == "punishment") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
