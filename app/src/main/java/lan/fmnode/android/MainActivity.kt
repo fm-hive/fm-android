@@ -305,6 +305,10 @@ class MainActivity : ComponentActivity() {
                     onVoucherTtl = viewModel::setVoucherTtl,
                     onLoadVouchers = viewModel::loadVouchers,
                     onRevokeVoucher = viewModel::revokeVoucher,
+                    autoRequestPubkeys = state.autoRequestPubkeys,
+                    autoSendPubkey = state.autoSendPubkey,
+                    onAutoRequestPubkeys = viewModel::setAutoRequestPubkeys,
+                    onAutoSendPubkey = viewModel::setAutoSendPubkey,
                 )
             }
         }

@@ -20,6 +20,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.OutlinedTextField
@@ -79,6 +80,10 @@ fun SettingsScreen(
     onVoucherTtl: (String) -> Unit = {},
     onLoadVouchers: () -> Unit = {},
     onRevokeVoucher: (String) -> Unit = {},
+    autoRequestPubkeys: Boolean = false,
+    autoSendPubkey: Boolean = false,
+    onAutoRequestPubkeys: (Boolean) -> Unit = {},
+    onAutoSendPubkey: (Boolean) -> Unit = {},
     onOpenOutbox: () -> Unit,
     onOpenPolicyViewer: () -> Unit,
     onLock: () -> Unit,
@@ -197,6 +202,39 @@ fun SettingsScreen(
             backupError?.let { Text(errorText(it), color = MaterialTheme.colorScheme.error) }
             OutlinedButton(onClick = { showInviteDialog = true }, modifier = Modifier.fillMaxWidth()) {
                 Text(stringResource(R.string.show_invite_qr))
+            }
+            // Keys of other users only arrive in a pubkey_response, so a netmail
+            // to an unknown recipient stays in the outbox unless we ask for it.
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                    Text(
+                        text = stringResource(R.string.privacy_title),
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                text = stringResource(R.string.privacy_auto_request_pubkeys),
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                            Text(
+                                text = stringResource(R.string.privacy_auto_request_pubkeys_hint),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(checked = autoRequestPubkeys, onCheckedChange = onAutoRequestPubkeys)
+                    }
+                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                text = stringResource(R.string.privacy_auto_send_pubkey),
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                        Switch(checked = autoSendPubkey, onCheckedChange = onAutoSendPubkey)
+                    }
+                }
             }
             if (voucherEnabled) {
                 Card(Modifier.fillMaxWidth()) {

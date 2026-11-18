@@ -127,15 +127,27 @@
 | баннер ошибки отправки | тот же отказ | UI: «Message not sent — only moderators may post…» | PASS |
 | `change_rules.md` (отправка) | «Rules and name» → Send proposal | узел сохранил `change_rules` (proto/from/node1/echo/all_chunks_only), UI «Proposal queued» | PASS |
 
+### Проверено: сообщения, модерация, анонсы
+
+| Сценарий | Что сделано | Подтверждение | Итог |
+| --- | --- | --- | --- |
+| `netmail.md` (нет ключа) | netmail на `:0:1` без ключа в кэше | UI: «Message saved to the outbox…» | PASS |
+| настройки приватности | новый блок «Private messages», включён «Request missing keys» | переключатель сохраняется | PASS (после фикса) |
+| `service.md` (pubkey) | отправка netmail после включения опции | узел: `api request type=service`, `pubkeys: cache hit address=:0:1` | PASS |
+| `netmail.md` (доставка) | повторная отправка после получения ключа | узел: `netmail with JWE to=:0:1`, `netmail queued local` | PASS |
+| `announcements.md` | тумблер «Post as announcement» в эхе с `announcements_enable` | узел сохранил `type=announcement` | PASS |
+| модерация | «Moderate» → Punishment на сообщении `:0:1` | узел: `:0:2 issued punishment to :0:1`, `total punishments: 1` | PASS |
+| бейдж модерации | наказанное сообщение в ленте | кнопка «Appeal a moderation action» | PASS (после фикса) |
+| `appeal.md` | апелляция на наказание | узел сохранил `appeal` (`protoAddress`, `punishmentMessageId`) | PASS |
+| карточка апелляции | кто модератор, кто наказан | «Moderator: :0:2», «Target: :0:1» | PASS (после фикса) |
+
 ### Не проверено в этой сессии
 | `merge.md` фазы и переназначение адресов | нужен QR/камера либо `fmadmin merge`; стенд из 5 несвязанных узлов; на узле сейчас нет второго реального узла для merge | `fmadmin merge` по сценарию `test_network`, Android — только отображение |
 | `recover.md` | нужен второй узел и подписанный запрос | `fmclient`/`curl` на node2, затем экран Recovery в приложении |
 | `refill.md` ответ | диалог запроса есть, но ответить должен другой пользователь | второй клиент в той же эхе |
-| `appeal.md` | нужен пакет наказаний (punishment) и исходное сообщение; UI апелляции доступен только админу | модерация в ModeratedEcho по сценарию стенда, затем «Appeal» на сообщении |
 | `remote_subscribe.md` | нужны объединённые узлы | сначала merge, затем «Remote» в браузере эх |
 | `conflict.md` | нужны разошедшиеся данные на двух узлах | два узла с разными голосами |
 | `client_synchronize.md` | нужны два Android-клиента с одними ключами | второй эмулятор/профиль |
-| netmail, announcement | не дошли руки | отдельный прогон |
 
 ### Замечания по стенду
 
@@ -185,6 +197,45 @@
 `variants` (узел сам добавляет `remove`/`keep`). Тест:
 `RemoveEchoPayloadTest`. После фикса узел логирует
 `Initiating echo removal vote for dup` и создаёт постер.
+
+### Netmail к незнакомому получателю оставался в outbox
+
+Запрос ключа включается настройкой `auto_request_pubkeys`, которая по умолчанию
+выключена (как и в fm-app). Ключи приходят только в `pubkey_response`, поэтому
+без этой настройки netmail новому получателю висел в outbox **навсегда**, а
+включить настройку было негде: сеттеры в `NetworkSession` были, UI — нет.
+
+Исправление: в Settings добавлен блок «Private messages» с переключателями
+«Request missing keys» (`autoRequestPubkeys`) и «Answer key requests»
+(`autoSendPubkey`); флаги читаются при открытии сессии.
+На стенде: включил → запрос ушёл → ключ пришёл → netmail доставлен.
+
+### Бейдж модерации и апелляция не появлялись
+
+`collectFeedRows` ключевал модерацию по id **самого сообщения о модерации**, а
+искал по id строки ленты. В итоге бейдж вешался на само уведомление (которое
+отрисовывается пустым), а наказанное сообщение оставалось без бейджа и без
+кнопки Appeal — апелляция была недоступна вообще.
+
+Исправление: карта ключуется по `originalMessageId`. Тест:
+`ModerationMappingTest.the mapping key is the punished message id`.
+
+### В карточке апелляции модератором называли наказанного
+
+Диалог печатал `message.senderAddress` — отправителя **наказанного** сообщения.
+В payload модерации есть только `to` (жертва), автор — это отправитель
+уведомления.
+
+Исправление: `ModerationUi.moderatorAddress` заполняется из отправителя
+уведомления, диалог показывает его. На стенде: «Moderator: :0:2»,
+«Target: :0:1».
+
+### `change_rules` без изменений отклоняется
+
+Предложение с текущими правилами узел отклоняет: «no differences found between
+current and proposed rules». UI при этом сначала пишет «Proposal queued»
+(сообщение уходит в outbox), а отказ появляется позже баннером — ожидаемо, но
+можно предупреждать сразу, сравнив rules до отправки.
 
 ### Ограничения стороны узла (не клиента)
 

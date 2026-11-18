@@ -76,6 +76,10 @@
     <string name="scan_hint">Point the camera at an invite QR code</string>
     <string name="camera_permission_required">Camera permission is required to scan QR codes</string>
     <string name="show_invite_qr">Show invite QR</string>
+    <string name="privacy_title">Private messages</string>
+    <string name="privacy_auto_request_pubkeys">Request missing keys</string>
+    <string name="privacy_auto_request_pubkeys_hint">Ask the node for a recipient key so a private message can be encrypted and sent</string>
+    <string name="privacy_auto_send_pubkey">Answer key requests</string>
     <string name="invite_qr_title">Invite QR</string>
     <string name="close">Close</string>
     <string name="emoji_title">Emoji</string>

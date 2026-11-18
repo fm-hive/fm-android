@@ -422,7 +422,13 @@ fun AppealDialog(
                 )
                 Spacer(Modifier.height(8.dp))
                 if (moderation != null) {
-                    Text("${stringResource(R.string.appeal_moderator)}: ${message.senderAddress}")
+                    // The moderator authored the notice; the punished message only
+                // names the victim, so showing its sender here labelled the victim
+                // as the moderator.
+                Text(
+                    "${stringResource(R.string.appeal_moderator)}: " +
+                        moderation.moderatorAddress.ifBlank { message.senderAddress },
+                )
                     Text("${stringResource(R.string.appeal_target)}: ${moderation.targetAddress}")
                     Text("${stringResource(R.string.appeal_echo)}: ${message.echoName}")
                     Text("${stringResource(R.string.appeal_severity)}: ${moderation.severity}")

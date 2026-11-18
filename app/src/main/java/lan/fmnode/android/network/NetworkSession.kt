@@ -847,6 +847,19 @@ class NetworkSession(
         database.metaDao().put(MetaEntity(META_AUTO_REQUEST_PUBKEYS, if (enabled) "1" else "0"))
     }
 
+    /**
+     * Whether a netmail to an unknown recipient asks the node for its key.
+     *
+     * With this off (the default, same as fm-app) a netmail to somebody we have
+     * never exchanged keys with stays in the outbox forever: keys only arrive in
+     * `pubkey_response`, and nothing requests them. The Settings screen exposes
+     * this switch so the queue is not a dead end.
+     */
+    suspend fun autoRequestPubkeys(): Boolean = settingsFlag(META_AUTO_REQUEST_PUBKEYS, default = false)
+
+    /** Whether a `pubkey_request` from another user is answered automatically. */
+    suspend fun autoSendPubkey(): Boolean = settingsFlag(META_AUTO_SEND_PUBKEY, default = false)
+
     // -------------------------------------------------------- client sync
 
     private suspend fun clientId(): String {

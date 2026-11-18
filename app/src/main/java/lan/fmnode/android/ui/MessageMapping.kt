@@ -69,8 +69,13 @@ internal object MessageMapping {
     }
 }
 
-/** Moderation fields of a warning/punishment echomail, if it is one. */
-internal fun moderationOf(data: JsonObject?): ModerationUi? {
+/**
+ * Moderation fields of a warning/punishment echomail, if it is one.
+ *
+ * [senderAddress] is the author of the notice — the moderator. It cannot be read
+ * from the payload, which only names the punished user in `to`.
+ */
+internal fun moderationOf(data: JsonObject?, senderAddress: String = ""): ModerationUi? {
     if (data == null || data.containsKey("event")) return null
     val severity = (data["severity"] as? JsonPrimitive)?.contentOrNull.orEmpty()
     if (severity != "warning" && severity != "punishment") return null
@@ -85,5 +90,5 @@ internal fun moderationOf(data: JsonObject?): ModerationUi? {
         }.getOrDefault("")
         else -> ""
     }
-    return ModerationUi(severity, punished, originalId)
+    return ModerationUi(severity, punished, originalId, senderAddress)
 }

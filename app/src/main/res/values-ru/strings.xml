@@ -76,6 +76,10 @@
     <string name="scan_hint">Наведите камеру на QR-приглашение</string>
     <string name="camera_permission_required">Для сканирования QR нужен доступ к камере</string>
     <string name="show_invite_qr">Показать QR-приглашение</string>
+    <string name="privacy_title">Личные сообщения</string>
+    <string name="privacy_auto_request_pubkeys">Запрашивать недостающие ключи</string>
+    <string name="privacy_auto_request_pubkeys_hint">Запрашивать у узла ключ получателя, чтобы личное сообщение можно было зашифровать и отправить</string>
+    <string name="privacy_auto_send_pubkey">Отвечать на запросы ключей</string>
     <string name="invite_qr_title">QR-приглашение</string>
     <string name="close">Закрыть</string>
     <string name="emoji_title">Эмодзи</string>

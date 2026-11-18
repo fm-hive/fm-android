@@ -336,6 +336,8 @@ data class ModerationUi(
     val severity: String,
     val targetAddress: String,
     val originalMessageId: String,
+    /** Who issued the action: the sender of the moderation notice, not the punished message. */
+    val moderatorAddress: String = "",
 )
 
 data class SearchResultUi(
@@ -600,6 +602,10 @@ data class UiState(
     val vouchersError: UiError? = null,
     /** Network policy switch; the create button hides when vouchers are off. */
     val voucherEnabled: Boolean = true,
+    /** Ask the node for a recipient key when netmail cannot be encrypted yet. */
+    val autoRequestPubkeys: Boolean = false,
+    /** Answer other users' `pubkey_request` messages automatically. */
+    val autoSendPubkey: Boolean = false,
     val voucherLoading: Boolean = false,
     val voucherError: UiError? = null,
     /** Rules of an echo the user is subscribing to; the dialog asks to accept. */
@@ -773,6 +779,33 @@ class AppViewModel(
     fun setRememberPassword(value: Boolean) =
         _state.update { it.copy(rememberPassword = value) }
 
+    // --------------------------------------------------------------- privacy
+
+    /**
+     * Turns the node-side key request on for netmail. Without it a message to an
+     * unknown recipient stays in the outbox: only a `pubkey_response` can make
+     * it sendable, and nothing else asks for the key.
+     */
+    fun setAutoRequestPubkeys(value: Boolean) {
+        val opened = networkSession
+        _state.update { it.copy(autoRequestPubkeys = value) }
+        opened ?: return
+        viewModelScope.launch {
+            runCatching { opened.setAutoRequestPubkeys(value) }
+                .onFailure { _state.update { state -> state.copy(autoRequestPubkeys = !value) } }
+        }
+    }
+
+    fun setAutoSendPubkey(value: Boolean) {
+        val opened = networkSession
+        _state.update { it.copy(autoSendPubkey = value) }
+        opened ?: return
+        viewModelScope.launch {
+            runCatching { opened.setAutoSendPubkey(value) }
+                .onFailure { _state.update { state -> state.copy(autoSendPubkey = !value) } }
+        }
+    }
+
     fun unlock(password: String) {
         viewModelScope.launch {
             _state.update { it.copy(autoUnlocking = false) }
@@ -942,6 +975,13 @@ class AppViewModel(
             viewModelScope.launch { openOtherSessions(password, profile.id) }
             runCatching { opened.refreshEchoes() }
                 .onFailure { e -> _state.update { it.copy(syncError = UiError.Failed(e.message ?: "Failed")) } }
+            // Privacy switches live in the profile database, not in the vault.
+            _state.update {
+                it.copy(
+                    autoRequestPubkeys = runCatching { opened.autoRequestPubkeys() }.getOrDefault(false),
+                    autoSendPubkey = runCatching { opened.autoSendPubkey() }.getOrDefault(false),
+                )
+            }
             syncOnce(opened)
             startSyncLoop(opened)
             _state.update { it.copy(screen = AppScreen.Echoes) }
@@ -3844,7 +3884,14 @@ class AppViewModel(
             // Attachment-only uploads without a body/echo context are not
             // conversation messages: they are rendered as file bundles (#9).
             if (row.isAttachmentOnly()) continue
-            moderationOf(data)?.let { moderationByMessage[row.messageId] = it }
+            // A moderation message names the punished message in
+            // `originalMessage.message_id`; the badge and the appeal action
+            // belong to that message, not to the moderation notice itself.
+            moderationOf(data, row.senderAddress)?.let { moderation ->
+                if (moderation.originalMessageId.isNotBlank()) {
+                    moderationByMessage[moderation.originalMessageId] = moderation
+                }
+            }
             messageRows += row
         }
         val protocolTypes = setOf(
