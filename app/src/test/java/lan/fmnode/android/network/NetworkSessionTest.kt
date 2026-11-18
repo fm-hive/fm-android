@@ -999,4 +999,29 @@ class NetworkSessionTest {
         assertEquals("General", data["echo"]!!.jsonPrimitive.content)
     }
 
+    /**
+     * Rights are granted and revoked on the node. The cached registration
+     * response must not win, otherwise a demoted admin keeps the admin UI.
+     */
+    @Test
+    fun `session follows the roles the node reports`() {
+        assertFalse(session.profile.isAdmin)
+
+        session.applyRoleChange(isAdmin = true, isModerator = false)
+
+        assertTrue(session.profile.isAdmin)
+        session.applyRoleChange(isAdmin = false, isModerator = true)
+        assertFalse(session.profile.isAdmin)
+        assertTrue(session.profile.isModerator)
+    }
+
+    @Test
+    fun `role update without a change keeps the profile`() {
+        val before = session.profile
+
+        session.applyRoleChange(isAdmin = false, isModerator = false)
+
+        assertEquals(before, session.profile)
+    }
+
 }

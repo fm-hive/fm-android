@@ -226,6 +226,17 @@ class NetworkManager(
         db().profileDao().upsert(profile.copy(displayName = name))
     }
 
+    /**
+     * Stores the roles the node reports. Admin/moderator rights are granted and
+     * revoked on the node, so a cached registration response would otherwise
+     * keep them forever.
+     */
+    suspend fun updateProfileRoles(id: String, isAdmin: Boolean, isModerator: Boolean) {
+        val profile = db().profileDao().getById(id) ?: return
+        if (profile.isAdmin == isAdmin && profile.isModerator == isModerator) return
+        db().profileDao().upsert(profile.copy(isAdmin = isAdmin, isModerator = isModerator))
+    }
+
     suspend fun setActive(id: String) {
         db().appStateDao().put(AppStateEntity(KEY_ACTIVE_PROFILE, id))
     }

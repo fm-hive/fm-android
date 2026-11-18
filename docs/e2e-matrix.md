@@ -34,10 +34,10 @@
 | --- | --- | --- | --- |
 | `vote.md` | poster, vote, result, ballot | `VoteMappingTest`, `NetworkSessionTest` | auto |
 | `election.md` | start election, vote/retract, candidate card | `NetworkSessionTest`, `ActiveProtocolsList` | auto/manual |
-| `excommunicate.md` | admin proposal in Admin council | `AdminScreen` | manual |
-| `change_policy.md` | policy editor, chunk diff, diff preview | `PolicyParamsTest` | auto/manual |
+| `excommunicate.md` | admin proposal in Admin council | `AdminScreen` | manual (PASS) |
+| `change_policy.md` | policy editor, chunk diff, diff preview | `PolicyParamsTest`, `AdminScreen` | auto/manual (PASS) |
 | `change_rules.md` | rules editor, rename proposal | `NetworkSessionTest`, `RulesEditor` | auto/manual |
-| `remove_echo.md` | moderators proposal dialog | `AdminScreen` | manual |
+| `remove_echo.md` | moderators proposal dialog | `AdminScreen`, `RemoveEchoPayloadTest` | auto/manual (PASS) |
 | `merge.md` | QR invite + start; phases on the node | `NetworkSessionTest` | node |
 | `conflict.md` | passive protocol list | `ProtocolsScreen` | manual |
 | `recover.md` | recovery screen + signed request | `NetworkManagerTest` | auto/manual |
@@ -107,12 +107,27 @@
 это сторона узла, не Android-клиента.
 
 
-### Не проверено в этой сессии
+### Проверено с правами админа и модератора
 
-| Сценарий | Почему | Как проверить |
-| --- | --- | --- |
-| `excommunicate.md`, `change_policy.md`, `remove_echo.md` | UI админский; клиент `:0:2` не админ, экран Admin скрыт | завести в приложении профиль админа (`:0:1`), либо создавать предложения через `fmclient` и смотреть пассивный список |
-| `merge.md` фазы и переназначение адресов | нужен QR/камера либо `fmadmin merge`; стенд из 5 несвязанных узлов | `fmadmin merge` по сценарию `test_network`, Android — только отображение |
+Права выданы на стенде (прямая правка БД — штатный способ для `test_network`):
+`is_admin=1` для `:0:2`, подписка на `Admin council` и `Moderators council`,
+`:0:2` добавлен в `moderators` правил Newcomers (нужно для `remove_echo`).
+
+| Сценарий | Что сделано | Подтверждение | Итог |
+| --- | --- | --- | --- |
+| обновление ролей | роль появилась без перерегистрации | в Settings чипы `admin`, затем `moderator` | PASS (после фикса) |
+| `change_policy.md` | правка `net_name` → diff → submit | узел: `Executing policy change proposed by :0:2`, `Policy updated successfully` | PASS |
+| сохранение вложенных карт | `net_name` менялся в редакторе | в политике узла `special_echogroups` и `rate_limit` без изменений | PASS |
+| переподписание политики | баннер «The network policy has changed» → Accept | узел: `User :0:2 signed policy …` | PASS |
+| имя сети после смены | `net_name=FME2E` | шапка и Settings показывают `FME2E` | PASS |
+| `remove_echo.md` | «Remove a conference» → `dup` | узел: `Initiating echo removal vote for dup`, постер `remove/keep` в Moderators council | PASS (после фикса) |
+| голосование по удалению | экран Protocols | кнопки `remove` / `keep` на постере | PASS |
+| `excommunicate.md` | «Excommunicate a node» → `:0:1:0` | узел: `Excommunicate poster from :0:2 targeting :0:1:0` | PASS |
+| права на совет | не модератор в Moderators council | узел: `only moderators may post to Moderators council` | PASS (отказ) |
+| баннер ошибки отправки | тот же отказ | UI: «Message not sent — only moderators may post…» | PASS |
+
+### Не проверено в этой сессии
+| `merge.md` фазы и переназначение адресов | нужен QR/камера либо `fmadmin merge`; стенд из 5 несвязанных узлов; на узле сейчас нет второго реального узла для merge | `fmadmin merge` по сценарию `test_network`, Android — только отображение |
 | `recover.md` | нужен второй узел и подписанный запрос | `fmclient`/`curl` на node2, затем экран Recovery в приложении |
 | `refill.md` ответ | диалог запроса есть, но ответить должен другой пользователь | второй клиент в той же эхе |
 | `appeal.md` | нужен пакет наказаний (punishment) | модерация в ModeratedEcho по сценарию стенда |
@@ -147,9 +162,35 @@
 именем; все вызывающие места используют `ifBlank { заголовок профиля }`.
 Защищено тестом `NetworkNameTest.a network named FM is a real name`.
 
-### Вероятные дальнейшие дефекты (не проверены)
+### Роли админа и модератора не обновлялись
 
-Админские протоколы (`excommunicate`, `change_policy`, `remove_echo`) и
-`merge` не прогонялись в UI: нужен профиль админа в приложении. Их диалоги
-компилируются и скрыты для не-админа, но фактическая отправка сообщений не
-подтверждена на стенде.
+`refreshIdentity` читал `identity.is_admin` / `is_moderator`, но применял только
+имя и адрес. Роль кэшировалась из регистрации навсегда: назначенный модератор
+не получал модераторский UI, а понижённый админ сохранял админский.
+
+Исправление: `refreshIdentity` обновляет роли через
+`NetworkManager.updateProfileRoles` + `NetworkSession.applyRoleChange`, как это
+уже делалось для имени и адреса. Тесты: `NetworkSessionTest` (следование ролям).
+
+### `remove_echo` не создавал голосование
+
+Клиент отправлял `variants: ["remove", "keep"]` в предложении. Узел в
+`handleRemoveEcho` проверяет `len(Variants) == 0`, чтобы понять, что это новое
+предложение, и только тогда создаёт постер голосования; с `variants` он уходил
+в ветку обработки чанка и ничего не делал. На стенде это выглядело как
+«Proposal submitted» без результата.
+
+Исправление: payload вынесен в `removeEchoPayload` и больше не содержит
+`variants` (узел сам добавляет `remove`/`keep`). Тест:
+`RemoveEchoPayloadTest`. После фикса узел логирует
+`Initiating echo removal vote for dup` и создаёт постер.
+
+### Ограничения стороны узла (не клиента)
+
+- `processRemoveEchoUpdate` в fm-go — заглушка («For now, just log»), поэтому
+  удаление эхи после голосования в этой сборке не выполняется.
+- `handleCreateLocalEcho` требует админа, но отвечает текстом про правила
+  («Only admins may create echoes with rules»).
+- `remove_echo` принимается только от модератора: клиент показывает кнопку в
+  админском экране, так что админ без модераторских прав получит отказ (и
+  увидит его в баннере ошибок).

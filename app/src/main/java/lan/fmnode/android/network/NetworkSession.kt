@@ -290,6 +290,12 @@ class NetworkSession(
         profile = profile.copy(displayName = name)
     }
 
+    /** Adopts the rights the node reports (granted or revoked on the node). */
+    fun applyRoleChange(isAdmin: Boolean, isModerator: Boolean) {
+        if (isAdmin == profile.isAdmin && isModerator == profile.isModerator) return
+        profile = profile.copy(isAdmin = isAdmin, isModerator = isModerator)
+    }
+
     // -------------------------------------------------------------------- sync
 
     /** Pulls new messages, sends queued outbox entries, confirms delivered packets. */

@@ -437,6 +437,33 @@ internal fun networkNameFromPolicyJson(policyJson: String): String {
     }.getOrDefault("")
 }
 
+/**
+ * Payload of a `remove_echo` proposal.
+ *
+ * The **node** owns the vote: it creates the `remove`/`keep` poster itself as
+ * soon as it sees a proposal without `variants` (fm-go checks
+ * `len(Variants) == 0`). Sending `variants` from the client made the node treat
+ * the message as a vote chunk and skip the proposal entirely, so this payload
+ * deliberately carries only the target and the reason.
+ */
+internal fun removeEchoPayload(
+    from: String,
+    echoName: String,
+    reason: String,
+    council: String,
+    date: String,
+): String = buildJsonObject {
+    put("proto", "remove_echo")
+    put("from", from)
+    put("to", "all")
+    put("message", reason.ifBlank { "Remove echo: $echoName" })
+    put("date", date)
+    put("echo", council)
+    put("node1", from)
+    put("subject", "Remove echo: $echoName")
+    put("echo_name", echoName)
+}.toString()
+
 /** Network news conference name from the accepted policy (interactive posts are node-only). */
 internal fun networkNewsEchoName(policyJson: String): String {
     val json = Json { ignoreUnknownKeys = true }
@@ -1258,6 +1285,22 @@ class AppViewModel(
             _state.update { state ->
                 val updated = state.activeProfile?.let { current ->
                     if (current.id == opened.profile.id) current.copy(displayName = remoteName) else current
+                }
+                state.copy(activeProfile = updated)
+            }
+        }
+        // Rights are granted and revoked on the node: follow them like the name,
+        // otherwise a demoted admin keeps the admin UI forever.
+        if (identity.isAdmin != opened.profile.isAdmin || identity.isModerator != opened.profile.isModerator) {
+            manager.updateProfileRoles(opened.profile.id, identity.isAdmin, identity.isModerator)
+            opened.applyRoleChange(identity.isAdmin, identity.isModerator)
+            _state.update { state ->
+                val updated = state.activeProfile?.let { current ->
+                    if (current.id == opened.profile.id) {
+                        current.copy(isAdmin = identity.isAdmin, isModerator = identity.isModerator)
+                    } else {
+                        current
+                    }
                 }
                 state.copy(activeProfile = updated)
             }
@@ -2672,22 +2715,13 @@ class AppViewModel(
         viewModelScope.launch {
             _state.update { it.copy(removeEchoSending = true, removeEchoError = null, removeEchoStatus = null) }
             try {
-                val data = buildJsonObject {
-                    put("proto", "remove_echo")
-                    put("type", "")
-                    put("from", opened.profile.address)
-                    put("to", "all")
-                    put("message", _state.value.removeEchoReason.trim().ifBlank { "Remove echo: $target" })
-                    put("date", java.time.Instant.now().toString())
-                    put("echo", council)
-                    put("node1", opened.profile.address)
-                    put("subject", "Remove echo: $target")
-                    put("variants", kotlinx.serialization.json.buildJsonArray {
-                        add(JsonPrimitive("remove"))
-                        add(JsonPrimitive("keep"))
-                    })
-                    put("echo_name", target)
-                }.toString()
+                val data = removeEchoPayload(
+                    from = opened.profile.address,
+                    echoName = target,
+                    reason = _state.value.removeEchoReason.trim(),
+                    council = council,
+                    date = java.time.Instant.now().toString(),
+                )
                 opened.postProtocol(council, "remove_echo", data)
                 _state.update { it.copy(removeEchoSending = false, removeEchoStatus = "Proposal submitted") }
                 syncOnce(opened)
