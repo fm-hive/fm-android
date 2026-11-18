@@ -222,4 +222,5 @@
     <string name="appeal_severity">Severity</string>
     <string name="appeal_reason">Reason</string>
     <string name="appeal_submit">Submit appeal</string>
+    <string name="election_start">Start election</string>
 </resources>

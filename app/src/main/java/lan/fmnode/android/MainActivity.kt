@@ -293,6 +293,7 @@ class MainActivity : ComponentActivity() {
                     onCreateEchoRetractVote = viewModel::setCreateEchoRetractVote,
                     onCreateEchoRetractVoteDays = viewModel::setCreateEchoRetractVoteDays,
                     onFeedVote = viewModel::castFeedVote,
+                    onStartElection = viewModel::startElection,
                     onOpenVoteCompose = viewModel::openVoteCompose,
                     onCloseVoteCompose = viewModel::closeVoteCompose,
                     onVoteQuestion = viewModel::setVoteQuestion,

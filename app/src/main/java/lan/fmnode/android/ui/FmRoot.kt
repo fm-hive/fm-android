@@ -182,6 +182,7 @@ fun FmRoot(
     onCreateEchoRetractVoteDays: (String) -> Unit = {},
     onFeedVote: (VoteCardUi, String) -> Unit = { _, _ -> },
     onOpenVoteCompose: () -> Unit = {},
+    onStartElection: () -> Unit = {},
     onCloseVoteCompose: () -> Unit = {},
     onVoteQuestion: (String) -> Unit = {},
     onVoteVariant: (Int, String) -> Unit = { _, _ -> },
@@ -593,6 +594,7 @@ fun FmRoot(
                 onDismissSendErrors = onDismissSendErrors,
                 onOpenRules = onOpenRulesEditor,
                 onOpenVote = onOpenVoteCompose,
+                onOpenElection = onStartElection,
                 onVote = onFeedVote,
             )
         }
@@ -1536,6 +1538,7 @@ fun EchoConversationScreen(
     onDismissSendErrors: () -> Unit = {},
     onOpenRules: () -> Unit = {},
     onOpenVote: () -> Unit = {},
+    onOpenElection: () -> Unit = {},
     onVote: (VoteCardUi, String) -> Unit = { _, _ -> },
 ) {
     var versionsMessage by remember { mutableStateOf<MessageUi?>(null) }
@@ -1591,6 +1594,13 @@ fun EchoConversationScreen(
                                     onClick = {
                                         menuExpanded = false
                                         onOpenVote()
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.election_start)) },
+                                    onClick = {
+                                        menuExpanded = false
+                                        onOpenElection()
                                     },
                                 )
                             }

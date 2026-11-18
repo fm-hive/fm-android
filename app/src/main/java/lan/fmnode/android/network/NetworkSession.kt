@@ -518,6 +518,20 @@ class NetworkSession(
         return postProtocol(echoName, "echomail", data)
     }
 
+    /** Starts a moderator election in [echoName] (docs/proto/election.md). */
+    suspend fun postElectionPoster(echoName: String): SendResult {
+        val data = buildJsonObject {
+            put("echo", echoName)
+            put("proto", "election")
+            put("type", "poster")
+            put("from", profile.address)
+            put("to", "all")
+            put("message", "Moderator election")
+            put("date", java.time.Instant.now().toString())
+        }.toString()
+        return postProtocol(echoName, "election", data)
+    }
+
     /** Votes for a candidate ([candidate] empty retracts) in an election. */
     suspend fun postElectionVote(echoName: String, candidate: String): SendResult {
         val data = buildJsonObject {

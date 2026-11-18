@@ -1926,6 +1926,16 @@ class AppViewModel(
         }
     }
 
+    /** Starts a moderator election in the currently open echo (election poster). */
+    fun startElection() {
+        val echo = _state.value.selectedEcho ?: return
+        val opened = networkSession ?: return
+        viewModelScope.launch {
+            runCatching { opened.postElectionPoster(echo.name) }
+            syncOnce(opened)
+        }
+    }
+
     fun castVote(protocol: ProtocolUi, variant: String) {
         val opened = networkSession ?: return
         viewModelScope.launch {

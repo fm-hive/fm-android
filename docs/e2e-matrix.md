@@ -33,7 +33,7 @@
 | Документ | Клиент | Покрытие | Статус |
 | --- | --- | --- | --- |
 | `vote.md` | poster, vote, result, ballot | `VoteMappingTest`, `NetworkSessionTest` | auto |
-| `election.md` | vote/retract, candidate card | `NetworkSessionTest`, `ActiveProtocolsList` | auto/manual |
+| `election.md` | start election, vote/retract, candidate card | `NetworkSessionTest`, `ActiveProtocolsList` | auto/manual |
 | `excommunicate.md` | admin proposal in Admin council | `AdminScreen` | manual |
 | `change_policy.md` | policy editor, chunk diff, diff preview | `PolicyParamsTest` | auto/manual |
 | `change_rules.md` | rules editor, rename proposal | `NetworkSessionTest`, `RulesEditor` | auto/manual |

@@ -985,4 +985,17 @@ class NetworkSessionTest {
         assertEquals("be nice", rules["text"]!!.jsonPrimitive.content)
     }
 
+
+    @Test
+    fun `election poster starts a moderator election`() = runBlocking {
+        session.postElectionPoster("General")
+
+        val message = sentMessages.last()
+        assertEquals("election", message["type"]!!.jsonPrimitive.content)
+        val payload = CryptoService.jwsPayload(message["jws"]!!.jsonPrimitive.content)!!
+        val data = Json.parseToJsonElement(payload).jsonObject
+        assertEquals("poster", data["type"]!!.jsonPrimitive.content)
+        assertEquals("General", data["echo"]!!.jsonPrimitive.content)
+    }
+
 }

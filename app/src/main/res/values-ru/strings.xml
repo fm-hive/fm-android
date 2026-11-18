@@ -222,4 +222,5 @@
     <string name="appeal_severity">Вид наказания</string>
     <string name="appeal_reason">Причина</string>
     <string name="appeal_submit">Подать апелляцию</string>
+    <string name="election_start">Начать выборы</string>
 </resources>
