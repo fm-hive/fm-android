@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.yield
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -850,7 +851,17 @@ class AppViewModel(
     /** Logout: same as fm-app — drop decrypted data and require the password. */
     fun confirmLogout() {
         _state.update { it.copy(logoutDialog = false) }
-        lockVault()
+        val opened = networkSession
+        if (opened == null) {
+            lockVault()
+            return
+        }
+        viewModelScope.launch {
+            // Best effort: remove this client from the sync list so it stops
+            // receiving copies. Never block logout on a dead node.
+            withTimeoutOrNull(2_000) { runCatching { opened.unregisterClient() } }
+            lockVault()
+        }
     }
 
     private fun lockVault() {
