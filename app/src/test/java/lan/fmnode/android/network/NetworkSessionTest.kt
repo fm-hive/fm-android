@@ -1322,6 +1322,18 @@ class NetworkSessionTest {
             op["message"]!!.jsonObject["data"]!!.jsonPrimitive.content
                 .let { Json.parseToJsonElement(it).jsonObject["subject"]!!.jsonPrimitive.content },
         )
+
+        // The history is shared once; the next poll must not re-upload it.
+        clientSyncRequests.clear()
+        session.sync()
+        assertTrue(
+            "history must not be repeated on every poll",
+            clientSyncRequests.none { control ->
+                val data = control["data"] as? JsonObject
+                data?.get("action")?.jsonPrimitive?.content == "append" &&
+                    data["name"]?.jsonPrimitive?.content == "outbound_client_other-1"
+            },
+        )
     }
 
     @Test
