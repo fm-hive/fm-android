@@ -1091,6 +1091,7 @@ class NetworkSession(
         )
 
         // Register before sharing history so the other side can address us.
+        var justRegistered = false
         if (me !in clients && !registeredThisSession) {
             appendContainer(
                 CLIENT_LIST_CONTAINER,
@@ -1100,15 +1101,18 @@ class NetworkSession(
                 },
             )
             registeredThisSession = true
+            justRegistered = true
             clients.add(me)
         }
 
         // A new client missed all previous netmail and blogs. Share local
         // history with it (and with everybody after our own registration).
+        // `justRegistered` is local: history must be uploaded once, not on
+        // every poll for the rest of the session.
         val knownBefore = loadKnownClients()
         val fresh = clients.filter { it != me && it !in knownBefore }.toSet()
-        if (registeredThisSession || fresh.isNotEmpty()) {
-            val targets = if (registeredThisSession) clients - me else fresh
+        if (justRegistered || fresh.isNotEmpty()) {
+            val targets = if (justRegistered) clients - me else fresh
             uploadLocalHistory(targets)
         }
         knownClients = clients - me
