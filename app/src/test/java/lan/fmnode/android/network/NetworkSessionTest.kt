@@ -1141,6 +1141,79 @@ class NetworkSessionTest {
     }
 
     @Test
+    fun `plain edit is applied and forwarded to other clients`() = runBlocking {
+        db.metaDao().put(lan.fmnode.android.storage.MetaEntity("client_id", "client-1"))
+        db.messageDao().upsert(
+            MessageEntity(
+                messageId = "m1",
+                echoName = "General",
+                type = "echomail",
+                senderAddress = ":0:1",
+                recipientAddress = null,
+                timestamp = 1000,
+                dataJson = data("subject" to "Old", "body" to "Old body"),
+                jws = "old-jws",
+                jwe = null,
+                receivedAt = 0,
+            ),
+        )
+        val updateData = data(
+            "subject" to "New",
+            "body" to "New body",
+            "updateMessageId" to "m1",
+        )
+        val update = buildJsonObject {
+            put("type", "echomail")
+            put("message_id", "upd-1")
+            put("sender_address", ":0:1")
+            put("timestamp", 2000)
+            put("echo_name", "General")
+            put("jws", CryptoService.createJws(userSeed, updateData, userPublicKey))
+        }
+        val listEntry = buildJsonObject {
+            put("id", 1)
+            put("payload", clientEncrypt(buildJsonObject {
+                put("op", "add")
+                put("client", "other-1")
+            }))
+        }
+        sendReceiveResponse = buildJsonObject {
+            put("messages", buildJsonArray { add(update) })
+            put("local_packet_ids", buildJsonArray {})
+            put("client_synchronize", true)
+            put("client_container_entries", buildJsonArray {
+                add(buildJsonObject {
+                    put("name", "client_synchronize")
+                    put("entries", buildJsonArray { add(listEntry) })
+                })
+                add(buildJsonObject {
+                    put("name", "outbound_client_client-1")
+                    put("entries", buildJsonArray {})
+                })
+            })
+        }
+        session.sync()
+
+        val stored = db.messageDao().getByEchoAndId("General", "m1")!!
+        assertTrue(stored.dataJson.contains("New body"))
+        assertTrue(stored.versionsJson?.contains("Old body") == true)
+        assertNull(db.messageDao().getByEchoAndId("General", "upd-1"))
+
+        val append = clientSyncRequests.lastOrNull { control ->
+            val data = control["data"] as? JsonObject
+            data != null &&
+                data["action"]?.jsonPrimitive?.content == "append" &&
+                data["name"]?.jsonPrimitive?.content == "outbound_client_other-1"
+        } ?: error("edit was not forwarded to the other client")
+        val payload = (append["data"] as JsonObject)["payload"]!!.jsonPrimitive.content
+        val op = Json.parseToJsonElement(
+            String(CryptoService.decryptJwe(payload, CryptoService.x25519PrivateKeyFromSeed(userSeed))),
+        ).jsonObject
+        assertEquals("message", op["op"]!!.jsonPrimitive.content)
+        assertEquals("upd-1", op["message"]!!.jsonObject["message_id"]!!.jsonPrimitive.content)
+    }
+
+    @Test
     fun `rate limit usage from send receive is stored`() = runBlocking {
         sendReceiveResponse = buildJsonObject {
             put("messages", buildJsonArray {})

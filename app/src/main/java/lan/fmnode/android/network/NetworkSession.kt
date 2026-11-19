@@ -341,6 +341,11 @@ class NetworkSession(
                     received++
                     incoming += message
                 }
+                // An edit replaces an existing message instead of creating a
+                // new one. It is not a new "received" message, but other
+                // clients of this address still need the update through
+                // client_synchronize.
+                is Incoming.Updated -> incoming += message
                 is Incoming.Error -> errors += result.text
                 else -> {}
             }
@@ -1178,7 +1183,7 @@ class NetworkSession(
                 when (op.string("op")) {
                     "message", "sent" -> (op["message"] as? JsonObject)?.let { message ->
                         when (processIncoming(message)) {
-                            is Incoming.Stored, is Incoming.Error -> {}
+                            is Incoming.Stored, is Incoming.Updated, is Incoming.Error -> {}
                             else -> {}
                         }
                     }
@@ -1336,6 +1341,8 @@ class NetworkSession(
         data object Ignored : Incoming
         data object Internal : Incoming
         data object Stored : Incoming
+        /** A plain message update that replaced an existing message. */
+        data object Updated : Incoming
         data class Error(val text: String) : Incoming
     }
 
@@ -1413,7 +1420,7 @@ class NetworkSession(
                     JsonArray(versions).toString(),
                     System.currentTimeMillis(),
                 )
-                return Incoming.Internal
+                return Incoming.Updated
             }
         }
         parsedData?.string("sender_name")?.takeIf { it.isNotBlank() }?.let { name ->
