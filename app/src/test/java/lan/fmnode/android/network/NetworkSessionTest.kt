@@ -1189,6 +1189,43 @@ class NetworkSessionTest {
     }
 
     @Test
+    fun `double encrypted client sync payload from the web is decrypted`() = runBlocking {
+        db.metaDao().put(lan.fmnode.android.storage.MetaEntity("client_id", "client-1"))
+        val netmail = incomingNetmail("web-1", data("subject" to "From web", "body" to "Hi"))
+        val clientLayer = clientEncrypt(buildJsonObject {
+            put("op", "message")
+            put("message", netmail)
+        })
+        // The node wraps the client layer once more with the user's key.
+        val nodeLayer = CryptoService.encryptJwe(
+            clientLayer.toByteArray(),
+            CryptoService.x25519PublicKeyFromEd25519(userPublicKey),
+        )
+        val ownEntry = buildJsonObject {
+            put("id", 51)
+            put("payload", nodeLayer)
+        }
+        sendReceiveResponse = buildJsonObject {
+            put("messages", buildJsonArray {})
+            put("local_packet_ids", buildJsonArray {})
+            put("client_synchronize", true)
+            put("client_container_entries", buildJsonArray {
+                add(buildJsonObject {
+                    put("name", "outbound_client_client-1")
+                    put("entries", buildJsonArray { add(ownEntry) })
+                })
+            })
+        }
+        session.sync()
+
+        assertEquals(
+            "From web",
+            Json.parseToJsonElement(db.messageDao().getById("web-1")!!.dataJson)
+                .jsonObject["subject"]!!.jsonPrimitive.content,
+        )
+    }
+
+    @Test
     fun `sent op from another client is stored in the sent folder`() = runBlocking {
         db.metaDao().put(lan.fmnode.android.storage.MetaEntity("client_id", "client-1"))
         val payload = data("subject" to "From phone", "body" to "Hi")

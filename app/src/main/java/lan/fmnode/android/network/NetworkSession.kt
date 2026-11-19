@@ -1085,6 +1085,10 @@ class NetworkSession(
             val client = op.string("client") ?: continue
             if (op.string("op") == "remove") clients.remove(client) else clients.add(client)
         }
+        android.util.Log.d(
+            "NetworkSession",
+            "client sync: me=$me clients=$clients ownEntries=${ownEntries.size}",
+        )
 
         // Register before sharing history so the other side can address us.
         if (me !in clients && !registeredThisSession) {
