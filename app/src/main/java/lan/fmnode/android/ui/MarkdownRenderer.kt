@@ -38,28 +38,47 @@ object MarkdownRenderer {
         MarkdownTokenTypes.CODE_FENCE_END,
     )
 
-    fun render(markdown: String): AnnotatedString {
+    /**
+     * [attachmentResolver] receives a full `attachment:N` or
+     * `attachment:<message_id>:N` reference and returns the file name to show.
+     * The reference is rendered as an attachment label instead of a broken
+     * link (the composer inserts these references, the gallery shows the file).
+     */
+    fun render(
+        markdown: String,
+        attachmentResolver: (String) -> String? = { null },
+    ): AnnotatedString {
         val source = markdown.replace("\r\n", "\n")
         val tree = parser.buildMarkdownTreeFromString(source)
         val built = buildAnnotatedString {
-            appendChildren(this, tree, source)
+            appendChildren(this, tree, source, attachmentResolver)
         }
         var end = built.length
         while (end > 0 && built.text[end - 1] == '\n') end--
         return built.subSequence(0, end)
     }
 
-    private fun appendChildren(builder: AnnotatedString.Builder, node: ASTNode, source: String) {
-        for (child in node.children) appendNode(builder, child, source)
+    private fun appendChildren(
+        builder: AnnotatedString.Builder,
+        node: ASTNode,
+        source: String,
+        attachmentResolver: (String) -> String?,
+    ) {
+        for (child in node.children) appendNode(builder, child, source, attachmentResolver)
     }
 
-    private fun appendNode(builder: AnnotatedString.Builder, node: ASTNode, source: String) {
+    private fun appendNode(
+        builder: AnnotatedString.Builder,
+        node: ASTNode,
+        source: String,
+        attachmentResolver: (String) -> String?,
+    ) {
         // Structural marker tokens (delimiters, bullets, hashes, quotes) are
         // rendered as decoration by the parent elements, never as text.
         if (node.type in SKIPPED_MARKERS) return
         when (node.type) {
             MarkdownElementTypes.PARAGRAPH -> {
-                appendChildren(builder, node, source)
+                appendChildren(builder, node, source, attachmentResolver)
                 builder.append("\n\n")
             }
             MarkdownElementTypes.ATX_1, MarkdownElementTypes.ATX_2, MarkdownElementTypes.ATX_3,
@@ -67,20 +86,20 @@ object MarkdownRenderer {
             MarkdownElementTypes.SETEXT_1, MarkdownElementTypes.SETEXT_2,
             -> {
                 builder.withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
-                    appendChildren(builder, node, source)
+                    appendChildren(builder, node, source, attachmentResolver)
                 }
                 builder.append("\n\n")
             }
             MarkdownElementTypes.STRONG -> builder.withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
-                appendChildren(builder, node, source)
+                appendChildren(builder, node, source, attachmentResolver)
             }
             MarkdownElementTypes.EMPH -> builder.withStyle(SpanStyle(fontStyle = FontStyle.Italic)) {
-                appendChildren(builder, node, source)
+                appendChildren(builder, node, source, attachmentResolver)
             }
             MarkdownElementTypes.CODE_SPAN -> builder.withStyle(
                 SpanStyle(fontFamily = FontFamily.Monospace),
             ) {
-                appendChildren(builder, node, source)
+                appendChildren(builder, node, source, attachmentResolver)
             }
             MarkdownElementTypes.CODE_FENCE, MarkdownElementTypes.CODE_BLOCK -> {
                 val raw = node.getTextInNode(source).toString()
@@ -90,44 +109,108 @@ object MarkdownRenderer {
                 builder.withStyle(SpanStyle(fontFamily = FontFamily.Monospace)) { append(code) }
                 builder.append("\n\n")
             }
-            MarkdownElementTypes.INLINE_LINK, MarkdownElementTypes.AUTOLINK -> {
+            MarkdownElementTypes.INLINE_LINK, MarkdownElementTypes.IMAGE,
+            MarkdownElementTypes.AUTOLINK,
+            -> {
                 val text = node.getTextInNode(source).toString()
+                // IMAGE wraps an INLINE_LINK node; the destination and link text
+                // live there, not directly under IMAGE.
+                val linkNode = if (node.type == MarkdownElementTypes.IMAGE) {
+                    node.findChildOfType(MarkdownElementTypes.INLINE_LINK) ?: node
+                } else {
+                    node
+                }
                 val url = if (node.type == MarkdownElementTypes.AUTOLINK) {
                     text.trim('<', '>')
                 } else {
-                    val dest = node.findChildOfType(MarkdownElementTypes.LINK_DESTINATION)
+                    val dest = linkNode.findChildOfType(MarkdownElementTypes.LINK_DESTINATION)
                     dest?.getTextInNode(source)?.toString()?.trim('<', '>') ?: text
                 }
                 val label = if (node.type == MarkdownElementTypes.AUTOLINK) {
                     url
                 } else {
-                    val linkText = node.findChildOfType(MarkdownElementTypes.LINK_TEXT)
-                    linkText?.getTextInNode(source)?.toString()?.trim('[', ']') ?: url
+                    val linkText = linkNode.findChildOfType(MarkdownElementTypes.LINK_TEXT)
+                    linkText?.getTextInNode(source)?.toString()?.trim('[', ']')?.trimStart('!')
+                        ?: url
                 }
-                builder.withLink(LinkAnnotation.Url(url)) { append(label) }
+                if (url.startsWith("attachment:")) {
+                    // The composer inserts attachment:N references; never emit
+                    // a broken URL. Show the file name (or the alt text) instead.
+                    val name = attachmentResolver(url) ?: label.ifBlank { "attachment" }
+                    builder.withStyle(SpanStyle(fontFamily = FontFamily.Monospace)) {
+                        append("\uD83D\uDCCE $name")
+                    }
+                } else {
+                    builder.withLink(LinkAnnotation.Url(url)) { append(label) }
+                }
             }
             MarkdownElementTypes.UNORDERED_LIST, MarkdownElementTypes.ORDERED_LIST -> {
-                appendChildren(builder, node, source)
+                appendChildren(builder, node, source, attachmentResolver)
                 builder.append("\n")
             }
             MarkdownElementTypes.LIST_ITEM -> {
                 builder.append("• ")
-                appendChildren(builder, node, source)
+                appendChildren(builder, node, source, attachmentResolver)
                 builder.append("\n")
             }
             MarkdownElementTypes.BLOCK_QUOTE -> {
-                appendChildren(builder, node, source)
+                appendChildren(builder, node, source, attachmentResolver)
                 builder.append("\n")
             }
             MarkdownTokenTypes.HORIZONTAL_RULE -> builder.append("\n———\n")
             MarkdownTokenTypes.EOL -> builder.append("\n")
             else -> {
                 if (node.children.isEmpty()) {
-                    builder.append(node.getTextInNode(source).toString())
+                    appendLeafText(builder, node.getTextInNode(source).toString(), attachmentResolver)
                 } else {
-                    appendChildren(builder, node, source)
+                    appendChildren(builder, node, source, attachmentResolver)
                 }
             }
         }
     }
+
+    /**
+     * The markdown parser leaves image syntax (`![alt](attachment:N)`) as a
+     * plain text node in this flavour; replace those references with the same
+     * attachment label used for normal links.
+     */
+    private val IMAGE_ATTACHMENT = Regex("""!?\[([^\]]*)]\((attachment:[^)]+)\)""")
+
+    private fun appendLeafText(
+        builder: AnnotatedString.Builder,
+        text: String,
+        attachmentResolver: (String) -> String?,
+    ) {
+        var last = 0
+        for (match in IMAGE_ATTACHMENT.findAll(text)) {
+            builder.append(text.substring(last, match.range.first))
+            val label = match.groupValues[1]
+            val ref = match.groupValues[2]
+            val name = attachmentResolver(ref) ?: label.ifBlank { "attachment" }
+            builder.withStyle(SpanStyle(fontFamily = FontFamily.Monospace)) {
+                append("\uD83D\uDCCE $name")
+            }
+            last = match.range.last + 1
+        }
+        builder.append(text.substring(last))
+    }
+}
+
+/**
+ * Resolves `attachment:N` against the current message and
+ * `attachment:<message_id>:N` against another message of the conversation.
+ * Returns the file name, or null when the reference cannot be resolved.
+ */
+internal fun attachmentRefName(
+    ref: String,
+    messageId: String,
+    attachments: List<AttachmentUi>,
+    otherMessage: (String) -> List<AttachmentUi>? = { null },
+): String? {
+    if (!ref.startsWith("attachment:")) return null
+    val parts = ref.removePrefix("attachment:").split(":")
+    val index = parts.lastOrNull()?.toIntOrNull() ?: return null
+    val targetId = if (parts.size >= 2) parts.first() else messageId
+    val list = if (targetId == messageId) attachments else otherMessage(targetId)
+    return list?.getOrNull(index)?.name
 }

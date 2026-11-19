@@ -67,6 +67,14 @@ internal object MessageMapping {
             (att["name"] as? JsonPrimitive)?.contentOrNull.orEmpty().ifBlank { null }
         }
     }
+
+    /** Optional user tagline carried in the payload (#309). */
+    fun taglineOf(data: JsonObject?): String =
+        (data?.get("tagline") as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
+
+    /** Optional client tearline carried in the payload (#311). */
+    fun tearlineOf(data: JsonObject?): String =
+        (data?.get("tearline") as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
 }
 
 /**

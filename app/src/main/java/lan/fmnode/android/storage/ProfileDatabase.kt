@@ -254,6 +254,14 @@ interface MessageDao {
     @Query("SELECT * FROM messages WHERE echoName = :echo ORDER BY timestamp ASC, messageId ASC")
     suspend fun getEcho(echo: String): List<MessageEntity>
 
+    /**
+     * Newest messages of [echo], used when a newly joined client needs the
+     * netmail history. Callers usually reverse the list to keep chronological
+     * order.
+     */
+    @Query("SELECT * FROM messages WHERE echoName = :echo ORDER BY timestamp DESC, messageId DESC LIMIT :limit")
+    suspend fun getRecent(echo: String, limit: Int): List<MessageEntity>
+
     @Query("SELECT * FROM messages WHERE messageId = :messageId LIMIT 1")
     suspend fun getById(messageId: String): MessageEntity?
 

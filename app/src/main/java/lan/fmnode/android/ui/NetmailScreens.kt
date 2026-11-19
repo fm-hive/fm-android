@@ -18,9 +18,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Reply
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.EmojiEmotions
 import androidx.compose.material.icons.filled.Folder
@@ -296,6 +298,8 @@ fun NetmailDetailScreen(
     message: MessageUi?,
     onBack: () -> Unit,
     onForward: (MessageUi) -> Unit,
+    onReply: (MessageUi) -> Unit = {},
+    showTearline: Boolean = false,
 ) {
     Scaffold(
         topBar = {
@@ -308,6 +312,12 @@ fun NetmailDetailScreen(
                 },
                 actions = {
                     if (message != null) {
+                        IconButton(onClick = { onReply(message) }) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.Reply,
+                                contentDescription = stringResource(R.string.fm_messageactions_reply),
+                            )
+                        }
                         IconButton(onClick = { onForward(message) }) {
                             Icon(Icons.Default.Forward, contentDescription = stringResource(R.string.forward))
                         }
@@ -335,7 +345,27 @@ fun NetmailDetailScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.height(12.dp))
-            Text(MarkdownRenderer.render(message.body), style = MaterialTheme.typography.bodyMedium)
+            Text(
+                MarkdownRenderer.render(message.body) { ref ->
+                    attachmentRefName(ref, message.messageId, message.attachments)
+                },
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            if (message.tagline.isNotBlank()) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = message.tagline,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (showTearline && message.tearline.isNotBlank()) {
+                Text(
+                    text = "--- ${message.tearline}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             if (message.attachments.isNotEmpty()) {
                 Spacer(Modifier.height(8.dp))
                 AttachmentsRow(message.attachments)
@@ -354,6 +384,10 @@ fun NetmailComposeScreen(
     onBody: (String) -> Unit,
     onSend: () -> Unit,
     onContacts: () -> Unit,
+    onAttachFiles: () -> Unit = {},
+    onRemoveAttachment: (Int) -> Unit = {},
+    onTagline: (String) -> Unit = {},
+    onClearReply: () -> Unit = {},
 ) {
     var showEmoji by remember { mutableStateOf(false) }
     if (showEmoji) {
@@ -381,8 +415,8 @@ fun NetmailComposeScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = onContacts) {
-                        Icon(Icons.Default.Person, contentDescription = stringResource(R.string.contacts_title))
+                    IconButton(onClick = onAttachFiles) {
+                        Icon(Icons.Default.AttachFile, contentDescription = stringResource(R.string.attach_file))
                     }
                     IconButton(onClick = { showEmoji = true }) {
                         Icon(Icons.Default.EmojiEmotions, contentDescription = stringResource(R.string.emoji_title))
@@ -403,11 +437,20 @@ fun NetmailComposeScreen(
                 .padding(padding)
                 .padding(12.dp),
         ) {
+            ReplyBanner(label = state.replyToLabel, onClear = onClearReply)
             OutlinedTextField(
                 value = state.recipient,
                 onValueChange = onRecipient,
                 label = { Text(stringResource(R.string.recipient)) },
                 singleLine = true,
+                trailingIcon = {
+                    IconButton(onClick = onContacts) {
+                        Icon(
+                            Icons.Default.Person,
+                            contentDescription = stringResource(R.string.contacts_title),
+                        )
+                    }
+                },
                 modifier = Modifier.fillMaxWidth(),
             )
             Spacer(Modifier.height(8.dp))
@@ -419,12 +462,25 @@ fun NetmailComposeScreen(
                 modifier = Modifier.fillMaxWidth(),
             )
             Spacer(Modifier.height(8.dp))
-            OutlinedTextField(
-                value = state.body,
-                onValueChange = onBody,
-                label = { Text(stringResource(R.string.body)) },
+            ComposerBodyEditor(
+                body = state.body,
+                onBody = onBody,
+                attachments = state.attachments,
                 modifier = Modifier.fillMaxWidth().weight(1f),
             )
+            Spacer(Modifier.height(8.dp))
+            OutlinedTextField(
+                value = state.tagline,
+                onValueChange = onTagline,
+                label = { Text(stringResource(R.string.fm_editor_tagline)) },
+                placeholder = { Text(stringResource(R.string.fm_editor_taglineplaceholder)) },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            if (state.attachments.isNotEmpty()) {
+                Spacer(Modifier.height(8.dp))
+                ComposerAttachments(attachments = state.attachments, onRemove = onRemoveAttachment)
+            }
             if (state.keyRequested) {
                 Spacer(Modifier.height(8.dp))
                 Text(stringResource(R.string.key_requested), color = MaterialTheme.colorScheme.primary)

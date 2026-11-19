@@ -25,6 +25,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Reply
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
@@ -211,6 +212,15 @@ fun FmRoot(
     onAttachFiles: () -> Unit = {},
     onRemoveAttachment: (Int) -> Unit = {},
     onRemoveBlogAttachment: (Int) -> Unit = {},
+    onRemoveNetmailAttachment: (Int) -> Unit = {},
+    onReplyEchoMessage: (MessageUi) -> Unit = {},
+    onReplyNetmailMessage: (MessageUi) -> Unit = {},
+    onClearComposeReply: () -> Unit = {},
+    onClearNetmailReply: () -> Unit = {},
+    onComposeTagline: (String) -> Unit = {},
+    onNetmailTagline: (String) -> Unit = {},
+    onTagline: (String) -> Unit = {},
+    onShowTearline: (Boolean) -> Unit = {},
     onOpenAdmin: () -> Unit = {},
     onOpenRecovery: () -> Unit = {},
     onRequestVoucher: (NodeUi) -> Unit = {},
@@ -592,6 +602,8 @@ fun FmRoot(
                 onModerate = onOpenModeration,
                 onAppeal = onOpenAppeal,
                 onForward = onForwardMessage,
+                onReply = onReplyEchoMessage,
+                showTearline = state.showTearline,
                 messageView = state.messageView,
                 onChangeMessageView = onChangeMessageView,
                 onOpenMessage = onOpenMessage,
@@ -612,6 +624,8 @@ fun FmRoot(
             canModerate = state.activeProfile?.let { it.isAdmin || it.isModerator } == true,
             canAppeal = state.activeProfile?.isAdmin == true,
             onAppeal = onOpenAppeal,
+            onReply = onReplyEchoMessage,
+            showTearline = state.showTearline,
             canReact = state.selectedEcho?.let { echo ->
                 EchoPermissions.canWriteToEcho(
                     echo.rulesText,
@@ -656,6 +670,8 @@ fun FmRoot(
             onSend = onSendCompose,
             onAttachFiles = onAttachFiles,
             onRemoveAttachment = onRemoveAttachment,
+            onTagline = onComposeTagline,
+            onClearReply = onClearComposeReply,
         )
         AppScreen.QrScanner -> QrScannerScreen(
             onBack = onCloseScanner,
@@ -705,6 +721,8 @@ fun FmRoot(
             message = state.selectedNetmail,
             onBack = onBackFromNetmailDetail,
             onForward = onForwardMessage,
+            onReply = onReplyNetmailMessage,
+            showTearline = state.showTearline,
         )
         AppScreen.NetmailCompose -> NetmailComposeScreen(
             state = state.netmailCompose,
@@ -714,6 +732,10 @@ fun FmRoot(
             onBody = onNetmailBody,
             onSend = onSendNetmail,
             onContacts = onOpenContacts,
+            onAttachFiles = onAttachFiles,
+            onRemoveAttachment = onRemoveNetmailAttachment,
+            onTagline = onNetmailTagline,
+            onClearReply = onClearNetmailReply,
         )
         AppScreen.Outbox -> OutboxScreen(
             entries = state.outbox,
@@ -776,6 +798,10 @@ fun FmRoot(
             onOpenOutbox = onOpenOutbox,
             onOpenPolicyViewer = onOpenPolicyViewer,
             onOpenDisplayName = onOpenDisplayName,
+            tagline = state.tagline,
+            showTearline = state.showTearline,
+            onTagline = onTagline,
+            onShowTearline = onShowTearline,
             voucherEnabled = state.voucherEnabled,
             voucherType = state.voucherType,
             voucherTtl = state.voucherTtl,
@@ -1541,6 +1567,8 @@ fun EchoConversationScreen(
     onModerate: (MessageUi) -> Unit,
     onAppeal: (MessageUi) -> Unit = {},
     onForward: (MessageUi) -> Unit,
+    onReply: (MessageUi) -> Unit = {},
+    showTearline: Boolean = false,
     messageView: EchoMessageView = EchoMessageView.All,
     onChangeMessageView: (EchoMessageView) -> Unit = {},
     onOpenMessage: (MessageUi) -> Unit = {},
@@ -1685,6 +1713,8 @@ fun EchoConversationScreen(
                 onReact = onReact,
                 onModerate = onModerate,
                 onForward = onForward,
+                onReply = onReply,
+                showTearline = showTearline,
                 onOpenMessage = onOpenMessage,
                 versionsMessage = { versionsMessage = it },
                 onVote = onVote,
@@ -1709,6 +1739,8 @@ private fun ConversationList(
     onReact: (MessageUi, String) -> Unit,
     onModerate: (MessageUi) -> Unit,
     onForward: (MessageUi) -> Unit,
+    onReply: (MessageUi) -> Unit = {},
+    showTearline: Boolean = false,
     onOpenMessage: (MessageUi) -> Unit,
     versionsMessage: (MessageUi) -> Unit,
     onVote: (VoteCardUi, String) -> Unit = { _, _ -> },
@@ -1736,6 +1768,8 @@ private fun ConversationList(
                 onReact = onReact,
                 onModerate = onModerate,
                 onForward = onForward,
+                onReply = onReply,
+                showTearline = showTearline,
                 onVersions = { versionsMessage(message) },
                 onOpen = { onOpenMessage(message) },
                 onVote = onVote,
@@ -1856,6 +1890,8 @@ private fun MessageCard(
     onReact: (MessageUi, String) -> Unit,
     onModerate: (MessageUi) -> Unit,
     onForward: (MessageUi) -> Unit,
+    onReply: (MessageUi) -> Unit = {},
+    showTearline: Boolean = false,
     onVersions: (MessageUi) -> Unit,
     onOpen: (MessageUi) -> Unit = {},
     onVote: (VoteCardUi, String) -> Unit = { _, _ -> },
@@ -1876,6 +1912,12 @@ private fun MessageCard(
                     TextButton(onClick = { onVersions(message) }) {
                         Text("${message.versions.size}✎")
                     }
+                }
+                IconButton(onClick = { onReply(message) }) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.Reply,
+                        contentDescription = stringResource(R.string.fm_messageactions_reply),
+                    )
                 }
                 IconButton(onClick = { onForward(message) }) {
                     Icon(Icons.Default.Forward, contentDescription = stringResource(R.string.forward))
@@ -1914,7 +1956,27 @@ private fun MessageCard(
                 }
                 if (message.body.isNotBlank()) {
                     Spacer(Modifier.height(4.dp))
-                    Text(MarkdownRenderer.render(message.body), style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        MarkdownRenderer.render(message.body) { ref ->
+                            attachmentRefName(ref, message.messageId, message.attachments)
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+                if (message.tagline.isNotBlank()) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = message.tagline,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (showTearline && message.tearline.isNotBlank()) {
+                    Text(
+                        text = "--- ${message.tearline}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
                 if (message.attachments.isNotEmpty()) {
                     Spacer(Modifier.height(6.dp))
@@ -1960,6 +2022,8 @@ fun EchoComposeScreen(
     onSend: () -> Unit,
     onAttachFiles: () -> Unit,
     onRemoveAttachment: (Int) -> Unit,
+    onTagline: (String) -> Unit = {},
+    onClearReply: () -> Unit = {},
 ) {
     var showEmoji by remember { mutableStateOf(false) }
     if (showEmoji) {
@@ -1999,6 +2063,7 @@ fun EchoComposeScreen(
                 .padding(padding)
                 .padding(12.dp),
         ) {
+            ReplyBanner(label = state.replyToLabel, onClear = onClearReply)
             OutlinedTextField(
                 value = state.subject,
                 onValueChange = onSubject,
@@ -2019,11 +2084,20 @@ fun EchoComposeScreen(
                 }
             }
             Spacer(Modifier.height(8.dp))
-            OutlinedTextField(
-                value = state.body,
-                onValueChange = onBody,
-                label = { Text(stringResource(R.string.body)) },
+            ComposerBodyEditor(
+                body = state.body,
+                onBody = onBody,
+                attachments = state.attachments,
                 modifier = Modifier.fillMaxWidth().weight(1f),
+            )
+            Spacer(Modifier.height(8.dp))
+            OutlinedTextField(
+                value = state.tagline,
+                onValueChange = onTagline,
+                label = { Text(stringResource(R.string.fm_editor_tagline)) },
+                placeholder = { Text(stringResource(R.string.fm_editor_taglineplaceholder)) },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
             )
             if (state.attachments.isNotEmpty()) {
                 Spacer(Modifier.height(8.dp))
@@ -2124,6 +2198,8 @@ fun MessageDetailScreen(
     canReact: Boolean = true,
     canAppeal: Boolean = false,
     onAppeal: (MessageUi) -> Unit = {},
+    onReply: (MessageUi) -> Unit = {},
+    showTearline: Boolean = false,
 ) {
     Scaffold(
         topBar = {
@@ -2136,6 +2212,12 @@ fun MessageDetailScreen(
                 },
                 actions = {
                     if (message != null) {
+                        IconButton(onClick = { onReply(message) }) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.Reply,
+                                contentDescription = stringResource(R.string.fm_messageactions_reply),
+                            )
+                        }
                         IconButton(onClick = { onForward(message) }) {
                             Icon(Icons.Default.Forward, contentDescription = stringResource(R.string.forward))
                         }
@@ -2182,7 +2264,27 @@ fun MessageDetailScreen(
             )
             if (message.body.isNotBlank()) {
                 Spacer(Modifier.height(12.dp))
-                Text(MarkdownRenderer.render(message.body), style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    MarkdownRenderer.render(message.body) { ref ->
+                        attachmentRefName(ref, message.messageId, message.attachments)
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+            if (message.tagline.isNotBlank()) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = message.tagline,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (showTearline && message.tearline.isNotBlank()) {
+                Text(
+                    text = "--- ${message.tearline}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
             if (message.attachments.isNotEmpty()) {
                 Spacer(Modifier.height(12.dp))

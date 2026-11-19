@@ -1074,4 +1074,325 @@ class NetworkSessionTest {
         assertEquals(before, session.profile)
     }
 
+    @Test
+    fun `postEcho carries reply tagline tearline and attachments`() = runBlocking {
+        val attachments = buildJsonArray {
+            add(buildJsonObject {
+                put("name", "a.txt")
+                put("type", "text/plain")
+                put("size", 1)
+                put("data", "data:text/plain;base64,YQ==")
+            })
+        }
+        session.postEcho(
+            "General",
+            "Re: Hello",
+            "Body",
+            replyToMessageId = "m1",
+            attachments = attachments,
+            tagline = "Pavel",
+            tearline = "fm-android v0.3.0 :0:1",
+        )
+        val message = sentMessages.last()
+        val payload = Json.parseToJsonElement(
+            CryptoService.jwsPayload(message["jws"]!!.jsonPrimitive.content)!!,
+        ).jsonObject
+        assertEquals("m1", payload["reply_to_message_id"]!!.jsonPrimitive.content)
+        assertEquals("Pavel", payload["tagline"]!!.jsonPrimitive.content)
+        assertEquals("fm-android v0.3.0 :0:1", payload["tearline"]!!.jsonPrimitive.content)
+        assertEquals("a.txt", payload["attachments"]!!.jsonArray[0].jsonObject["name"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun `sendNetmail carries reply tagline tearline and attachments`() = runBlocking {
+        db.pubkeyDao().upsert(
+            PubkeyEntity(
+                address = ":0:2",
+                signPublicKeyB64 = Encoding.base64Encode(otherPublicKey),
+                thumbprint = CryptoService.thumbprint(otherPublicKey),
+                updatedAt = 0,
+            ),
+        )
+        val attachments = buildJsonArray {
+            add(buildJsonObject {
+                put("name", "a.txt")
+                put("type", "text/plain")
+                put("size", 1)
+                put("data", "data:text/plain;base64,YQ==")
+            })
+        }
+        session.sendNetmail(
+            ":0:2",
+            "Re: Hello",
+            "Body",
+            attachments = attachments,
+            replyToMessageId = "m1",
+            tagline = "Pavel",
+            tearline = "fm-android v0.3.0 :0:1",
+        )
+        val message = sentMessages.last()
+        val payload = Json.parseToJsonElement(
+            String(CryptoService.decryptJwe(message["jwe"]!!.jsonPrimitive.content, otherX25519)),
+        ).jsonObject
+        assertEquals("m1", payload["reply_to_message_id"]!!.jsonPrimitive.content)
+        assertEquals("Pavel", payload["tagline"]!!.jsonPrimitive.content)
+        assertEquals("fm-android v0.3.0 :0:1", payload["tearline"]!!.jsonPrimitive.content)
+        assertEquals("a.txt", payload["attachments"]!!.jsonArray[0].jsonObject["name"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun `delivered packet ids are acknowledged only once`() = runBlocking {
+        sendReceiveResponse = buildJsonObject {
+            put("messages", buildJsonArray {})
+            put("local_packet_ids", buildJsonArray { add(JsonPrimitive(47)); add(JsonPrimitive(45)) })
+        }
+        session.sync()
+
+        sendReceiveResponse = emptySendReceive()
+        session.sync()
+        val second = (lastSendReceiveControl!!["data"] as JsonObject)["delivered_local_ids"]!!
+            .jsonArray.map { it.jsonPrimitive.int }
+        assertEquals(listOf(47, 45), second)
+
+        session.sync()
+        val third = (lastSendReceiveControl!!["data"] as JsonObject)["delivered_local_ids"]
+        assertNull("already acknowledged ids must not be sent again", third)
+    }
+
+    @Test
+    fun `undecryptable own container entry is acknowledged`() = runBlocking {
+        db.metaDao().put(lan.fmnode.android.storage.MetaEntity("client_id", "client-1"))
+        sendReceiveResponse = buildJsonObject {
+            put("messages", buildJsonArray {})
+            put("local_packet_ids", buildJsonArray {})
+            put("client_synchronize", true)
+            put("client_container_entries", buildJsonArray {
+                add(buildJsonObject {
+                    put("name", "outbound_client_client-1")
+                    put("entries", buildJsonArray {
+                        add(buildJsonObject {
+                            put("id", 77)
+                            put("payload", "not-a-jwe")
+                        })
+                    })
+                })
+            })
+        }
+        session.sync()
+
+        val delete = clientSyncRequests.last { control ->
+            ((control["data"] as? JsonObject)?.get("action") as? JsonPrimitive)?.content == "delete"
+        }
+        val data = delete["data"]!!.jsonObject
+        assertEquals("outbound_client_client-1", data["name"]!!.jsonPrimitive.content)
+        assertEquals(77, data["ids"]!!.jsonArray[0].jsonPrimitive.int)
+    }
+
+    @Test
+    fun `double encrypted client sync payload from the web is decrypted`() = runBlocking {
+        db.metaDao().put(lan.fmnode.android.storage.MetaEntity("client_id", "client-1"))
+        val netmail = incomingNetmail("web-1", data("subject" to "From web", "body" to "Hi"))
+        val clientLayer = clientEncrypt(buildJsonObject {
+            put("op", "message")
+            put("message", netmail)
+        })
+        // The node wraps the client layer once more with the user's key.
+        val nodeLayer = CryptoService.encryptJwe(
+            clientLayer.toByteArray(),
+            CryptoService.x25519PublicKeyFromEd25519(userPublicKey),
+        )
+        val ownEntry = buildJsonObject {
+            put("id", 51)
+            put("payload", nodeLayer)
+        }
+        sendReceiveResponse = buildJsonObject {
+            put("messages", buildJsonArray {})
+            put("local_packet_ids", buildJsonArray {})
+            put("client_synchronize", true)
+            put("client_container_entries", buildJsonArray {
+                add(buildJsonObject {
+                    put("name", "outbound_client_client-1")
+                    put("entries", buildJsonArray { add(ownEntry) })
+                })
+            })
+        }
+        session.sync()
+
+        assertEquals(
+            "From web",
+            Json.parseToJsonElement(db.messageDao().getById("web-1")!!.dataJson)
+                .jsonObject["subject"]!!.jsonPrimitive.content,
+        )
+    }
+
+    @Test
+    fun `sent op from another client is stored in the sent folder`() = runBlocking {
+        db.metaDao().put(lan.fmnode.android.storage.MetaEntity("client_id", "client-1"))
+        val payload = data("subject" to "From phone", "body" to "Hi")
+        val sentMessage = buildJsonObject {
+            put("type", "netmail")
+            put("message_id", "s1")
+            put("sender_address", ":0:1")
+            put("recipient_address", ":0:2")
+            put("timestamp", 1000)
+            put("data", payload)
+            put("jws", CryptoService.createJws(userSeed, payload, userPublicKey))
+        }
+        val ownEntry = buildJsonObject {
+            put("id", 43)
+            put("payload", clientEncrypt(buildJsonObject {
+                put("op", "sent")
+                put("message", sentMessage)
+            }))
+        }
+        sendReceiveResponse = buildJsonObject {
+            put("messages", buildJsonArray {})
+            put("local_packet_ids", buildJsonArray {})
+            put("client_synchronize", true)
+            put("client_container_entries", buildJsonArray {
+                add(buildJsonObject {
+                    put("name", "outbound_client_client-1")
+                    put("entries", buildJsonArray { add(ownEntry) })
+                })
+            })
+        }
+        session.sync()
+
+        val stored = db.messageDao().getById("s1")!!
+        assertEquals(":0:1", stored.senderAddress)
+        assertEquals(":0:2", stored.recipientAddress)
+        assertTrue(Json.parseToJsonElement(stored.dataJson).jsonObject["subject"]!!.jsonPrimitive.content == "From phone")
+    }
+
+    @Test
+    fun `a newly registered client receives netmail history`() = runBlocking {
+        db.metaDao().put(lan.fmnode.android.storage.MetaEntity("client_id", "client-1"))
+        db.messageDao().upsert(
+            MessageEntity(
+                messageId = "old-sent",
+                echoName = NetworkSession.NETMAIL_ECHO,
+                type = "netmail",
+                senderAddress = ":0:1",
+                recipientAddress = ":0:2",
+                timestamp = 100,
+                dataJson = data("subject" to "Old letter", "body" to "Hi"),
+                jws = "jws-old",
+                jwe = null,
+                receivedAt = 0,
+            ),
+        )
+        sendReceiveResponse = buildJsonObject {
+            put("messages", buildJsonArray {})
+            put("local_packet_ids", buildJsonArray {})
+            put("client_synchronize", true)
+            put("client_container_entries", buildJsonArray {
+                add(buildJsonObject {
+                    put("name", "client_synchronize")
+                    put("entries", buildJsonArray {
+                        add(buildJsonObject {
+                            put("id", 1)
+                            put("payload", clientEncrypt(buildJsonObject {
+                                put("op", "add")
+                                put("client", "other-1")
+                            }))
+                        })
+                    })
+                })
+                add(buildJsonObject {
+                    put("name", "outbound_client_client-1")
+                    put("entries", buildJsonArray {})
+                })
+            })
+        }
+        session.sync()
+
+        val append = clientSyncRequests.lastOrNull { control ->
+            val data = control["data"] as? JsonObject
+            data != null &&
+                data["action"]?.jsonPrimitive?.content == "append" &&
+                data["name"]?.jsonPrimitive?.content == "outbound_client_other-1"
+        } ?: error("no history append for outbound_client_other-1")
+        val payload = ((append["data"] as JsonObject)["payload"]!!).jsonPrimitive.content
+        val op = Json.parseToJsonElement(
+            String(CryptoService.decryptJwe(payload, CryptoService.x25519PrivateKeyFromSeed(userSeed))),
+        ).jsonObject
+        assertEquals("sent", op["op"]!!.jsonPrimitive.content)
+        assertEquals(
+            "Old letter",
+            op["message"]!!.jsonObject["data"]!!.jsonPrimitive.content
+                .let { Json.parseToJsonElement(it).jsonObject["subject"]!!.jsonPrimitive.content },
+        )
+
+        // The history is shared once; the next poll must not re-upload it.
+        clientSyncRequests.clear()
+        session.sync()
+        assertTrue(
+            "history must not be repeated on every poll",
+            clientSyncRequests.none { control ->
+                val data = control["data"] as? JsonObject
+                data?.get("action")?.jsonPrimitive?.content == "append" &&
+                    data["name"]?.jsonPrimitive?.content == "outbound_client_other-1"
+            },
+        )
+    }
+
+    @Test
+    fun `sending netmail stores a sent copy and shares it`() = runBlocking {
+        db.metaDao().put(lan.fmnode.android.storage.MetaEntity("client_id", "client-1"))
+        db.pubkeyDao().upsert(
+            PubkeyEntity(
+                address = ":0:2",
+                signPublicKeyB64 = Encoding.base64Encode(otherPublicKey),
+                thumbprint = CryptoService.thumbprint(otherPublicKey),
+                updatedAt = 0,
+            ),
+        )
+        // First sync learns the other client and enables the feature.
+        sendReceiveResponse = buildJsonObject {
+            put("messages", buildJsonArray {})
+            put("local_packet_ids", buildJsonArray {})
+            put("client_synchronize", true)
+            put("client_container_entries", buildJsonArray {
+                add(buildJsonObject {
+                    put("name", "client_synchronize")
+                    put("entries", buildJsonArray {
+                        add(buildJsonObject {
+                            put("id", 1)
+                            put("payload", clientEncrypt(buildJsonObject {
+                                put("op", "add")
+                                put("client", "other-1")
+                            }))
+                        })
+                    })
+                })
+                add(buildJsonObject {
+                    put("name", "outbound_client_client-1")
+                    put("entries", buildJsonArray {})
+                })
+            })
+        }
+        session.sync()
+        clientSyncRequests.clear()
+
+        session.sendNetmail(":0:2", "Hello", "Body")
+
+        val stored = db.messageDao().getEcho(NetworkSession.NETMAIL_ECHO)
+            .single { it.messageId.startsWith("sent_") }
+        assertEquals(":0:2", stored.recipientAddress)
+        assertTrue(Json.parseToJsonElement(stored.dataJson).jsonObject["subject"]!!.jsonPrimitive.content == "Hello")
+
+        val append = clientSyncRequests.lastOrNull { control ->
+            val data = control["data"] as? JsonObject
+            data != null &&
+                data["action"]?.jsonPrimitive?.content == "append" &&
+                data["name"]?.jsonPrimitive?.content == "outbound_client_other-1"
+        } ?: error("no history append for outbound_client_other-1")
+        val payload = ((append["data"] as JsonObject)["payload"]!!).jsonPrimitive.content
+        val op = Json.parseToJsonElement(
+            String(CryptoService.decryptJwe(payload, CryptoService.x25519PrivateKeyFromSeed(userSeed))),
+        ).jsonObject
+        assertEquals("sent", op["op"]!!.jsonPrimitive.content)
+        assertEquals(":0:2", op["message"]!!.jsonObject["recipient_address"]!!.jsonPrimitive.content)
+    }
+
 }

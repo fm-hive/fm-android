@@ -303,11 +303,14 @@ class NetworkSession(
         flushOutbox()
 
         val ownContainer = CLIENT_CONTAINER_PREFIX + clientId()
+        // These ids are ACKed by this request. They must be forgotten only after
+        // the node accepted the request; otherwise the same ids are sent on
+        // every poll and the node logs the same "send_receive ACK" forever.
+        val pendingAcks = pendingDeliveredIds()
         val request = buildJsonObject {
             put("messages", buildJsonArray {})
-            val pending = pendingDeliveredIds()
-            if (pending.isNotEmpty()) {
-                put("delivered_local_ids", buildJsonArray { pending.forEach { add(JsonPrimitive(it)) } })
+            if (pendingAcks.isNotEmpty()) {
+                put("delivered_local_ids", buildJsonArray { pendingAcks.forEach { add(JsonPrimitive(it)) } })
             }
             put(
                 "client_sync_read",
@@ -318,6 +321,7 @@ class NetworkSession(
             )
         }
         val response = api.post("send_receive", request.toString(), auth)
+        clearDeliveredIds(pendingAcks)
         val obj = response as? JsonObject ?: return SyncOutcome(0, 0, emptyList())
 
         var received = 0
@@ -413,6 +417,8 @@ class NetworkSession(
         replyToMessageId: String? = null,
         attachments: JsonArray? = null,
         announcement: Boolean = false,
+        tagline: String = "",
+        tearline: String? = null,
     ): SendResult {
         val messageType = if (announcement) "announcement" else "echomail"
         val data = buildJsonObject {
@@ -422,6 +428,10 @@ class NetworkSession(
             put("sender_name", senderName())
             if (replyToMessageId != null) put("reply_to_message_id", replyToMessageId)
             if (attachments != null && attachments.isNotEmpty()) put("attachments", attachments)
+            // Always sent: an empty value removes the default tagline for this
+            // one message, matching fm-app (#309).
+            put("tagline", tagline)
+            if (tearline != null) put("tearline", tearline)
         }.toString()
         return try {
             sendMessages(listOf(signMessage(messageType, data, echoName = echoName)))
@@ -440,12 +450,20 @@ class NetworkSession(
         recipient: String,
         subject: String,
         body: String,
+        attachments: JsonArray? = null,
+        replyToMessageId: String? = null,
+        tagline: String = "",
+        tearline: String? = null,
     ): SendResult {
         val data = buildJsonObject {
             put("subject", subject)
             put("body", body)
             put("timestamp", nowSeconds())
             put("sender_name", senderName())
+            if (replyToMessageId != null) put("reply_to_message_id", replyToMessageId)
+            if (attachments != null && attachments.isNotEmpty()) put("attachments", attachments)
+            put("tagline", tagline)
+            if (tearline != null) put("tearline", tearline)
         }.toString()
 
         val message = buildNetmailMessage(recipient, data)
@@ -460,6 +478,7 @@ class NetworkSession(
         }
         return try {
             sendMessages(listOf(message))
+            recordSentNetmail(recipient, data, message.string("jws"))
             SendResult(queued = false)
         } catch (e: Exception) {
             queueOutbox("netmail", null, recipient, data, e)
@@ -919,12 +938,33 @@ class NetworkSession(
     /** Whether a `pubkey_request` from another user is answered automatically. */
     suspend fun autoSendPubkey(): Boolean = settingsFlag(META_AUTO_SEND_PUBKEY, default = false)
 
+    /** Default user tagline appended to outgoing echomail and netmail (#309). */
+    suspend fun tagline(): String = database.metaDao().get(META_TAGLINE).orEmpty()
+
+    suspend fun setTagline(value: String) {
+        database.metaDao().put(MetaEntity(META_TAGLINE, value.trim()))
+    }
+
+    /** Whether the client tearline is appended and shown (#311). */
+    suspend fun showTearline(): Boolean = settingsFlag(META_SHOW_TEARLINE, default = false)
+
+    suspend fun setShowTearline(value: Boolean) {
+        database.metaDao().put(MetaEntity(META_SHOW_TEARLINE, if (value) "1" else "0"))
+    }
+
+    /** The client line written under the tagline, matching fm-app's format. */
+    fun clientTearline(): String {
+        val version = lan.fmnode.android.BuildConfig.VERSION_NAME
+        return "fm-android v$version ${profile.address}"
+    }
+
     // -------------------------------------------------------- client sync
 
     private suspend fun clientId(): String {
         database.metaDao().get(META_CLIENT_ID)?.let { return it }
         val id = java.util.UUID.randomUUID().toString()
         database.metaDao().put(MetaEntity(META_CLIENT_ID, id))
+        android.util.Log.i("NetworkSession", "client sync: registered local client id $id")
         return id
     }
 
@@ -964,18 +1004,63 @@ class NetworkSession(
 
     /** Shares a local blog operation with the other devices of this identity. */
     suspend fun broadcastBlogOp(op: JsonObject) {
-        if (!clientSyncEnabled || knownClients.isEmpty()) return
-        val me = clientId()
-        for (other in knownClients) {
-            if (other == me) continue
-            appendContainer(CLIENT_CONTAINER_PREFIX + other, op)
+        appendToClients(knownClients, op)
+    }
+
+    /** Removes this client from the list on logout (best effort). */
+    suspend fun unregisterClient() {
+        if (!clientSyncEnabled) return
+        runCatching {
+            appendContainer(
+                CLIENT_LIST_CONTAINER,
+                buildJsonObject {
+                    put("op", "remove")
+                    put("client", clientId())
+                },
+            )
+        }
+    }
+
+    /**
+     * Keeps a local copy of a sent netmail in the Sent folder and shares it
+     * with the other clients of this address. A failed copy must never requeue
+     * the already delivered message.
+     */
+    private suspend fun recordSentNetmail(recipient: String, dataJson: String, jws: String?) {
+        runCatching {
+            val timestamp = runCatching {
+                val data = json.parseToJsonElement(dataJson).jsonObject
+                (data["timestamp"] as? JsonPrimitive)?.longOrNull
+            }.getOrNull() ?: nowSeconds()
+            val sent = MessageEntity(
+                messageId = "sent_${System.currentTimeMillis()}_${java.util.UUID.randomUUID()}",
+                echoName = NETMAIL_ECHO,
+                type = "netmail",
+                senderAddress = profile.address,
+                recipientAddress = recipient,
+                timestamp = timestamp,
+                dataJson = dataJson,
+                jws = jws,
+                jwe = null,
+                receivedAt = System.currentTimeMillis(),
+                versionsJson = null,
+                folderSlug = null,
+            )
+            database.messageDao().upsert(sent)
+            appendToClients(
+                knownClients,
+                buildJsonObject {
+                    put("op", "sent")
+                    put("message", clientMessage(sent, sent = true))
+                },
+            )
         }
     }
 
     /**
      * Applies the client-sync containers returned by send_receive: rebuilds the
-     * client list, consumes this client's own queue and forwards freshly
-     * received messages to the other devices.
+     * client list, consumes this client's own queue, shares history with a new
+     * client and forwards freshly received messages to the other devices.
      */
     private suspend fun processClientContainers(entries: JsonArray?, incoming: List<JsonObject>) {
         val me = clientId()
@@ -1000,52 +1085,13 @@ class NetworkSession(
             val client = op.string("client") ?: continue
             if (op.string("op") == "remove") clients.remove(client) else clients.add(client)
         }
+        android.util.Log.d(
+            "NetworkSession",
+            "client sync: me=$me clients=$clients ownEntries=${ownEntries.size}",
+        )
 
-        knownClients = clients
-        val ackIds = mutableListOf<JsonElement>()
-        for (entry in ownEntries) {
-            val op = entry.string("payload")?.let { decryptClientPayload(it) } ?: continue
-            when (op.string("op")) {
-                "message" -> (op["message"] as? JsonObject)?.let { message ->
-                    when (processIncoming(message)) {
-                        is Incoming.Stored, is Incoming.Error -> {}
-                        else -> {}
-                    }
-                }
-                "blog" -> (op["blog"] as? JsonObject)?.let { blog ->
-                    val id = blog.string("id") ?: return@let
-                    database.blogDao().upsert(
-                        BlogEntity(
-                            id = id,
-                            name = blog.string("name").orEmpty(),
-                            description = blog.string("description").orEmpty(),
-                            createdAt = blog.long("createdAt") ?: System.currentTimeMillis(),
-                            updatedAt = System.currentTimeMillis(),
-                        ),
-                    )
-                }
-                "blogPost" -> (op["post"] as? JsonObject)?.let { post ->
-                    val id = post.string("id") ?: return@let
-                    val blogId = post.string("blogId") ?: return@let
-                    database.blogPostDao().upsert(
-                        BlogPostEntity(
-                            id = id,
-                            blogId = blogId,
-                            title = post.string("title").orEmpty(),
-                            body = post.string("body").orEmpty(),
-                            attachmentsJson = post["attachments"]?.toString() ?: "[]",
-                            timestamp = post.long("timestamp") ?: System.currentTimeMillis(),
-                            updatedAt = System.currentTimeMillis(),
-                        ),
-                    )
-                }
-                "blogDelete" -> op.string("id")?.let { database.blogPostDao().deleteByBlog(it); database.blogDao().delete(it) }
-                "blogPostDelete" -> op.string("id")?.let { database.blogPostDao().delete(it) }
-            }
-            (entry["id"] as? JsonPrimitive)?.let(ackIds::add)
-        }
-        if (ackIds.isNotEmpty()) deleteContainerEntries(ownContainer, ackIds)
-
+        // Register before sharing history so the other side can address us.
+        var justRegistered = false
         if (me !in clients && !registeredThisSession) {
             appendContainer(
                 CLIENT_LIST_CONTAINER,
@@ -1055,23 +1101,184 @@ class NetworkSession(
                 },
             )
             registeredThisSession = true
+            justRegistered = true
             clients.add(me)
         }
 
-        if (incoming.isNotEmpty()) {
-            for (other in clients) {
-                if (other == me) continue
-                for (message in incoming) {
-                    appendContainer(
-                        CLIENT_CONTAINER_PREFIX + other,
-                        buildJsonObject {
-                            put("op", "message")
-                            put("message", message)
-                        },
-                    )
+        // A new client missed all previous netmail and blogs. Share local
+        // history with it (and with everybody after our own registration).
+        // `justRegistered` is local: history must be uploaded once, not on
+        // every poll for the rest of the session.
+        val knownBefore = loadKnownClients()
+        val fresh = clients.filter { it != me && it !in knownBefore }.toSet()
+        if (justRegistered || fresh.isNotEmpty()) {
+            val targets = if (justRegistered) clients - me else fresh
+            uploadLocalHistory(targets)
+        }
+        knownClients = clients - me
+        persistKnownClients(knownClients)
+
+        val ackIds = mutableListOf<JsonElement>()
+        for (entry in ownEntries) {
+            val op = entry.string("payload")?.let { decryptClientPayload(it) }
+            if (op == null) {
+                // An entry written by another key or an old client must not
+                // block this queue forever: ACK it even though it is skipped.
+                android.util.Log.w("NetworkSession", "client sync: undecryptable entry ${entry["id"]}")
+            } else {
+                when (op.string("op")) {
+                    "message", "sent" -> (op["message"] as? JsonObject)?.let { message ->
+                        when (processIncoming(message)) {
+                            is Incoming.Stored, is Incoming.Error -> {}
+                            else -> {}
+                        }
+                    }
+                    "blog" -> (op["blog"] as? JsonObject)?.let { blog ->
+                        val id = blog.string("id") ?: return@let
+                        database.blogDao().upsert(
+                            BlogEntity(
+                                id = id,
+                                name = blog.string("name").orEmpty(),
+                                description = blog.string("description").orEmpty(),
+                                createdAt = blog.long("createdAt") ?: System.currentTimeMillis(),
+                                updatedAt = System.currentTimeMillis(),
+                            ),
+                        )
+                    }
+                    "blogPost" -> (op["post"] as? JsonObject)?.let { post ->
+                        val id = post.string("id") ?: return@let
+                        val blogId = post.string("blogId") ?: return@let
+                        database.blogPostDao().upsert(
+                            BlogPostEntity(
+                                id = id,
+                                blogId = blogId,
+                                title = post.string("title").orEmpty(),
+                                body = post.string("body").orEmpty(),
+                                attachmentsJson = post["attachments"]?.toString() ?: "[]",
+                                timestamp = post.long("timestamp") ?: System.currentTimeMillis(),
+                                updatedAt = System.currentTimeMillis(),
+                            ),
+                        )
+                    }
+                    "blogDelete" -> op.string("id")?.let { database.blogPostDao().deleteByBlog(it); database.blogDao().delete(it) }
+                    "blogPostDelete" -> op.string("id")?.let { database.blogPostDao().delete(it) }
                 }
             }
+            (entry["id"] as? JsonPrimitive)?.let(ackIds::add)
         }
+        if (ackIds.isNotEmpty()) deleteContainerEntries(ownContainer, ackIds)
+
+        if (incoming.isNotEmpty()) {
+            val others = clients - me
+            for (message in incoming) {
+                appendToClients(
+                    others,
+                    buildJsonObject {
+                        put("op", "message")
+                        put("message", message)
+                    },
+                )
+            }
+        }
+    }
+
+    /** Sends one op to every client in [targets], best effort. */
+    private suspend fun appendToClients(targets: Set<String>, op: JsonObject) {
+        if (!clientSyncEnabled || targets.isEmpty()) return
+        val me = clientId()
+        for (target in targets) {
+            if (target.isBlank() || target == me) continue
+            runCatching { appendContainer(CLIENT_CONTAINER_PREFIX + target, op) }
+        }
+    }
+
+    /**
+     * Shares local netmail and blogs with [targets] (a newly joined client or
+     * every other client right after this client registered). Mirrors fm-app's
+     * `uploadLocalHistory`, so a device that was offline for a while catches up.
+     */
+    private suspend fun uploadLocalHistory(targets: Set<String>) {
+        if (!clientSyncEnabled || targets.isEmpty()) return
+        val netmail = database.messageDao().getRecent(NETMAIL_ECHO, 100).reversed()
+        for (message in netmail) {
+            val sent = message.senderAddress == profile.address && !message.recipientAddress.isNullOrBlank()
+            appendToClients(
+                targets,
+                buildJsonObject {
+                    put("op", if (sent) "sent" else "message")
+                    put("message", clientMessage(message, sent))
+                },
+            )
+        }
+        for (blog in database.blogDao().getAll()) {
+            appendToClients(
+                targets,
+                buildJsonObject {
+                    put("op", "blog")
+                    put(
+                        "blog",
+                        buildJsonObject {
+                            put("id", blog.id)
+                            put("name", blog.name)
+                            put("description", blog.description)
+                            put("createdAt", blog.createdAt)
+                            put("updatedAt", blog.updatedAt)
+                        },
+                    )
+                },
+            )
+        }
+        for (post in database.blogPostDao().getAll().takeLast(100)) {
+            val attachments = runCatching { json.parseToJsonElement(post.attachmentsJson) }
+                .getOrElse { buildJsonArray {} }
+            appendToClients(
+                targets,
+                buildJsonObject {
+                    put("op", "blogPost")
+                    put(
+                        "post",
+                        buildJsonObject {
+                            put("id", post.id)
+                            put("blogId", post.blogId)
+                            put("title", post.title)
+                            put("body", post.body)
+                            put("attachments", attachments)
+                            put("timestamp", post.timestamp)
+                        },
+                    )
+                },
+            )
+        }
+    }
+
+    /** Wire shape of one locally stored message for the client-sync queue. */
+    private fun clientMessage(message: MessageEntity, sent: Boolean): JsonObject = buildJsonObject {
+        put("message_id", message.messageId)
+        put("type", message.type)
+        put("sender_address", message.senderAddress)
+        message.recipientAddress?.let { put("recipient_address", it) }
+        put("timestamp", message.timestamp)
+        put("data", message.dataJson)
+        message.jws?.let { put("jws", it) }
+        if (sent) put("_internal", true)
+    }
+
+    private suspend fun loadKnownClients(): Set<String> {
+        val raw = database.metaDao().get(META_KNOWN_CLIENTS) ?: return emptySet()
+        return runCatching {
+            (json.parseToJsonElement(raw) as JsonArray)
+                .mapNotNull { (it as? JsonPrimitive)?.content?.takeIf(String::isNotBlank) }
+                .toSet()
+        }.getOrDefault(emptySet())
+    }
+
+    private suspend fun persistKnownClients(clients: Set<String>) {
+        database.metaDao().put(
+            MetaEntity(
+                META_KNOWN_CLIENTS,
+                buildJsonArray { clients.forEach { add(JsonPrimitive(it)) } }.toString(),
+            ),
+        )
     }
 
     // ---------------------------------------------------------------- internals
@@ -1292,6 +1499,11 @@ class NetworkSession(
             } ?: continue // still no recipient key: keep it queued
             try {
                 sendMessages(listOf(message))
+                if (entry.type == "netmail") {
+                    entry.recipientAddress?.let { recipient ->
+                        recordSentNetmail(recipient, entry.dataJson, message.string("jws"))
+                    }
+                }
                 database.outboxDao().delete(entry.id)
             } catch (e: Exception) {
                 database.outboxDao().updateAttempt(entry.id, entry.attempts + 1, e.message)
@@ -1350,6 +1562,23 @@ class NetworkSession(
         return fresh.size
     }
 
+    /** Removes ids the node has already accepted in the last request. */
+    private suspend fun clearDeliveredIds(ids: List<Long>) {
+        if (ids.isEmpty()) return
+        val done = ids.toSet()
+        val left = pendingDeliveredIds().filterNot { it in done }
+        if (left.isEmpty()) {
+            database.metaDao().delete(META_DELIVERED_IDS)
+        } else {
+            database.metaDao().put(
+                MetaEntity(
+                    META_DELIVERED_IDS,
+                    buildJsonArray { left.forEach { add(JsonPrimitive(it)) } }.toString(),
+                ),
+            )
+        }
+    }
+
     private suspend fun settingsFlag(key: String, default: Boolean): Boolean {
         val value = database.metaDao().get(key) ?: return default
         return value == "1"
@@ -1374,6 +1603,7 @@ class NetworkSession(
         const val NETMAIL_ECHO = "__netmail__"
         private const val META_DELIVERED_IDS = "pending_delivered_ids"
         private const val META_CLIENT_ID = "client_id"
+        private const val META_KNOWN_CLIENTS = "client_sync_known"
         const val CLIENT_LIST_CONTAINER = "client_synchronize"
         const val CLIENT_CONTAINER_PREFIX = "outbound_client_"
         private const val META_ECHO_GROUPS = "echo_groups"
@@ -1383,6 +1613,8 @@ class NetworkSession(
         const val VOUCHER_INVITE_TIME = "invite_time"
         private const val META_PENDING_PUBKEY_REQUESTS = "pending_pubkey_requests"
         private const val META_AUTO_SEND_PUBKEY = "auto_send_pubkey"
+        private const val META_TAGLINE = "tagline"
+        private const val META_SHOW_TEARLINE = "show_tearline"
         private const val META_AUTO_REQUEST_PUBKEYS = "auto_request_pubkeys"
     }
 }
