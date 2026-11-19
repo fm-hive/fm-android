@@ -1,5 +1,14 @@
 package lan.fmnode.android.ui
 
+import android.Manifest
+import android.content.ContentValues
+import android.content.Context
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
@@ -56,7 +65,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
@@ -429,17 +440,83 @@ fun AttachmentViewer(attachment: AttachmentUi, modifier: Modifier = Modifier) {
 /** Full-screen preview used by every attachment thumbnail (#9). */
 @Composable
 fun AttachmentViewerDialog(attachment: AttachmentUi, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val bitmap = remember(attachment.dataUrl) { decodeDataUrl(attachment.dataUrl) }
+    val permission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        if (granted) {
+            saveImage(context, bitmap?.asAndroidBitmap(), attachment.name)
+        } else {
+            Toast.makeText(context, R.string.gallery_permission_denied, Toast.LENGTH_SHORT).show()
+        }
+    }
     Dialog(onDismissRequest = onDismiss) {
         Surface(shape = RoundedCornerShape(12.dp), tonalElevation = 6.dp) {
             Column(Modifier.padding(12.dp)) {
                 AttachmentViewer(attachment)
                 Spacer(Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+                    if (bitmap != null) {
+                        TextButton(
+                            onClick = {
+                                if (Build.VERSION.SDK_INT >= 29 ||
+                                    context.checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) ==
+                                    android.content.pm.PackageManager.PERMISSION_GRANTED
+                                ) {
+                                    saveImage(context, bitmap.asAndroidBitmap(), attachment.name)
+                                } else {
+                                    permission.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                                }
+                            },
+                        ) {
+                            Text(stringResource(R.string.save_to_gallery))
+                        }
+                    }
                     TextButton(onClick = onDismiss) { Text(stringResource(R.string.close)) }
                 }
             }
         }
     }
+}
+
+private fun saveImage(context: Context, bitmap: android.graphics.Bitmap?, name: String) {
+    if (bitmap == null) {
+        Toast.makeText(context, R.string.save_to_gallery_failed, Toast.LENGTH_SHORT).show()
+        return
+    }
+    val resolver = context.contentResolver
+    val fileName = name.ifBlank { "fm-image" }
+    val ok = runCatching {
+        if (Build.VERSION.SDK_INT >= 29) {
+            val values = ContentValues().apply {
+                put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
+                put(MediaStore.Images.Media.MIME_TYPE, "image/png")
+                put(
+                    MediaStore.Images.Media.RELATIVE_PATH,
+                    "${Environment.DIRECTORY_PICTURES}/FM",
+                )
+                put(MediaStore.Images.Media.IS_PENDING, 1)
+            }
+            val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+                ?: error("insert failed")
+            resolver.openOutputStream(uri)?.use { out ->
+                bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out)
+            }
+            values.clear()
+            values.put(MediaStore.Images.Media.IS_PENDING, 0)
+            resolver.update(uri, values, null, null)
+        } else {
+            @Suppress("DEPRECATION")
+            MediaStore.Images.Media.insertImage(resolver, bitmap, fileName, "FM")
+        }
+        true
+    }.getOrDefault(false)
+    Toast.makeText(
+        context,
+        if (ok) R.string.saved_to_gallery else R.string.save_to_gallery_failed,
+        Toast.LENGTH_SHORT,
+    ).show()
 }
 
 internal fun formatFileSize(bytes: Int): String = when {
@@ -476,7 +553,7 @@ fun ComposerAttachmentsRow(attachments: List<AttachmentUi>) {
     AttachmentsRow(attachments)
 }
 
-private fun decodeDataUrl(url: String): androidx.compose.ui.graphics.ImageBitmap? {
+internal fun decodeDataUrl(url: String): androidx.compose.ui.graphics.ImageBitmap? {
     val marker = ";base64,"
     val index = url.indexOf(marker)
     if (index < 0) return null

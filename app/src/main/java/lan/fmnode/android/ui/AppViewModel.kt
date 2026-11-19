@@ -30,12 +30,14 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import lan.fmnode.android.BuildConfig
 import lan.fmnode.android.network.FmApiException
 import lan.fmnode.android.network.Invite
 import lan.fmnode.android.network.InviteParser
 import lan.fmnode.android.network.NetworkManager
 import lan.fmnode.android.network.NetworkSession
 import lan.fmnode.android.network.PolicyInfo
+import lan.fmnode.android.network.RateLimitUsage
 import lan.fmnode.android.network.RulesId
 import lan.fmnode.android.session.Session
 import lan.fmnode.android.storage.BackupService
@@ -69,6 +71,9 @@ enum class EchoMessageView {
     All,
     Attachments,
 }
+
+/** Where picked files should be added. */
+enum class AttachmentTarget { Echo, Netmail, Blog }
 
 const val NETMAIL_INBOX = "inbox"
 const val NETMAIL_SENT = "sent"
@@ -340,6 +345,8 @@ data class NetmailComposeState(
     val replyQuote: String = "",
     /** Per-message tagline; the default is copied from settings on open. */
     val tagline: String = "",
+    /** Policy/echo/rate-limit problems; blocking issues disable Send. */
+    val limitIssues: List<MessageLimitIssue> = emptyList(),
     val sending: Boolean = false,
     val error: UiError? = null,
     val keyRequested: Boolean = false,
@@ -421,6 +428,8 @@ data class ComposeState(
     val replyQuote: String = "",
     /** Per-message tagline; the default is copied from settings on open. */
     val tagline: String = "",
+    /** Policy/echo/rate-limit problems; blocking issues disable Send. */
+    val limitIssues: List<MessageLimitIssue> = emptyList(),
     val sending: Boolean = false,
     val error: UiError? = null,
 )
@@ -562,6 +571,14 @@ data class UiState(
     /** Default tagline and tearline switch, stored in the profile meta. */
     val tagline: String = "",
     val showTearline: Boolean = false,
+    /** Daily rate-limit usage reported by the node (address-wide). */
+    val rateLimits: Map<String, RateLimitUsage> = emptyMap(),
+    /** fm-app parity: allow sending over the daily rate limit. */
+    val allowSendingWithoutRateLimit: Boolean = false,
+    /** Pending image resize dialog (see prepareAttachments). */
+    val imageResizeDialog: Boolean = false,
+    val imageMaxDimension: Int = 1280,
+    val rememberImageDimension: Boolean = false,
     val unlocked: Boolean = false,
     val echoes: List<EchoUi> = emptyList(),
     /** Echoes of every unlocked network, grouped by network (#15). */
@@ -736,6 +753,8 @@ class AppViewModel(
 
     private var importedSeed: ByteArray? = null
     private var importJsonText: String? = null
+    private var pendingAttachmentFiles: List<Triple<String, String, ByteArray>>? = null
+    private var pendingAttachmentTarget: AttachmentTarget = AttachmentTarget.Echo
 
     /** Parsed full export waiting for the password, if the selected file was one. */
     private var importFull: lan.fmnode.android.storage.ImportedFullBackup? = null
@@ -1002,7 +1021,16 @@ class AppViewModel(
             networkSession = opened
             val tagline = runCatching { opened.tagline() }.getOrDefault("")
             val showTearline = runCatching { opened.showTearline() }.getOrDefault(false)
-            _state.update { it.copy(tagline = tagline, showTearline = showTearline) }
+            val allowRateOverride = runCatching {
+                opened.allowSendingWithoutRateLimit()
+            }.getOrDefault(false)
+            _state.update {
+                it.copy(
+                    tagline = tagline,
+                    showTearline = showTearline,
+                    allowSendingWithoutRateLimit = allowRateOverride,
+                )
+            }
             loadEchoGroups(opened)
             _state.update { it.copy(syncing = true) }
             // Local work first: the echo list is stored on the device, so the
@@ -1020,6 +1048,9 @@ class AppViewModel(
                 it.copy(
                     autoRequestPubkeys = runCatching { opened.autoRequestPubkeys() }.getOrDefault(false),
                     autoSendPubkey = runCatching { opened.autoSendPubkey() }.getOrDefault(false),
+                    allowSendingWithoutRateLimit = runCatching {
+                        opened.allowSendingWithoutRateLimit()
+                    }.getOrDefault(false),
                 )
             }
             syncOnce(opened)
@@ -1349,7 +1380,15 @@ class AppViewModel(
             collectSendErrors(outcome.errors + opened.drainErrors())
             // A merge can renumber users while the app is running (#11).
             refreshIdentity(opened)
-            _state.update { it.copy(syncing = false, syncError = null) }
+            _state.update {
+                it.copy(
+                    syncing = false,
+                    syncError = null,
+                    rateLimits = opened.rateLimitUsage,
+                )
+            }
+            revalidateCompose()
+            revalidateNetmailCompose()
         } catch (e: Exception) {
             if (e is FmApiException && e.next == "policy") {
                 _state.update { it.copy(syncing = false, syncError = null) }
@@ -1633,6 +1672,7 @@ class AppViewModel(
                 compose = ComposeState(tagline = current.tagline),
             )
         }
+        revalidateCompose()
         if (opened != null) {
             viewModelScope.launch {
                 opened.database.draftDao().get(echo.name)?.let { draft ->
@@ -1646,6 +1686,7 @@ class AppViewModel(
                         }
                     }
                 }
+                revalidateCompose()
             }
         }
     }
@@ -1670,6 +1711,7 @@ class AppViewModel(
                 ),
             )
         }
+        revalidateCompose()
     }
 
     /** Removes the quoted reply and its subject prefix. */
@@ -1691,6 +1733,7 @@ class AppViewModel(
                 ),
             )
         }
+        revalidateCompose()
     }
 
     fun backFromCompose() {
@@ -1712,45 +1755,215 @@ class AppViewModel(
         _state.update { it.copy(screen = AppScreen.Echo, compose = ComposeState()) }
     }
 
-    fun setComposeSubject(value: String) =
+    fun setComposeSubject(value: String) {
         _state.update { it.copy(compose = it.compose.copy(subject = value, error = null)) }
+        revalidateCompose()
+    }
 
-    fun setComposeBody(value: String) =
+    fun setComposeBody(value: String) {
         _state.update { it.copy(compose = it.compose.copy(body = value, error = null)) }
+        revalidateCompose()
+    }
 
-    fun setComposeAnnouncement(value: Boolean) =
+    fun setComposeAnnouncement(value: Boolean) {
         _state.update { it.copy(compose = it.compose.copy(announcement = value)) }
+        revalidateCompose()
+    }
 
-    fun setComposeTagline(value: String) =
+    fun setComposeTagline(value: String) {
         _state.update { it.copy(compose = it.compose.copy(tagline = value)) }
+        revalidateCompose()
+    }
+
+    /** Effective client tearline for size estimation and sending. */
+    private fun tearlineFor(state: UiState): String? {
+        if (!state.showTearline) return null
+        return "fm-android v${BuildConfig.VERSION_NAME} ${state.activeProfile?.address.orEmpty()}"
+    }
+
+    private fun revalidateCompose() {
+        val state = _state.value
+        val limits = MessageLimits.fromPolicy(
+            state.activeProfile?.policyJson.orEmpty(),
+            state.selectedEcho?.rulesText,
+        )
+        val kind = echoRateLimitKind(state.compose.announcement)
+        val issues = limits.validate(
+            subject = state.compose.subject,
+            body = state.compose.body,
+            tagline = state.compose.tagline,
+            tearline = tearlineFor(state),
+            attachments = state.compose.attachments,
+            replyToMessageId = state.compose.replyToMessageId,
+            senderName = state.activeProfile?.displayName.orEmpty(),
+            rateLimit = kind?.let { state.rateLimits[it] },
+            rateLimitKind = kind,
+            allowRateLimitOverride = state.allowSendingWithoutRateLimit,
+        )
+        _state.update { it.copy(compose = it.compose.copy(limitIssues = issues)) }
+    }
+
+    /** True when one more message of [kind] would exceed the server usage. */
+    private fun rateLimitOver(kind: String): Boolean {
+        val usage = _state.value.rateLimits[kind] ?: return false
+        return usage.limit > 0 && usage.used + 1 > usage.limit
+    }
+
+    /** Shows the same warning the composer gets and returns true when blocked. */
+    private fun blockRateLimit(kind: String): Boolean {
+        if (!rateLimitOver(kind)) return false
+        if (_state.value.allowSendingWithoutRateLimit) return false
+        _state.update {
+            it.copy(
+                sendErrors = (listOf("Daily rate limit exceeded for $kind") + it.sendErrors)
+                    .take(MAX_SEND_ERRORS),
+            )
+        }
+        return true
+    }
+
+    private fun rateLimitOverride(kind: String): Boolean =
+        _state.value.allowSendingWithoutRateLimit && rateLimitOver(kind)
+
+    private fun revalidateNetmailCompose() {
+        val state = _state.value
+        val limits = MessageLimits.fromPolicy(state.activeProfile?.policyJson.orEmpty())
+        val kind = NETMAIL_RATE_LIMIT_KIND
+        val issues = limits.validate(
+            subject = state.netmailCompose.subject,
+            body = state.netmailCompose.body,
+            tagline = state.netmailCompose.tagline,
+            tearline = tearlineFor(state),
+            attachments = state.netmailCompose.attachments,
+            replyToMessageId = state.netmailCompose.replyToMessageId,
+            senderName = state.activeProfile?.displayName.orEmpty(),
+            rateLimit = state.rateLimits[kind],
+            rateLimitKind = kind,
+            allowRateLimitOverride = state.allowSendingWithoutRateLimit,
+        )
+        _state.update { it.copy(netmailCompose = it.netmailCompose.copy(limitIssues = issues)) }
+    }
+
+    /**
+     * Entry point for the system file picker. Images go through the resize
+     * dialog; other files are added directly to the target composer.
+     */
+    fun prepareAttachments(
+        files: List<Triple<String, String, ByteArray>>,
+        target: AttachmentTarget,
+    ) {
+        if (files.isEmpty()) return
+        if (files.none { it.second.startsWith("image/") }) {
+            addToTarget(files, target)
+            return
+        }
+        pendingAttachmentFiles = files
+        pendingAttachmentTarget = target
+        val opened = networkSession
+        viewModelScope.launch {
+            val max = runCatching { opened?.imageMaxDimension() }.getOrNull() ?: 1280
+            _state.update {
+                it.copy(
+                    imageResizeDialog = true,
+                    imageMaxDimension = max,
+                    rememberImageDimension = false,
+                )
+            }
+        }
+    }
+
+    fun setImageMaxDimension(value: Int) =
+        _state.update { it.copy(imageMaxDimension = value) }
+
+    fun setRememberImageDimension(value: Boolean) =
+        _state.update { it.copy(rememberImageDimension = value) }
+
+    fun cancelImageResize() {
+        pendingAttachmentFiles = null
+        _state.update { it.copy(imageResizeDialog = false) }
+    }
+
+    fun confirmImageResize() {
+        val files = pendingAttachmentFiles ?: return
+        val target = pendingAttachmentTarget
+        val maxDimension = _state.value.imageMaxDimension
+        val remember = _state.value.rememberImageDimension
+        pendingAttachmentFiles = null
+        _state.update { it.copy(imageResizeDialog = false) }
+        val opened = networkSession
+        viewModelScope.launch {
+            if (remember && opened != null) {
+                runCatching { opened.setImageMaxDimension(maxDimension) }
+            }
+            val processed = withContext(Dispatchers.IO) {
+                files.map { (name, type, bytes) ->
+                    if (type.startsWith("image/")) {
+                        val image = ImageProcessor.process(bytes, name, type, maxDimension)
+                        Triple(image.name, image.type, image.bytes)
+                    } else {
+                        Triple(name, type, bytes)
+                    }
+                }
+            }
+            addToTarget(processed, target)
+        }
+    }
+
+    private fun withAttachmentRefs(body: String, refs: List<String>): String {
+        if (refs.isEmpty()) return body
+        val prefix = if (body.isBlank()) "" else body.trimEnd() + "\n\n"
+        return prefix + refs.joinToString("\n")
+    }
+
+    private fun addToTarget(files: List<Triple<String, String, ByteArray>>, target: AttachmentTarget) {
+        when (target) {
+            AttachmentTarget.Echo -> addAttachments(files)
+            AttachmentTarget.Netmail -> addNetmailAttachments(files)
+            AttachmentTarget.Blog -> addBlogAttachments(files)
+        }
+    }
 
     /** Adds files (already read from the system picker) to the composer. */
     fun addAttachments(files: List<Triple<String, String, ByteArray>>) {
-        val existing = _state.value.compose.attachments
+        val state = _state.value
+        val limits = MessageLimits.fromPolicy(
+            state.activeProfile?.policyJson.orEmpty(),
+            state.selectedEcho?.rulesText,
+        )
+        val existing = state.compose.attachments
         val result = existing.toMutableList()
-        var total = existing.sumOf { it.size }
+        val refs = mutableListOf<String>()
         for ((name, type, bytes) in files) {
-            if (bytes.size > MAX_ATTACHMENT_BYTES) {
+            if (limits.maxAttachmentSize > 0 && bytes.size > limits.maxAttachmentSize) {
                 _state.update {
-                    it.copy(compose = it.compose.copy(error = UiError.Failed("Attachment is too large (max 2 MiB)")))
+                    it.copy(compose = it.compose.copy(error = UiError.Failed("Attachment $name is too large (max ${limits.maxAttachmentSize} bytes)")))
                 }
                 return
             }
-            total += bytes.size
-            if (total > MAX_ATTACHMENTS_TOTAL) {
+            if (limits.maxAttachments > 0 && result.size >= limits.maxAttachments) {
                 _state.update {
-                    it.copy(compose = it.compose.copy(error = UiError.Failed("Attachments are too large (max 6 MiB)")))
+                    it.copy(compose = it.compose.copy(error = UiError.Failed("Too many attachments (max ${limits.maxAttachments})")))
                 }
                 return
             }
+            val index = result.size
             result += AttachmentUi(
                 name = name,
                 type = type,
                 size = bytes.size,
                 dataUrl = "data:$type;base64," + android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP),
             )
+            refs += if (type.startsWith("image/")) {
+                "![$name](attachment:$index)"
+            } else {
+                "[$name](attachment:$index)"
+            }
         }
-        _state.update { it.copy(compose = it.compose.copy(attachments = result, error = null)) }
+        val body = withAttachmentRefs(state.compose.body, refs)
+        _state.update {
+            it.copy(compose = it.compose.copy(attachments = result, body = body, error = null))
+        }
+        revalidateCompose()
     }
 
     fun removeAttachment(index: Int) {
@@ -1759,6 +1972,7 @@ class AppViewModel(
             if (index in list.indices) list.removeAt(index)
             it.copy(compose = it.compose.copy(attachments = list))
         }
+        revalidateCompose()
     }
 
     fun sendCompose() {
@@ -1771,6 +1985,12 @@ class AppViewModel(
             _state.update { it.copy(compose = it.compose.copy(error = UiError.Failed("Message is empty"))) }
             return
         }
+        if (current.compose.limitIssues.any { it.blocking }) {
+            _state.update { it.copy(compose = it.compose.copy(error = UiError.Failed("Message exceeds a policy limit"))) }
+            return
+        }
+        val rateLimitOverride = current.allowSendingWithoutRateLimit &&
+            current.compose.limitIssues.any { it is MessageLimitIssue.RateLimitExceeded }
         viewModelScope.launch {
             _state.update { it.copy(compose = it.compose.copy(sending = true, error = null)) }
             try {
@@ -1799,6 +2019,7 @@ class AppViewModel(
                     announcement = current.compose.announcement,
                     tagline = current.compose.tagline,
                     tearline = if (opened.showTearline()) opened.clientTearline() else null,
+                    rateLimitOverride = rateLimitOverride,
                 )
                 // The node can reject the message in the response to this very
                 // send; show why instead of leaving it as a silent no-op (#14).
@@ -2021,6 +2242,7 @@ class AppViewModel(
                 ),
             )
         }
+        revalidateNetmailCompose()
     }
 
     fun forwardMessage(message: MessageUi) {
@@ -2046,6 +2268,7 @@ class AppViewModel(
                 ),
             )
         }
+        revalidateNetmailCompose()
     }
 
     // ------------------------------------------------------------------- search
@@ -2115,8 +2338,12 @@ class AppViewModel(
 
     fun voteElection(protocol: ProtocolUi, candidate: String) {
         val opened = networkSession ?: return
+        if (blockRateLimit("vote")) return
+        val override = rateLimitOverride("vote")
         viewModelScope.launch {
-            runCatching { opened.postElectionVote(protocol.echoName, candidate) }
+            runCatching {
+                opened.postElectionVote(protocol.echoName, candidate, rateLimitOverride = override)
+            }
             syncOnce(opened)
         }
     }
@@ -2161,17 +2388,23 @@ class AppViewModel(
     fun startElection() {
         val echo = _state.value.selectedEcho ?: return
         val opened = networkSession ?: return
+        if (blockRateLimit("poster")) return
+        val override = rateLimitOverride("poster")
         viewModelScope.launch {
-            runCatching { opened.postElectionPoster(echo.name) }
+            runCatching { opened.postElectionPoster(echo.name, rateLimitOverride = override) }
             syncOnce(opened)
         }
     }
 
     fun castVote(protocol: ProtocolUi, variant: String) {
         val opened = networkSession ?: return
+        if (blockRateLimit("vote")) return
+        val override = rateLimitOverride("vote")
         viewModelScope.launch {
             // A vote refers to its poster by text (`poster_message`), not by id.
-            runCatching { opened.postVote(protocol.echoName, protocol.title, variant) }
+            runCatching {
+                opened.postVote(protocol.echoName, protocol.title, variant, rateLimitOverride = override)
+            }
             syncOnce(opened)
         }
     }
@@ -2179,8 +2412,12 @@ class AppViewModel(
     /** Votes (or retracts with an empty variant) on a card in the feed. */
     fun castFeedVote(vote: VoteCardUi, variant: String) {
         val opened = networkSession ?: return
+        if (blockRateLimit("vote")) return
+        val override = rateLimitOverride("vote")
         viewModelScope.launch {
-            runCatching { opened.postVote(vote.echoName, vote.posterMessage, variant) }
+            runCatching {
+                opened.postVote(vote.echoName, vote.posterMessage, variant, rateLimitOverride = override)
+            }
             syncOnce(opened)
         }
     }
@@ -2410,9 +2647,13 @@ class AppViewModel(
     fun toggleReaction(message: MessageUi, emoji: String) {
         val opened = networkSession ?: return
         val echo = _state.value.selectedEcho ?: return
+        if (blockRateLimit("reaction")) return
+        val override = rateLimitOverride("reaction")
         viewModelScope.launch {
             val next = if (message.myReaction == emoji) "" else emoji
-            runCatching { opened.postReaction(message.messageId, next, echo.name) }
+            runCatching {
+                opened.postReaction(message.messageId, next, echo.name, rateLimitOverride = override)
+            }
             syncOnce(opened)
         }
     }
@@ -2517,10 +2758,17 @@ class AppViewModel(
             _state.update { it.copy(voteCompose = draft.copy(error = UiError.Failed("At least two options are required"))) }
             return
         }
+        if (blockRateLimit("poster")) return
+        val rateOverride = rateLimitOverride("poster")
         viewModelScope.launch {
             _state.update { it.copy(voteCompose = draft.copy(sending = true, error = null)) }
             try {
-                opened.postVotePoster(echo.name, question, variants)
+                opened.postVotePoster(
+                    echo.name,
+                    question,
+                    variants,
+                    rateLimitOverride = rateOverride,
+                )
                 _state.update { it.copy(voteCompose = null) }
                 syncOnce(opened)
             } catch (e: Exception) {
@@ -3589,6 +3837,7 @@ class AppViewModel(
                 ),
             )
         }
+        revalidateNetmailCompose()
     }
 
     /** Opens the netmail composer with a quoted message (reply action). */
@@ -3610,6 +3859,7 @@ class AppViewModel(
                 ),
             )
         }
+        revalidateNetmailCompose()
     }
 
     /** Removes the quoted reply and its subject prefix from a netmail. */
@@ -3631,6 +3881,7 @@ class AppViewModel(
                 ),
             )
         }
+        revalidateNetmailCompose()
     }
 
     fun backFromNetmailCompose() {
@@ -3640,42 +3891,59 @@ class AppViewModel(
     fun setNetmailRecipient(value: String) =
         _state.update { it.copy(netmailCompose = it.netmailCompose.copy(recipient = value, error = null)) }
 
-    fun setNetmailSubject(value: String) =
+    fun setNetmailSubject(value: String) {
         _state.update { it.copy(netmailCompose = it.netmailCompose.copy(subject = value, error = null)) }
+        revalidateNetmailCompose()
+    }
 
-    fun setNetmailBody(value: String) =
+    fun setNetmailBody(value: String) {
         _state.update { it.copy(netmailCompose = it.netmailCompose.copy(body = value, error = null)) }
+        revalidateNetmailCompose()
+    }
 
-    fun setNetmailTagline(value: String) =
+    fun setNetmailTagline(value: String) {
         _state.update { it.copy(netmailCompose = it.netmailCompose.copy(tagline = value)) }
+        revalidateNetmailCompose()
+    }
 
     /** Adds files (already read from the system picker) to a netmail. */
     fun addNetmailAttachments(files: List<Triple<String, String, ByteArray>>) {
-        val existing = _state.value.netmailCompose.attachments
+        val state = _state.value
+        val limits = MessageLimits.fromPolicy(state.activeProfile?.policyJson.orEmpty())
+        val existing = state.netmailCompose.attachments
         val result = existing.toMutableList()
-        var total = existing.sumOf { it.size }
+        val refs = mutableListOf<String>()
         for ((name, type, bytes) in files) {
-            if (bytes.size > MAX_ATTACHMENT_BYTES) {
+            if (limits.maxAttachmentSize > 0 && bytes.size > limits.maxAttachmentSize) {
                 _state.update {
-                    it.copy(netmailCompose = it.netmailCompose.copy(error = UiError.Failed("Attachment is too large (max 2 MiB)")))
+                    it.copy(netmailCompose = it.netmailCompose.copy(error = UiError.Failed("Attachment $name is too large (max ${limits.maxAttachmentSize} bytes)")))
                 }
                 return
             }
-            total += bytes.size
-            if (total > MAX_ATTACHMENTS_TOTAL) {
+            if (limits.maxAttachments > 0 && result.size >= limits.maxAttachments) {
                 _state.update {
-                    it.copy(netmailCompose = it.netmailCompose.copy(error = UiError.Failed("Attachments are too large (max 6 MiB)")))
+                    it.copy(netmailCompose = it.netmailCompose.copy(error = UiError.Failed("Too many attachments (max ${limits.maxAttachments})")))
                 }
                 return
             }
+            val index = result.size
             result += AttachmentUi(
                 name = name,
                 type = type,
                 size = bytes.size,
                 dataUrl = "data:$type;base64," + android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP),
             )
+            refs += if (type.startsWith("image/")) {
+                "![$name](attachment:$index)"
+            } else {
+                "[$name](attachment:$index)"
+            }
         }
-        _state.update { it.copy(netmailCompose = it.netmailCompose.copy(attachments = result, error = null)) }
+        val body = withAttachmentRefs(state.netmailCompose.body, refs)
+        _state.update {
+            it.copy(netmailCompose = it.netmailCompose.copy(attachments = result, body = body, error = null))
+        }
+        revalidateNetmailCompose()
     }
 
     fun removeNetmailAttachment(index: Int) {
@@ -3684,6 +3952,7 @@ class AppViewModel(
             if (index in list.indices) list.removeAt(index)
             it.copy(netmailCompose = it.netmailCompose.copy(attachments = list))
         }
+        revalidateNetmailCompose()
     }
 
     fun sendNetmailCompose() {
@@ -3697,6 +3966,12 @@ class AppViewModel(
             _state.update { it.copy(netmailCompose = it.netmailCompose.copy(error = UiError.Failed("Message is empty"))) }
             return
         }
+        if (current.limitIssues.any { it.blocking }) {
+            _state.update { it.copy(netmailCompose = it.netmailCompose.copy(error = UiError.Failed("Message exceeds a policy limit"))) }
+            return
+        }
+        val rateLimitOverride = _state.value.allowSendingWithoutRateLimit &&
+            current.limitIssues.any { it is MessageLimitIssue.RateLimitExceeded }
         viewModelScope.launch {
             _state.update { it.copy(netmailCompose = it.netmailCompose.copy(sending = true, error = null)) }
             try {
@@ -3727,6 +4002,7 @@ class AppViewModel(
                     replyToMessageId = current.replyToMessageId,
                     tagline = current.tagline,
                     tearline = if (opened.showTearline()) opened.clientTearline() else null,
+                    rateLimitOverride = rateLimitOverride,
                 )
                 if (result.needsKey) {
                     _state.update {
@@ -3753,7 +4029,16 @@ class AppViewModel(
         viewModelScope.launch {
             val tagline = runCatching { opened.tagline() }.getOrDefault("")
             val showTearline = runCatching { opened.showTearline() }.getOrDefault(false)
-            _state.update { it.copy(tagline = tagline, showTearline = showTearline) }
+            val allowRateOverride = runCatching {
+                opened.allowSendingWithoutRateLimit()
+            }.getOrDefault(false)
+            _state.update {
+                it.copy(
+                    tagline = tagline,
+                    showTearline = showTearline,
+                    allowSendingWithoutRateLimit = allowRateOverride,
+                )
+            }
         }
     }
 
@@ -3767,6 +4052,14 @@ class AppViewModel(
         _state.update { it.copy(showTearline = value) }
         val opened = networkSession ?: return
         viewModelScope.launch { runCatching { opened.setShowTearline(value) } }
+    }
+
+    fun setAllowSendingWithoutRateLimit(value: Boolean) {
+        _state.update { it.copy(allowSendingWithoutRateLimit = value) }
+        revalidateCompose()
+        revalidateNetmailCompose()
+        val opened = networkSession ?: return
+        viewModelScope.launch { runCatching { opened.setAllowSendingWithoutRateLimit(value) } }
     }
 
     fun requestVoucher(node: NodeUi) {

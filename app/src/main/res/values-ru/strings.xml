@@ -227,4 +227,39 @@
     <string name="appeal_reason">Причина</string>
     <string name="appeal_submit">Подать апелляцию</string>
     <string name="election_start">Начать выборы</string>
+
+    <string name="limit_attachment_too_large">Вложение %1$s занимает %2$s, лимит %3$s</string>
+    <string name="limit_too_many_attachments">Слишком много вложений: %1$d, лимит %2$d</string>
+    <string name="limit_message_too_large">Сообщение занимает %1$s, лимит %2$s</string>
+    <string name="limit_rate_exceeded">Достигнут суточный лимит: %1$d из %2$d</string>
+    <string name="limit_rate_override">Сообщение будет отправлено сверх суточного лимита</string>
+    <string name="limit_blocked_hint">Отправка заблокирована, пока это не исправлено.</string>
+    <string name="limit_kind_echomail">эхопочта</string>
+    <string name="limit_kind_netmail">личные сообщения</string>
+    <string name="limit_kind_vote">голоса</string>
+    <string name="limit_kind_poster">постеры</string>
+    <string name="limit_kind_reaction">реакции</string>
+
+
+    <string name="image_resize_title">Размер изображений</string>
+    <string name="image_resize_hint">Изображения уменьшаются до выбранного максимума по ширине/высоте. Меньшие остаются как есть.</string>
+    <string name="image_resize_remember">Запомнить для следующих изображений</string>
+    <string name="image_resize_apply">Добавить</string>
+    <string name="save_to_gallery">Сохранить в галерею</string>
+    <string name="saved_to_gallery">Сохранено в галерею</string>
+    <string name="save_to_gallery_failed">Не удалось сохранить изображение</string>
+    <string name="gallery_permission_denied">Для сохранения нужен доступ к хранилищу</string>
+
+
+    <string name="share_title">Поделиться сообщением</string>
+    <string name="share_text">Текст</string>
+    <string name="share_image">Картинка</string>
+    <string name="share_image_width">Ширина картинки</string>
+    <string name="share">Поделиться</string>
+    <string name="share_echo_label">Эха</string>
+    <string name="share_from_label">От</string>
+    <string name="share_date_label">Дата</string>
+    <string name="share_netmail_echo">Личные</string>
+    <string name="share_failed">Не удалось поделиться сообщением</string>
+
 </resources>

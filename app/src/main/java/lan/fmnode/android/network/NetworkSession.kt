@@ -48,6 +48,10 @@ class NetworkSession(
     private var clientSyncEnabled = false
     private var knownClients: Set<String> = emptySet()
 
+    /** Daily rate-limit usage of this address, returned by the node. */
+    var rateLimitUsage: Map<String, RateLimitUsage> = emptyMap()
+        private set
+
     /** Rejection reasons collected while sending, drained by the UI (#14). */
     private val pendingErrors = mutableListOf<String>()
     private val auth = ApiKeys(seed, publicKey)
@@ -323,6 +327,7 @@ class NetworkSession(
         val response = api.post("send_receive", request.toString(), auth)
         clearDeliveredIds(pendingAcks)
         val obj = response as? JsonObject ?: return SyncOutcome(0, 0, emptyList())
+        rateLimitUsage = parseRateLimits(obj["rate_limit"])
 
         var received = 0
         val errors = mutableListOf<String>()
@@ -373,7 +378,12 @@ class NetworkSession(
      * Creates a vote poster in [echoName] (vote protocol): the question and the
      * variants other users choose from.
      */
-    suspend fun postVotePoster(echoName: String, question: String, variants: List<String>): SendResult {
+    suspend fun postVotePoster(
+        echoName: String,
+        question: String,
+        variants: List<String>,
+        rateLimitOverride: Boolean = false,
+    ): SendResult {
         val data = buildJsonObject {
             put("echo", echoName)
             put("proto", "vote")
@@ -383,6 +393,7 @@ class NetworkSession(
             put("message", question)
             put("variants", buildJsonArray { variants.forEach { add(JsonPrimitive(it)) } })
             put("date", java.time.Instant.now().toString())
+            if (rateLimitOverride) put("rate_limit_override", true)
         }.toString()
         return postProtocol(echoName, "vote", data)
     }
@@ -391,7 +402,12 @@ class NetworkSession(
      * Casts (or retracts with an empty [variant]) a vote on a poster (vote
      * protocol, matching fm-app's vote message shape).
      */
-    suspend fun postVote(echoName: String, posterMessage: String, variant: String): SendResult {
+    suspend fun postVote(
+        echoName: String,
+        posterMessage: String,
+        variant: String,
+        rateLimitOverride: Boolean = false,
+    ): SendResult {
         val data = buildJsonObject {
             put("echo", echoName)
             put("proto", "vote")
@@ -402,6 +418,7 @@ class NetworkSession(
             put("poster_message", posterMessage)
             put("message", if (variant.isEmpty()) "Retract vote" else "Vote: $variant")
             put("date", java.time.Instant.now().toString())
+            if (rateLimitOverride) put("rate_limit_override", true)
         }.toString()
         return postProtocol(echoName, "vote", data)
     }
@@ -419,6 +436,7 @@ class NetworkSession(
         announcement: Boolean = false,
         tagline: String = "",
         tearline: String? = null,
+        rateLimitOverride: Boolean = false,
     ): SendResult {
         val messageType = if (announcement) "announcement" else "echomail"
         val data = buildJsonObject {
@@ -432,6 +450,7 @@ class NetworkSession(
             // one message, matching fm-app (#309).
             put("tagline", tagline)
             if (tearline != null) put("tearline", tearline)
+            if (rateLimitOverride) put("rate_limit_override", true)
         }.toString()
         return try {
             sendMessages(listOf(signMessage(messageType, data, echoName = echoName)))
@@ -454,6 +473,7 @@ class NetworkSession(
         replyToMessageId: String? = null,
         tagline: String = "",
         tearline: String? = null,
+        rateLimitOverride: Boolean = false,
     ): SendResult {
         val data = buildJsonObject {
             put("subject", subject)
@@ -464,6 +484,7 @@ class NetworkSession(
             if (attachments != null && attachments.isNotEmpty()) put("attachments", attachments)
             put("tagline", tagline)
             if (tearline != null) put("tearline", tearline)
+            if (rateLimitOverride) put("rate_limit_override", true)
         }.toString()
 
         val message = buildNetmailMessage(recipient, data)
@@ -536,18 +557,24 @@ class NetworkSession(
     }
 
     /** Adds or retracts ([emoji] empty) a reaction to a message. */
-    suspend fun postReaction(targetMessageId: String, emoji: String, echoName: String): SendResult {
+    suspend fun postReaction(
+        targetMessageId: String,
+        emoji: String,
+        echoName: String,
+        rateLimitOverride: Boolean = false,
+    ): SendResult {
         val data = buildJsonObject {
             put("reaction", emoji)
             put("reactionMessageId", targetMessageId)
             put("echo", echoName)
             put("message", "")
+            if (rateLimitOverride) put("rate_limit_override", true)
         }.toString()
         return postProtocol(echoName, "echomail", data)
     }
 
     /** Starts a moderator election in [echoName] (docs/proto/election.md). */
-    suspend fun postElectionPoster(echoName: String): SendResult {
+    suspend fun postElectionPoster(echoName: String, rateLimitOverride: Boolean = false): SendResult {
         val data = buildJsonObject {
             put("echo", echoName)
             put("proto", "election")
@@ -556,12 +583,17 @@ class NetworkSession(
             put("to", "all")
             put("message", "Moderator election")
             put("date", java.time.Instant.now().toString())
+            if (rateLimitOverride) put("rate_limit_override", true)
         }.toString()
         return postProtocol(echoName, "election", data)
     }
 
     /** Votes for a candidate ([candidate] empty retracts) in an election. */
-    suspend fun postElectionVote(echoName: String, candidate: String): SendResult {
+    suspend fun postElectionVote(
+        echoName: String,
+        candidate: String,
+        rateLimitOverride: Boolean = false,
+    ): SendResult {
         val data = buildJsonObject {
             put("echo", echoName)
             put("proto", "election")
@@ -570,6 +602,7 @@ class NetworkSession(
             put("to", candidate)
             put("message", if (candidate.isEmpty()) "Retract vote" else "Vote for $candidate")
             put("date", java.time.Instant.now().toString())
+            if (rateLimitOverride) put("rate_limit_override", true)
         }.toString()
         return postProtocol(echoName, "election", data)
     }
@@ -950,6 +983,22 @@ class NetworkSession(
 
     suspend fun setShowTearline(value: Boolean) {
         database.metaDao().put(MetaEntity(META_SHOW_TEARLINE, if (value) "1" else "0"))
+    }
+
+    /** Max width/height used when resizing picked images (0 = original). */
+    suspend fun imageMaxDimension(): Int =
+        database.metaDao().get(META_IMAGE_MAX_DIMENSION)?.toIntOrNull() ?: 1280
+
+    suspend fun setImageMaxDimension(value: Int) {
+        database.metaDao().put(MetaEntity(META_IMAGE_MAX_DIMENSION, value.coerceAtLeast(0).toString()))
+    }
+
+    /** Whether the composer may send over the daily rate limit (fm-app parity). */
+    suspend fun allowSendingWithoutRateLimit(): Boolean =
+        settingsFlag(META_ALLOW_WITHOUT_RATE_LIMIT, default = false)
+
+    suspend fun setAllowSendingWithoutRateLimit(value: Boolean) {
+        database.metaDao().put(MetaEntity(META_ALLOW_WITHOUT_RATE_LIMIT, if (value) "1" else "0"))
     }
 
     /** The client line written under the tagline, matching fm-app's format. */
@@ -1431,6 +1480,7 @@ class NetworkSession(
         }
         val response = api.post("send_receive", body.toString(), auth)
         if (response is JsonObject) {
+            rateLimitUsage = parseRateLimits(response["rate_limit"])
             // Persist protocol/message data before acknowledging packet ids (#350):
             // an ACK must never outrun the local database write.
             (response["messages"] as? JsonArray)?.forEach { element ->
@@ -1488,11 +1538,26 @@ class NetworkSession(
     }
 
     private suspend fun flushOutbox() {
+        val allowRateOverride = allowSendingWithoutRateLimit()
+        val counts = rateLimitUsage.mapValues { it.value.used }.toMutableMap()
         for (entry in database.outboxDao().getAll()) {
+            val kind = rateLimitKindOfEntry(entry)
+            val usage = kind?.let { rateLimitUsage[it] }
+            val overLimit = usage != null && usage.limit > 0 &&
+                (counts[kind] ?: 0) + 1 > usage.limit
+            if (overLimit && !allowRateOverride) {
+                database.outboxDao().updateAttempt(
+                    entry.id,
+                    entry.attempts + 1,
+                    "Daily rate limit exceeded (${usage?.used ?: 0}/${usage?.limit ?: 0})",
+                )
+                continue
+            }
+            val dataJson = if (overLimit) withRateLimitOverride(entry.dataJson) else entry.dataJson
             val message = try {
                 when (entry.type) {
-                    "netmail" -> entry.recipientAddress?.let { buildNetmailMessage(it, entry.dataJson) }
-                    else -> entry.echoName?.let { signMessage(entry.type, entry.dataJson, echoName = it) }
+                    "netmail" -> entry.recipientAddress?.let { buildNetmailMessage(it, dataJson) }
+                    else -> entry.echoName?.let { signMessage(entry.type, dataJson, echoName = it) }
                 }
             } catch (_: Exception) {
                 null
@@ -1501,14 +1566,41 @@ class NetworkSession(
                 sendMessages(listOf(message))
                 if (entry.type == "netmail") {
                     entry.recipientAddress?.let { recipient ->
-                        recordSentNetmail(recipient, entry.dataJson, message.string("jws"))
+                        recordSentNetmail(recipient, dataJson, message.string("jws"))
                     }
                 }
                 database.outboxDao().delete(entry.id)
+                if (kind != null) counts[kind] = (counts[kind] ?: 0) + 1
             } catch (e: Exception) {
                 database.outboxDao().updateAttempt(entry.id, entry.attempts + 1, e.message)
             }
         }
+    }
+
+    /** Rate-limit kind of a queued entry, matching fm-app's classification. */
+    private fun rateLimitKindOfEntry(entry: OutboxEntity): String? {
+        val data = runCatching {
+            json.parseToJsonElement(entry.dataJson).jsonObject
+        }.getOrNull()
+        return when (entry.type) {
+            "netmail" -> "netmail"
+            "echomail" -> if (data?.string("reaction") != null) "reaction" else "echomail"
+            "vote", "election" -> when (data?.string("type")) {
+                "poster" -> "poster"
+                "result" -> null
+                else -> "vote"
+            }
+            else -> null
+        }
+    }
+
+    private fun withRateLimitOverride(dataJson: String): String {
+        val obj = runCatching { json.parseToJsonElement(dataJson).jsonObject }.getOrNull()
+            ?: return dataJson
+        if (obj["rate_limit_override"] != null) return dataJson
+        return JsonObject(
+            obj.toMutableMap().apply { put("rate_limit_override", JsonPrimitive(true)) },
+        ).toString()
     }
 
     private suspend fun queueOutbox(
@@ -1615,6 +1707,8 @@ class NetworkSession(
         private const val META_AUTO_SEND_PUBKEY = "auto_send_pubkey"
         private const val META_TAGLINE = "tagline"
         private const val META_SHOW_TEARLINE = "show_tearline"
+        private const val META_ALLOW_WITHOUT_RATE_LIMIT = "allow_sending_without_rate_limit"
+        private const val META_IMAGE_MAX_DIMENSION = "image_max_dimension"
         private const val META_AUTO_REQUEST_PUBKEYS = "auto_request_pubkeys"
     }
 }

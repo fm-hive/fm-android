@@ -375,3 +375,41 @@ adb shell am get-config | head -1   # ...-ru-rRU-...
 Проверка: `QuoteTest`, `ComposeValidationTest`, `MarkdownRendererTest`,
 `NetworkSessionTest` (payload с reply/tagline/tearline/attachments), ручной
 прогон на эмуляторе в `ru`.
+
+## Лимиты политики, изображения и share (#38, #39, #40)
+
+### Лимиты политики и rate limit (#40)
+
+- `MessageLimits` читает `max_message_size`, `max_attachment_size`,
+  `max_attachments_per_message` из policy и правил эхи.
+- Composer проверяет размер data JSON (включая base64-вложения, tagline и
+  tearline), количество и размер вложений; блокирует Send и показывает
+  warning.
+- `rate_limit` из `send_receive` хранится в UI state (лимит на адрес, то есть
+  учитывает другие синхронизированные клиенты); outbox, composer, реакции,
+  голосования и постеры проверяют его перед отправкой.
+- Настройка «Разрешать отправку без учёта rate_limit» (fm-app parity) и
+  `rate_limit_override` для таких сообщений.
+
+### Изображения (#38)
+
+- При вставке изображения показывается диалог 640/1280/1920/2560 px с
+  «запомнить» (meta профиля `image_max_dimension`).
+- `ImageProcessor` уменьшает по EXIF-ориентации, сохраняет PNG/JPEG.
+- `MessageBody` рендерит `attachment:N` в теле: изображения на всю ширину,
+  остальные файлы — `📎 имя`. Нижняя галерея показывает только не
+  отрисованные инлайн вложения.
+- `AttachmentViewerDialog` умеет сохранять изображение в галерею (MediaStore,
+  для API 26–28 — с разрешением на хранилище).
+
+### Share (#39)
+
+- `MessageShare.text` собирает Markdown с шапкой «Эха/От/Дата», subject и
+  телом.
+- `MessageShare.renderImage` рисует карточку на Canvas, включая вложения на
+  ширину контента.
+- Share-диалог: текст или картинка; ширина картинки 720/1080/1440 px;
+  `FileProvider` + системный chooser.
+
+Проверка: `MessageLimitsTest`, `ImageProcessorTest`, `MessageShareTest`,
+ручной прогон share и диалога ресайза на эмуляторе.

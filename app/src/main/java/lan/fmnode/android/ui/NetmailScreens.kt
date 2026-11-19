@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Forward
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Mail
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
@@ -299,8 +300,13 @@ fun NetmailDetailScreen(
     onBack: () -> Unit,
     onForward: (MessageUi) -> Unit,
     onReply: (MessageUi) -> Unit = {},
+    onShare: (MessageUi) -> Unit = {},
     showTearline: Boolean = false,
 ) {
+    var viewer by remember { mutableStateOf<AttachmentUi?>(null) }
+    viewer?.let { attachment ->
+        AttachmentViewerDialog(attachment = attachment, onDismiss = { viewer = null })
+    }
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
@@ -316,6 +322,12 @@ fun NetmailDetailScreen(
                             Icon(
                                 Icons.AutoMirrored.Filled.Reply,
                                 contentDescription = stringResource(R.string.fm_messageactions_reply),
+                            )
+                        }
+                        IconButton(onClick = { onShare(message) }) {
+                            Icon(
+                                Icons.Default.Share,
+                                contentDescription = stringResource(R.string.share_title),
                             )
                         }
                         IconButton(onClick = { onForward(message) }) {
@@ -345,11 +357,12 @@ fun NetmailDetailScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.height(12.dp))
-            Text(
-                MarkdownRenderer.render(message.body) { ref ->
-                    attachmentRefName(ref, message.messageId, message.attachments)
-                },
-                style = MaterialTheme.typography.bodyMedium,
+            MessageBody(
+                body = message.body,
+                messageId = message.messageId,
+                attachments = message.attachments,
+                maxImageHeight = 420.dp,
+                onOpenAttachment = { viewer = it },
             )
             if (message.tagline.isNotBlank()) {
                 Spacer(Modifier.height(8.dp))
@@ -366,9 +379,11 @@ fun NetmailDetailScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            if (message.attachments.isNotEmpty()) {
+            val inline = referencedAttachmentIndices(message.body, message.messageId)
+            val gallery = message.attachments.filterIndexed { index, _ -> index !in inline }
+            if (gallery.isNotEmpty()) {
                 Spacer(Modifier.height(8.dp))
-                AttachmentsRow(message.attachments)
+                AttachmentsRow(gallery)
             }
         }
     }
@@ -421,7 +436,11 @@ fun NetmailComposeScreen(
                     IconButton(onClick = { showEmoji = true }) {
                         Icon(Icons.Default.EmojiEmotions, contentDescription = stringResource(R.string.emoji_title))
                     }
-                    IconButton(onClick = onSend, enabled = !state.sending && !state.keyRequested) {
+                    IconButton(
+                        onClick = onSend,
+                        enabled = !state.sending && !state.keyRequested &&
+                            state.limitIssues.none { it.blocking },
+                    ) {
                         Icon(
                             Icons.AutoMirrored.Filled.Send,
                             contentDescription = stringResource(R.string.send),
@@ -461,6 +480,7 @@ fun NetmailComposeScreen(
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
+            MessageLimitWarnings(state.limitIssues)
             Spacer(Modifier.height(8.dp))
             ComposerBodyEditor(
                 body = state.body,
