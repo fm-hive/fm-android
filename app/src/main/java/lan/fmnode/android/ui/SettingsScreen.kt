@@ -68,6 +68,10 @@ fun SettingsScreen(
     voucherError: UiError?,
     onDismissVoucher: () -> Unit,
     onOpenDisplayName: () -> Unit = {},
+    tagline: String = "",
+    showTearline: Boolean = false,
+    onTagline: (String) -> Unit = {},
+    onShowTearline: (Boolean) -> Unit = {},
     voucherEnabled: Boolean = true,
     voucherType: String = NetworkSession.VOUCHER_INVITE,
     voucherTtl: String = "24h",
@@ -234,6 +238,40 @@ fun SettingsScreen(
                         }
                         Switch(checked = autoSendPubkey, onCheckedChange = onAutoSendPubkey)
                     }
+                }
+            }
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                    Text(
+                        text = stringResource(R.string.fm_settings_profiletagline),
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    OutlinedTextField(
+                        value = tagline,
+                        onValueChange = onTagline,
+                        placeholder = { Text(stringResource(R.string.fm_settings_profiletaglineplaceholder)) },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text(
+                        text = stringResource(R.string.fm_settings_profiletaglinehint),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        Text(
+                            text = stringResource(R.string.fm_settings_profileshowtearline),
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Switch(checked = showTearline, onCheckedChange = onShowTearline)
+                    }
+                    Text(
+                        text = stringResource(R.string.fm_settings_profileshowtearlinehint),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
             if (voucherEnabled) {

@@ -528,7 +528,7 @@
     <string name="fm_settings_profiletaglineplaceholder">Показывается отдельной строкой под вашими сообщениями</string>
     <string name="fm_settings_profiletaglinehint">Добавляется к вашим сообщениям (echomail и netmail); в композере таглайн можно убрать для конкретного сообщения.</string>
     <string name="fm_settings_profileshowtearline">Показывать tearline</string>
-    <string name="fm_settings_profileshowtearlinehint">Добавляет служебную строку клиента (fm-app v&lt;версия&gt; &lt;адрес&gt;) к вашим сообщениям и показывает её под таглайном; по умолчанию выключено.</string>
+    <string name="fm_settings_profileshowtearlinehint">Добавляет служебную строку клиента (fm-android v&lt;версия&gt; &lt;адрес&gt;) к вашим сообщениям и показывает её под таглайном; по умолчанию выключено.</string>
     <string name="fm_netmail_title">Netmail</string>
     <string name="fm_netmail_inbox">Входящие</string>
     <string name="fm_netmail_sent">Отправленные</string>

@@ -528,7 +528,7 @@
     <string name="fm_settings_profiletaglineplaceholder">Shown as a separate line under your messages</string>
     <string name="fm_settings_profiletaglinehint">Added to the messages you write (echomail and netmail); it can be cleared per message in the composer.</string>
     <string name="fm_settings_profileshowtearline">Show tearline</string>
-    <string name="fm_settings_profileshowtearlinehint">Appends the client line (fm-app v&lt;version&gt; &lt;address&gt;) to your messages and shows it under the tagline; off by default.</string>
+    <string name="fm_settings_profileshowtearlinehint">Appends the client line (fm-android v&lt;version&gt; &lt;address&gt;) to your messages and shows it under the tagline; off by default.</string>
     <string name="fm_netmail_title">Netmail</string>
     <string name="fm_netmail_inbox">Inbox</string>
     <string name="fm_netmail_sent">Sent</string>

@@ -65,10 +65,10 @@ class MainActivity : ComponentActivity() {
                                 Triple(name, type, bytes)
                             }.getOrNull()
                         }
-                        if (state.screen == lan.fmnode.android.ui.AppScreen.BlogCompose) {
-                            viewModel.addBlogAttachments(files)
-                        } else {
-                            viewModel.addAttachments(files)
+                        when (state.screen) {
+                            lan.fmnode.android.ui.AppScreen.BlogCompose -> viewModel.addBlogAttachments(files)
+                            lan.fmnode.android.ui.AppScreen.NetmailCompose -> viewModel.addNetmailAttachments(files)
+                            else -> viewModel.addAttachments(files)
                         }
                     }
                 }
@@ -161,6 +161,15 @@ class MainActivity : ComponentActivity() {
                     onAttachFiles = { attachLauncher.launch(arrayOf("*/*")) },
                     onRemoveAttachment = viewModel::removeAttachment,
                     onRemoveBlogAttachment = viewModel::removeBlogAttachment,
+                    onRemoveNetmailAttachment = viewModel::removeNetmailAttachment,
+                    onReplyEchoMessage = viewModel::replyToEchoMessage,
+                    onReplyNetmailMessage = viewModel::replyToNetmailMessage,
+                    onClearComposeReply = viewModel::clearComposeReply,
+                    onClearNetmailReply = viewModel::clearNetmailReply,
+                    onComposeTagline = viewModel::setComposeTagline,
+                    onNetmailTagline = viewModel::setNetmailTagline,
+                    onTagline = viewModel::setTagline,
+                    onShowTearline = viewModel::setShowTearline,
                     onOpenAdmin = viewModel::openAdmin,
                     onOpenRecovery = viewModel::openRecovery,
                     onRequestVoucher = viewModel::requestVoucher,

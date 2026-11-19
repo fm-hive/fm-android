@@ -417,6 +417,8 @@ class NetworkSession(
         replyToMessageId: String? = null,
         attachments: JsonArray? = null,
         announcement: Boolean = false,
+        tagline: String = "",
+        tearline: String? = null,
     ): SendResult {
         val messageType = if (announcement) "announcement" else "echomail"
         val data = buildJsonObject {
@@ -426,6 +428,10 @@ class NetworkSession(
             put("sender_name", senderName())
             if (replyToMessageId != null) put("reply_to_message_id", replyToMessageId)
             if (attachments != null && attachments.isNotEmpty()) put("attachments", attachments)
+            // Always sent: an empty value removes the default tagline for this
+            // one message, matching fm-app (#309).
+            put("tagline", tagline)
+            if (tearline != null) put("tearline", tearline)
         }.toString()
         return try {
             sendMessages(listOf(signMessage(messageType, data, echoName = echoName)))
@@ -444,12 +450,20 @@ class NetworkSession(
         recipient: String,
         subject: String,
         body: String,
+        attachments: JsonArray? = null,
+        replyToMessageId: String? = null,
+        tagline: String = "",
+        tearline: String? = null,
     ): SendResult {
         val data = buildJsonObject {
             put("subject", subject)
             put("body", body)
             put("timestamp", nowSeconds())
             put("sender_name", senderName())
+            if (replyToMessageId != null) put("reply_to_message_id", replyToMessageId)
+            if (attachments != null && attachments.isNotEmpty()) put("attachments", attachments)
+            put("tagline", tagline)
+            if (tearline != null) put("tearline", tearline)
         }.toString()
 
         val message = buildNetmailMessage(recipient, data)
@@ -923,6 +937,26 @@ class NetworkSession(
 
     /** Whether a `pubkey_request` from another user is answered automatically. */
     suspend fun autoSendPubkey(): Boolean = settingsFlag(META_AUTO_SEND_PUBKEY, default = false)
+
+    /** Default user tagline appended to outgoing echomail and netmail (#309). */
+    suspend fun tagline(): String = database.metaDao().get(META_TAGLINE).orEmpty()
+
+    suspend fun setTagline(value: String) {
+        database.metaDao().put(MetaEntity(META_TAGLINE, value.trim()))
+    }
+
+    /** Whether the client tearline is appended and shown (#311). */
+    suspend fun showTearline(): Boolean = settingsFlag(META_SHOW_TEARLINE, default = false)
+
+    suspend fun setShowTearline(value: Boolean) {
+        database.metaDao().put(MetaEntity(META_SHOW_TEARLINE, if (value) "1" else "0"))
+    }
+
+    /** The client line written under the tagline, matching fm-app's format. */
+    fun clientTearline(): String {
+        val version = lan.fmnode.android.BuildConfig.VERSION_NAME
+        return "fm-android v$version ${profile.address}"
+    }
 
     // -------------------------------------------------------- client sync
 
@@ -1571,6 +1605,8 @@ class NetworkSession(
         const val VOUCHER_INVITE_TIME = "invite_time"
         private const val META_PENDING_PUBKEY_REQUESTS = "pending_pubkey_requests"
         private const val META_AUTO_SEND_PUBKEY = "auto_send_pubkey"
+        private const val META_TAGLINE = "tagline"
+        private const val META_SHOW_TEARLINE = "show_tearline"
         private const val META_AUTO_REQUEST_PUBKEYS = "auto_request_pubkeys"
     }
 }

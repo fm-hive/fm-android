@@ -1075,6 +1075,72 @@ class NetworkSessionTest {
     }
 
     @Test
+    fun `postEcho carries reply tagline tearline and attachments`() = runBlocking {
+        val attachments = buildJsonArray {
+            add(buildJsonObject {
+                put("name", "a.txt")
+                put("type", "text/plain")
+                put("size", 1)
+                put("data", "data:text/plain;base64,YQ==")
+            })
+        }
+        session.postEcho(
+            "General",
+            "Re: Hello",
+            "Body",
+            replyToMessageId = "m1",
+            attachments = attachments,
+            tagline = "Pavel",
+            tearline = "fm-android v0.3.0 :0:1",
+        )
+        val message = sentMessages.last()
+        val payload = Json.parseToJsonElement(
+            CryptoService.jwsPayload(message["jws"]!!.jsonPrimitive.content)!!,
+        ).jsonObject
+        assertEquals("m1", payload["reply_to_message_id"]!!.jsonPrimitive.content)
+        assertEquals("Pavel", payload["tagline"]!!.jsonPrimitive.content)
+        assertEquals("fm-android v0.3.0 :0:1", payload["tearline"]!!.jsonPrimitive.content)
+        assertEquals("a.txt", payload["attachments"]!!.jsonArray[0].jsonObject["name"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun `sendNetmail carries reply tagline tearline and attachments`() = runBlocking {
+        db.pubkeyDao().upsert(
+            PubkeyEntity(
+                address = ":0:2",
+                signPublicKeyB64 = Encoding.base64Encode(otherPublicKey),
+                thumbprint = CryptoService.thumbprint(otherPublicKey),
+                updatedAt = 0,
+            ),
+        )
+        val attachments = buildJsonArray {
+            add(buildJsonObject {
+                put("name", "a.txt")
+                put("type", "text/plain")
+                put("size", 1)
+                put("data", "data:text/plain;base64,YQ==")
+            })
+        }
+        session.sendNetmail(
+            ":0:2",
+            "Re: Hello",
+            "Body",
+            attachments = attachments,
+            replyToMessageId = "m1",
+            tagline = "Pavel",
+            tearline = "fm-android v0.3.0 :0:1",
+        )
+        val message = sentMessages.last()
+        val payload = Json.parseToJsonElement(
+            String(CryptoService.decryptJwe(message["jwe"]!!.jsonPrimitive.content, otherX25519)),
+        ).jsonObject
+        assertEquals("m1", payload["reply_to_message_id"]!!.jsonPrimitive.content)
+        assertEquals("Pavel", payload["tagline"]!!.jsonPrimitive.content)
+        assertEquals("fm-android v0.3.0 :0:1", payload["tearline"]!!.jsonPrimitive.content)
+        assertEquals("a.txt", payload["attachments"]!!.jsonArray[0].jsonObject["name"]!!.jsonPrimitive.content)
+    }
+
+    @Test
     fun `delivered packet ids are acknowledged only once`() = runBlocking {
         sendReceiveResponse = buildJsonObject {
             put("messages", buildJsonArray {})

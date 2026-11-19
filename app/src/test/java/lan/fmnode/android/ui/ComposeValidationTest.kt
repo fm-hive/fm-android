@@ -1,5 +1,7 @@
 package lan.fmnode.android.ui
 
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -48,5 +50,15 @@ class ComposeValidationTest {
     @Test
     fun textOnlyMessageWithoutSubjectStaysEmpty() {
         assertEquals("", MessageMapping.subjectFor("", emptyList()))
+    }
+
+    @Test
+    fun taglineAndTearlineAreReadFromPayload() {
+        val data = Json.parseToJsonElement(
+            """{"body":"Hi","tagline":"  Pavel  ","tearline":"fm-android v0.3.0 :0:1"}""",
+        ).jsonObject
+        assertEquals("Pavel", MessageMapping.taglineOf(data))
+        assertEquals("fm-android v0.3.0 :0:1", MessageMapping.tearlineOf(data))
+        assertEquals("", MessageMapping.taglineOf(null))
     }
 }

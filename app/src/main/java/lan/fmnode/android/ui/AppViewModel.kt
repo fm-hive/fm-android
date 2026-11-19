@@ -225,6 +225,10 @@ data class MessageUi(
     val versions: List<MessageVersionUi> = emptyList(),
     /** Conference of the message; vote actions need it. */
     val echoName: String = "",
+    /** Optional user line under the body (#309). */
+    val tagline: String = "",
+    /** Client line under the tagline, shown when the setting is enabled (#311). */
+    val tearline: String = "",
     /** Set for vote posters: the card replaces the plain message body. */
     val vote: VoteCardUi? = null,
     /** Set for warnings/punishments that a node admin can appeal. */
@@ -327,6 +331,15 @@ data class NetmailComposeState(
     val recipient: String = "",
     val subject: String = "",
     val body: String = "",
+    val attachments: List<AttachmentUi> = emptyList(),
+    /** ``reply_to_message_id`` of the quoted message, if this is a reply. */
+    val replyToMessageId: String? = null,
+    /** Author shown in the reply banner. */
+    val replyToLabel: String = "",
+    /** Quoted text prepended to the body, removed when the reply is cancelled. */
+    val replyQuote: String = "",
+    /** Per-message tagline; the default is copied from settings on open. */
+    val tagline: String = "",
     val sending: Boolean = false,
     val error: UiError? = null,
     val keyRequested: Boolean = false,
@@ -400,6 +413,14 @@ data class ComposeState(
     val attachments: List<AttachmentUi> = emptyList(),
     /** Send as `announcement` instead of `echomail` (announcements-enabled echoes). */
     val announcement: Boolean = false,
+    /** ``reply_to_message_id`` of the quoted message, if this is a reply. */
+    val replyToMessageId: String? = null,
+    /** Author shown in the reply banner. */
+    val replyToLabel: String = "",
+    /** Quoted text prepended to the body, removed when the reply is cancelled. */
+    val replyQuote: String = "",
+    /** Per-message tagline; the default is copied from settings on open. */
+    val tagline: String = "",
     val sending: Boolean = false,
     val error: UiError? = null,
 )
@@ -538,6 +559,9 @@ data class UiState(
     val activeId: String? = null,
     val activeProfile: ProfileEntity? = null,
     val networkName: String = "",
+    /** Default tagline and tearline switch, stored in the profile meta. */
+    val tagline: String = "",
+    val showTearline: Boolean = false,
     val unlocked: Boolean = false,
     val echoes: List<EchoUi> = emptyList(),
     /** Echoes of every unlocked network, grouped by network (#15). */
@@ -976,6 +1000,9 @@ class AppViewModel(
         try {
             val opened = sessionFor(profile, password)
             networkSession = opened
+            val tagline = runCatching { opened.tagline() }.getOrDefault("")
+            val showTearline = runCatching { opened.showTearline() }.getOrDefault(false)
+            _state.update { it.copy(tagline = tagline, showTearline = showTearline) }
             loadEchoGroups(opened)
             _state.update { it.copy(syncing = true) }
             // Local work first: the echo list is stored on the device, so the
@@ -1597,14 +1624,22 @@ class AppViewModel(
     }
 
     fun openCompose() {
-        val echo = _state.value.selectedEcho ?: return
+        val current = _state.value
+        val echo = current.selectedEcho ?: return
         val opened = networkSession
-        _state.update { it.copy(screen = AppScreen.Compose, compose = ComposeState()) }
+        _state.update {
+            it.copy(
+                screen = AppScreen.Compose,
+                compose = ComposeState(tagline = current.tagline),
+            )
+        }
         if (opened != null) {
             viewModelScope.launch {
                 opened.database.draftDao().get(echo.name)?.let { draft ->
                     _state.update {
                         if (it.screen == AppScreen.Compose) {
+                            // The draft carries only the text; keep the tagline
+                            // and any reply context that was set on open.
                             it.copy(compose = it.compose.copy(subject = draft.subject, body = draft.body))
                         } else {
                             it
@@ -1612,6 +1647,49 @@ class AppViewModel(
                     }
                 }
             }
+        }
+    }
+
+    /** Opens the echo composer with a quoted message (reply action). */
+    fun replyToEchoMessage(message: MessageUi) {
+        val current = _state.value
+        val echo = current.echoes.firstOrNull { it.name == message.echoName } ?: return
+        val label = message.senderName.ifBlank { message.senderAddress }
+        val quote = Quote.formatFidoQuote(label, message.body)
+        _state.update {
+            it.copy(
+                screen = AppScreen.Compose,
+                selectedEcho = echo,
+                compose = ComposeState(
+                    subject = Quote.replySubject(message.subject),
+                    body = if (quote.isBlank()) "" else "$quote\n\n",
+                    replyToMessageId = message.messageId,
+                    replyToLabel = label,
+                    replyQuote = quote,
+                    tagline = current.tagline,
+                ),
+            )
+        }
+    }
+
+    /** Removes the quoted reply and its subject prefix. */
+    fun clearComposeReply() {
+        _state.update {
+            val compose = it.compose
+            val body = if (compose.replyQuote.isBlank()) {
+                compose.body
+            } else {
+                compose.body.replaceFirst(compose.replyQuote + "\n\n", "")
+            }
+            it.copy(
+                compose = compose.copy(
+                    subject = "",
+                    body = body,
+                    replyToMessageId = null,
+                    replyToLabel = "",
+                    replyQuote = "",
+                ),
+            )
         }
     }
 
@@ -1642,6 +1720,9 @@ class AppViewModel(
 
     fun setComposeAnnouncement(value: Boolean) =
         _state.update { it.copy(compose = it.compose.copy(announcement = value)) }
+
+    fun setComposeTagline(value: String) =
+        _state.update { it.copy(compose = it.compose.copy(tagline = value)) }
 
     /** Adds files (already read from the system picker) to the composer. */
     fun addAttachments(files: List<Triple<String, String, ByteArray>>) {
@@ -1713,8 +1794,11 @@ class AppViewModel(
                     echo.name,
                     MessageMapping.subjectFor(current.compose.subject, current.compose.attachments.map { it.name }),
                     current.compose.body.trim(),
+                    replyToMessageId = current.compose.replyToMessageId,
                     attachments = attachments,
                     announcement = current.compose.announcement,
+                    tagline = current.compose.tagline,
+                    tearline = if (opened.showTearline()) opened.clientTearline() else null,
                 )
                 // The node can reject the message in the response to this very
                 // send; show why instead of leaving it as a silent no-op (#14).
@@ -1933,6 +2017,7 @@ class AppViewModel(
                 netmailCompose = NetmailComposeState(
                     subject = "Fwd: ${selected.size} message(s)",
                     body = quote,
+                    tagline = it.tagline,
                 ),
             )
         }
@@ -1957,6 +2042,7 @@ class AppViewModel(
                 netmailCompose = NetmailComposeState(
                     subject = "Fwd: ${message.subject}",
                     body = quote,
+                    tagline = it.tagline,
                 ),
             )
         }
@@ -3497,7 +3583,52 @@ class AppViewModel(
         _state.update {
             it.copy(
                 screen = AppScreen.NetmailCompose,
-                netmailCompose = NetmailComposeState(recipient = recipient),
+                netmailCompose = NetmailComposeState(
+                    recipient = recipient,
+                    tagline = it.tagline,
+                ),
+            )
+        }
+    }
+
+    /** Opens the netmail composer with a quoted message (reply action). */
+    fun replyToNetmailMessage(message: MessageUi) {
+        val current = _state.value
+        val label = message.senderName.ifBlank { message.senderAddress }
+        val quote = Quote.formatFidoQuote(label, message.body)
+        _state.update {
+            it.copy(
+                screen = AppScreen.NetmailCompose,
+                netmailCompose = NetmailComposeState(
+                    recipient = message.senderAddress,
+                    subject = Quote.replySubject(message.subject),
+                    body = if (quote.isBlank()) "" else "$quote\n\n",
+                    replyToMessageId = message.messageId,
+                    replyToLabel = label,
+                    replyQuote = quote,
+                    tagline = current.tagline,
+                ),
+            )
+        }
+    }
+
+    /** Removes the quoted reply and its subject prefix from a netmail. */
+    fun clearNetmailReply() {
+        _state.update {
+            val compose = it.netmailCompose
+            val body = if (compose.replyQuote.isBlank()) {
+                compose.body
+            } else {
+                compose.body.replaceFirst(compose.replyQuote + "\n\n", "")
+            }
+            it.copy(
+                netmailCompose = compose.copy(
+                    subject = "",
+                    body = body,
+                    replyToMessageId = null,
+                    replyToLabel = "",
+                    replyQuote = "",
+                ),
             )
         }
     }
@@ -3515,6 +3646,46 @@ class AppViewModel(
     fun setNetmailBody(value: String) =
         _state.update { it.copy(netmailCompose = it.netmailCompose.copy(body = value, error = null)) }
 
+    fun setNetmailTagline(value: String) =
+        _state.update { it.copy(netmailCompose = it.netmailCompose.copy(tagline = value)) }
+
+    /** Adds files (already read from the system picker) to a netmail. */
+    fun addNetmailAttachments(files: List<Triple<String, String, ByteArray>>) {
+        val existing = _state.value.netmailCompose.attachments
+        val result = existing.toMutableList()
+        var total = existing.sumOf { it.size }
+        for ((name, type, bytes) in files) {
+            if (bytes.size > MAX_ATTACHMENT_BYTES) {
+                _state.update {
+                    it.copy(netmailCompose = it.netmailCompose.copy(error = UiError.Failed("Attachment is too large (max 2 MiB)")))
+                }
+                return
+            }
+            total += bytes.size
+            if (total > MAX_ATTACHMENTS_TOTAL) {
+                _state.update {
+                    it.copy(netmailCompose = it.netmailCompose.copy(error = UiError.Failed("Attachments are too large (max 6 MiB)")))
+                }
+                return
+            }
+            result += AttachmentUi(
+                name = name,
+                type = type,
+                size = bytes.size,
+                dataUrl = "data:$type;base64," + android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP),
+            )
+        }
+        _state.update { it.copy(netmailCompose = it.netmailCompose.copy(attachments = result, error = null)) }
+    }
+
+    fun removeNetmailAttachment(index: Int) {
+        _state.update {
+            val list = it.netmailCompose.attachments.toMutableList()
+            if (index in list.indices) list.removeAt(index)
+            it.copy(netmailCompose = it.netmailCompose.copy(attachments = list))
+        }
+    }
+
     fun sendNetmailCompose() {
         val current = _state.value.netmailCompose
         val opened = networkSession ?: return
@@ -3522,17 +3693,40 @@ class AppViewModel(
             _state.update { it.copy(netmailCompose = it.netmailCompose.copy(error = UiError.Failed("Recipient is required"))) }
             return
         }
-        if (current.body.isBlank()) {
+        if (!MessageMapping.canSend(current.body, current.attachments.size)) {
             _state.update { it.copy(netmailCompose = it.netmailCompose.copy(error = UiError.Failed("Message is empty"))) }
             return
         }
         viewModelScope.launch {
             _state.update { it.copy(netmailCompose = it.netmailCompose.copy(sending = true, error = null)) }
             try {
+                val attachments = if (current.attachments.isEmpty()) {
+                    null
+                } else {
+                    kotlinx.serialization.json.buildJsonArray {
+                        current.attachments.forEach { attachment ->
+                            add(
+                                buildJsonObject {
+                                    put("name", attachment.name)
+                                    put("type", attachment.type)
+                                    put("size", attachment.size)
+                                    put("data", attachment.dataUrl)
+                                },
+                            )
+                        }
+                    }
+                }
                 val result = opened.sendNetmail(
                     recipient = current.recipient.trim(),
-                    subject = current.subject.trim(),
+                    subject = MessageMapping.subjectFor(
+                        current.subject,
+                        current.attachments.map { it.name },
+                    ),
                     body = current.body.trim(),
+                    attachments = attachments,
+                    replyToMessageId = current.replyToMessageId,
+                    tagline = current.tagline,
+                    tearline = if (opened.showTearline()) opened.clientTearline() else null,
                 )
                 if (result.needsKey) {
                     _state.update {
@@ -3555,6 +3749,24 @@ class AppViewModel(
     fun openSettings() {
         _state.update { it.copy(screen = AppScreen.Settings) }
         loadNodes()
+        val opened = networkSession ?: return
+        viewModelScope.launch {
+            val tagline = runCatching { opened.tagline() }.getOrDefault("")
+            val showTearline = runCatching { opened.showTearline() }.getOrDefault(false)
+            _state.update { it.copy(tagline = tagline, showTearline = showTearline) }
+        }
+    }
+
+    fun setTagline(value: String) {
+        _state.update { it.copy(tagline = value) }
+        val opened = networkSession ?: return
+        viewModelScope.launch { runCatching { opened.setTagline(value) } }
+    }
+
+    fun setShowTearline(value: Boolean) {
+        _state.update { it.copy(showTearline = value) }
+        val opened = networkSession ?: return
+        viewModelScope.launch { runCatching { opened.setShowTearline(value) } }
     }
 
     fun requestVoucher(node: NodeUi) {
@@ -4071,6 +4283,8 @@ class AppViewModel(
             ?: emptyList()
         // A file bundle without a letter still gets a readable title (#9).
         val body = MessageMapping.renderBody(data)
+        val tagline = MessageMapping.taglineOf(data)
+        val tearline = MessageMapping.tearlineOf(data)
         val versions = versionsJson?.let { raw ->
             runCatching {
                 (messageJson.parseToJsonElement(raw) as kotlinx.serialization.json.JsonArray).mapNotNull { element ->
@@ -4099,6 +4313,8 @@ class AppViewModel(
             attachments = attachments,
             versions = versions,
             echoName = echoName,
+            tagline = tagline,
+            tearline = tearline,
         )
     }
 
