@@ -40,6 +40,7 @@ import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.EmojiEmotions
 import androidx.compose.material.icons.filled.HowToVote
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AssistChip
@@ -221,6 +222,11 @@ fun FmRoot(
     onNetmailTagline: (String) -> Unit = {},
     onTagline: (String) -> Unit = {},
     onShowTearline: (Boolean) -> Unit = {},
+    onAllowSendingWithoutRateLimit: (Boolean) -> Unit = {},
+    onImageMaxDimension: (Int) -> Unit = {},
+    onRememberImageDimension: (Boolean) -> Unit = {},
+    onConfirmImageResize: () -> Unit = {},
+    onCancelImageResize: () -> Unit = {},
     onOpenAdmin: () -> Unit = {},
     onOpenRecovery: () -> Unit = {},
     onRequestVoucher: (NodeUi) -> Unit = {},
@@ -308,6 +314,13 @@ fun FmRoot(
     onDismissAddressNotice: () -> Unit = {},
     onSelectEchoInNetwork: (String, String) -> Unit = { _, _ -> },
 ) {
+    var shareMessage by remember { mutableStateOf<MessageUi?>(null) }
+    val shareLabels = ShareLabels(
+        echo = stringResource(R.string.share_echo_label),
+        from = stringResource(R.string.share_from_label),
+        date = stringResource(R.string.share_date_label),
+        netmailEcho = stringResource(R.string.share_netmail_echo),
+    )
     // System back walks the in-app screen history instead of closing the app (#8).
     BackHandler {
         if (state.logoutDialog) return@BackHandler
@@ -516,6 +529,23 @@ fun FmRoot(
             onDismiss = onCancelPolicyResign,
         )
     }
+    shareMessage?.let { message ->
+        MessageShareDialog(
+            message = message,
+            labels = shareLabels,
+            onDismiss = { shareMessage = null },
+        )
+    }
+    if (state.imageResizeDialog) {
+        ImageResizeDialog(
+            maxDimension = state.imageMaxDimension,
+            remember = state.rememberImageDimension,
+            onDimension = onImageMaxDimension,
+            onRemember = onRememberImageDimension,
+            onConfirm = onConfirmImageResize,
+            onDismiss = onCancelImageResize,
+        )
+    }
     when (state.screen) {
         AppScreen.Unlock -> UnlockScreen(
             error = state.unlockError,
@@ -603,6 +633,7 @@ fun FmRoot(
                 onAppeal = onOpenAppeal,
                 onForward = onForwardMessage,
                 onReply = onReplyEchoMessage,
+                onShare = { shareMessage = it },
                 showTearline = state.showTearline,
                 messageView = state.messageView,
                 onChangeMessageView = onChangeMessageView,
@@ -625,6 +656,7 @@ fun FmRoot(
             canAppeal = state.activeProfile?.isAdmin == true,
             onAppeal = onOpenAppeal,
             onReply = onReplyEchoMessage,
+            onShare = { shareMessage = it },
             showTearline = state.showTearline,
             canReact = state.selectedEcho?.let { echo ->
                 EchoPermissions.canWriteToEcho(
@@ -722,6 +754,7 @@ fun FmRoot(
             onBack = onBackFromNetmailDetail,
             onForward = onForwardMessage,
             onReply = onReplyNetmailMessage,
+            onShare = { shareMessage = it },
             showTearline = state.showTearline,
         )
         AppScreen.NetmailCompose -> NetmailComposeScreen(
@@ -802,6 +835,8 @@ fun FmRoot(
             showTearline = state.showTearline,
             onTagline = onTagline,
             onShowTearline = onShowTearline,
+            allowSendingWithoutRateLimit = state.allowSendingWithoutRateLimit,
+            onAllowSendingWithoutRateLimit = onAllowSendingWithoutRateLimit,
             voucherEnabled = state.voucherEnabled,
             voucherType = state.voucherType,
             voucherTtl = state.voucherTtl,
@@ -1568,6 +1603,7 @@ fun EchoConversationScreen(
     onAppeal: (MessageUi) -> Unit = {},
     onForward: (MessageUi) -> Unit,
     onReply: (MessageUi) -> Unit = {},
+    onShare: (MessageUi) -> Unit = {},
     showTearline: Boolean = false,
     messageView: EchoMessageView = EchoMessageView.All,
     onChangeMessageView: (EchoMessageView) -> Unit = {},
@@ -1714,6 +1750,7 @@ fun EchoConversationScreen(
                 onModerate = onModerate,
                 onForward = onForward,
                 onReply = onReply,
+                onShare = onShare,
                 showTearline = showTearline,
                 onOpenMessage = onOpenMessage,
                 versionsMessage = { versionsMessage = it },
@@ -1740,6 +1777,7 @@ private fun ConversationList(
     onModerate: (MessageUi) -> Unit,
     onForward: (MessageUi) -> Unit,
     onReply: (MessageUi) -> Unit = {},
+    onShare: (MessageUi) -> Unit = {},
     showTearline: Boolean = false,
     onOpenMessage: (MessageUi) -> Unit,
     versionsMessage: (MessageUi) -> Unit,
@@ -1769,6 +1807,7 @@ private fun ConversationList(
                 onModerate = onModerate,
                 onForward = onForward,
                 onReply = onReply,
+                onShare = onShare,
                 showTearline = showTearline,
                 onVersions = { versionsMessage(message) },
                 onOpen = { onOpenMessage(message) },
@@ -1891,11 +1930,16 @@ private fun MessageCard(
     onModerate: (MessageUi) -> Unit,
     onForward: (MessageUi) -> Unit,
     onReply: (MessageUi) -> Unit = {},
+    onShare: (MessageUi) -> Unit = {},
     showTearline: Boolean = false,
     onVersions: (MessageUi) -> Unit,
     onOpen: (MessageUi) -> Unit = {},
     onVote: (VoteCardUi, String) -> Unit = { _, _ -> },
 ) {
+    var viewer by remember { mutableStateOf<AttachmentUi?>(null) }
+    viewer?.let { attachment ->
+        AttachmentViewerDialog(attachment = attachment, onDismiss = { viewer = null })
+    }
     Card(modifier = Modifier.fillMaxWidth().clickable { onOpen(message) }) {
         Column(Modifier.fillMaxWidth().padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1917,6 +1961,12 @@ private fun MessageCard(
                     Icon(
                         Icons.AutoMirrored.Filled.Reply,
                         contentDescription = stringResource(R.string.fm_messageactions_reply),
+                    )
+                }
+                IconButton(onClick = { onShare(message) }) {
+                    Icon(
+                        Icons.Default.Share,
+                        contentDescription = stringResource(R.string.share_title),
                     )
                 }
                 IconButton(onClick = { onForward(message) }) {
@@ -1956,11 +2006,11 @@ private fun MessageCard(
                 }
                 if (message.body.isNotBlank()) {
                     Spacer(Modifier.height(4.dp))
-                    Text(
-                        MarkdownRenderer.render(message.body) { ref ->
-                            attachmentRefName(ref, message.messageId, message.attachments)
-                        },
-                        style = MaterialTheme.typography.bodyMedium,
+                    MessageBody(
+                        body = message.body,
+                        messageId = message.messageId,
+                        attachments = message.attachments,
+                        onOpenAttachment = { viewer = it },
                     )
                 }
                 if (message.tagline.isNotBlank()) {
@@ -1978,9 +2028,11 @@ private fun MessageCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                if (message.attachments.isNotEmpty()) {
+                val inline = referencedAttachmentIndices(message.body, message.messageId)
+                val gallery = message.attachments.filterIndexed { index, _ -> index !in inline }
+                if (gallery.isNotEmpty()) {
                     Spacer(Modifier.height(6.dp))
-                    AttachmentsRow(message.attachments)
+                    AttachmentsRow(gallery)
                 }
             }
             if (canReact) {
@@ -2048,7 +2100,10 @@ fun EchoComposeScreen(
                     IconButton(onClick = { showEmoji = true }) {
                         Icon(Icons.Default.EmojiEmotions, contentDescription = stringResource(R.string.emoji_title))
                     }
-                    TextButton(onClick = onSend, enabled = !state.sending) {
+                    TextButton(
+                        onClick = onSend,
+                        enabled = !state.sending && state.limitIssues.none { it.blocking },
+                    ) {
                         Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null)
                         Spacer(Modifier.width(4.dp))
                         Text(stringResource(R.string.send))
@@ -2083,6 +2138,7 @@ fun EchoComposeScreen(
                     )
                 }
             }
+            MessageLimitWarnings(state.limitIssues)
             Spacer(Modifier.height(8.dp))
             ComposerBodyEditor(
                 body = state.body,
@@ -2199,8 +2255,13 @@ fun MessageDetailScreen(
     canAppeal: Boolean = false,
     onAppeal: (MessageUi) -> Unit = {},
     onReply: (MessageUi) -> Unit = {},
+    onShare: (MessageUi) -> Unit = {},
     showTearline: Boolean = false,
 ) {
+    var viewer by remember { mutableStateOf<AttachmentUi?>(null) }
+    viewer?.let { attachment ->
+        AttachmentViewerDialog(attachment = attachment, onDismiss = { viewer = null })
+    }
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
@@ -2216,6 +2277,12 @@ fun MessageDetailScreen(
                             Icon(
                                 Icons.AutoMirrored.Filled.Reply,
                                 contentDescription = stringResource(R.string.fm_messageactions_reply),
+                            )
+                        }
+                        IconButton(onClick = { onShare(message) }) {
+                            Icon(
+                                Icons.Default.Share,
+                                contentDescription = stringResource(R.string.share_title),
                             )
                         }
                         IconButton(onClick = { onForward(message) }) {
@@ -2264,11 +2331,12 @@ fun MessageDetailScreen(
             )
             if (message.body.isNotBlank()) {
                 Spacer(Modifier.height(12.dp))
-                Text(
-                    MarkdownRenderer.render(message.body) { ref ->
-                        attachmentRefName(ref, message.messageId, message.attachments)
-                    },
-                    style = MaterialTheme.typography.bodyMedium,
+                MessageBody(
+                    body = message.body,
+                    messageId = message.messageId,
+                    attachments = message.attachments,
+                    maxImageHeight = 420.dp,
+                    onOpenAttachment = { viewer = it },
                 )
             }
             if (message.tagline.isNotBlank()) {
@@ -2286,9 +2354,11 @@ fun MessageDetailScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            if (message.attachments.isNotEmpty()) {
+            val inline = referencedAttachmentIndices(message.body, message.messageId)
+            val gallery = message.attachments.filterIndexed { index, _ -> index !in inline }
+            if (gallery.isNotEmpty()) {
                 Spacer(Modifier.height(12.dp))
-                message.attachments.forEach { attachment ->
+                gallery.forEach { attachment ->
                     AttachmentViewer(attachment)
                     Spacer(Modifier.height(12.dp))
                 }

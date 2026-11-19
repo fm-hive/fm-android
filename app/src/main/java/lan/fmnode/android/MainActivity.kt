@@ -65,11 +65,14 @@ class MainActivity : ComponentActivity() {
                                 Triple(name, type, bytes)
                             }.getOrNull()
                         }
-                        when (state.screen) {
-                            lan.fmnode.android.ui.AppScreen.BlogCompose -> viewModel.addBlogAttachments(files)
-                            lan.fmnode.android.ui.AppScreen.NetmailCompose -> viewModel.addNetmailAttachments(files)
-                            else -> viewModel.addAttachments(files)
+                        val target = when (state.screen) {
+                            lan.fmnode.android.ui.AppScreen.BlogCompose ->
+                                lan.fmnode.android.ui.AttachmentTarget.Blog
+                            lan.fmnode.android.ui.AppScreen.NetmailCompose ->
+                                lan.fmnode.android.ui.AttachmentTarget.Netmail
+                            else -> lan.fmnode.android.ui.AttachmentTarget.Echo
                         }
+                        viewModel.prepareAttachments(files, target)
                     }
                 }
                 var pendingExport by remember { mutableStateOf<String?>(null) }
@@ -170,6 +173,11 @@ class MainActivity : ComponentActivity() {
                     onNetmailTagline = viewModel::setNetmailTagline,
                     onTagline = viewModel::setTagline,
                     onShowTearline = viewModel::setShowTearline,
+                    onAllowSendingWithoutRateLimit = viewModel::setAllowSendingWithoutRateLimit,
+                    onImageMaxDimension = viewModel::setImageMaxDimension,
+                    onRememberImageDimension = viewModel::setRememberImageDimension,
+                    onConfirmImageResize = viewModel::confirmImageResize,
+                    onCancelImageResize = viewModel::cancelImageResize,
                     onOpenAdmin = viewModel::openAdmin,
                     onOpenRecovery = viewModel::openRecovery,
                     onRequestVoucher = viewModel::requestVoucher,

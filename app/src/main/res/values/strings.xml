@@ -227,4 +227,39 @@
     <string name="appeal_reason">Reason</string>
     <string name="appeal_submit">Submit appeal</string>
     <string name="election_start">Start election</string>
+
+    <string name="limit_attachment_too_large">Attachment %1$s is %2$s, limit %3$s</string>
+    <string name="limit_too_many_attachments">Too many attachments: %1$d, limit %2$d</string>
+    <string name="limit_message_too_large">Message is %1$s, limit %2$s</string>
+    <string name="limit_rate_exceeded">Daily limit reached: %1$d of %2$d</string>
+    <string name="limit_rate_override">The message will be sent over the daily limit</string>
+    <string name="limit_blocked_hint">Sending is blocked until this is fixed.</string>
+    <string name="limit_kind_echomail">echomail</string>
+    <string name="limit_kind_netmail">netmail</string>
+    <string name="limit_kind_vote">votes</string>
+    <string name="limit_kind_poster">posters</string>
+    <string name="limit_kind_reaction">reactions</string>
+
+
+    <string name="image_resize_title">Image size</string>
+    <string name="image_resize_hint">Images are downscaled to the selected maximum width/height. Smaller images are kept as they are.</string>
+    <string name="image_resize_remember">Remember for the next images</string>
+    <string name="image_resize_apply">Add</string>
+    <string name="save_to_gallery">Save to gallery</string>
+    <string name="saved_to_gallery">Saved to gallery</string>
+    <string name="save_to_gallery_failed">Could not save the image</string>
+    <string name="gallery_permission_denied">Storage permission is required to save the image</string>
+
+
+    <string name="share_title">Share message</string>
+    <string name="share_text">Text</string>
+    <string name="share_image">Image</string>
+    <string name="share_image_width">Image width</string>
+    <string name="share">Share</string>
+    <string name="share_echo_label">Echo</string>
+    <string name="share_from_label">From</string>
+    <string name="share_date_label">Date</string>
+    <string name="share_netmail_echo">Netmail</string>
+    <string name="share_failed">Could not share the message</string>
+
 </resources>

@@ -72,6 +72,8 @@ fun SettingsScreen(
     showTearline: Boolean = false,
     onTagline: (String) -> Unit = {},
     onShowTearline: (Boolean) -> Unit = {},
+    allowSendingWithoutRateLimit: Boolean = false,
+    onAllowSendingWithoutRateLimit: (Boolean) -> Unit = {},
     voucherEnabled: Boolean = true,
     voucherType: String = NetworkSession.VOUCHER_INVITE,
     voucherTtl: String = "24h",
@@ -269,6 +271,30 @@ fun SettingsScreen(
                     }
                     Text(
                         text = stringResource(R.string.fm_settings_profileshowtearlinehint),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                    Text(
+                        text = stringResource(R.string.fm_settings_ratelimit),
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        Text(
+                            text = stringResource(R.string.fm_settings_allowsendingwithoutratelimit),
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Switch(
+                            checked = allowSendingWithoutRateLimit,
+                            onCheckedChange = onAllowSendingWithoutRateLimit,
+                        )
+                    }
+                    Text(
+                        text = stringResource(R.string.fm_settings_allowsendingwithoutratelimitdesc),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

@@ -1141,6 +1141,25 @@ class NetworkSessionTest {
     }
 
     @Test
+    fun `rate limit usage from send receive is stored`() = runBlocking {
+        sendReceiveResponse = buildJsonObject {
+            put("messages", buildJsonArray {})
+            put("local_packet_ids", buildJsonArray {})
+            put("rate_limit", buildJsonObject {
+                put("echomail", buildJsonObject {
+                    put("used", 4)
+                    put("limit", 5)
+                })
+            })
+        }
+        session.sync()
+
+        val usage = session.rateLimitUsage["echomail"]!!
+        assertEquals(4, usage.used)
+        assertEquals(5, usage.limit)
+    }
+
+    @Test
     fun `delivered packet ids are acknowledged only once`() = runBlocking {
         sendReceiveResponse = buildJsonObject {
             put("messages", buildJsonArray {})
