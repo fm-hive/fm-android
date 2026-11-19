@@ -340,3 +340,38 @@ adb shell am get-config | head -1   # ...-ru-rRU-...
 Правило для новых экранов: длинные русские подписи не ставить в один `Row` с
 другими кнопками; для парных действий использовать `Column`/`FlowRow`, для
 заголовков топбара — `maxLines = 1` и `TextOverflow.Ellipsis`.
+
+## Синхронизация клиентов и композер (#35, #36)
+
+### client_synchronize
+
+- `delivered_local_ids` очищаются после успешного `send_receive`, поэтому
+  повторяющийся лог `send_receive ACK ... deleted_ids` больше не появляется.
+- Прочитанные записи своего контейнера ACK-аются даже если payload не
+  расшифровался: «отравленная» запись не блокирует очередь.
+- Android обрабатывает `op: "sent"`, сохраняет локальную копию отправленного
+  netmail и рассылает её другим клиентам; папка «Отправленные» теперь
+  синхронизируется.
+- При появлении нового client ID отправляется история (netmail до 100,
+  блоги и посты), известные client ID хранятся в `meta`.
+- При logout клиент удаляется из `client_synchronize` (best effort).
+
+Проверка: `NetworkSessionTest` (ACK, `sent`, история, нерасшифровываемая
+запись), живой стенд с `client_synchronize: true`.
+
+### Композер
+
+- Reply в карточке сообщения, деталях эхи и netmail: тема `Re:`, FIDO-цитата,
+  `reply_to_message_id`.
+- Markdown: справка и предпросмотр в обоих композерах.
+- Аттачи в netmail (echo-композер уже поддерживал).
+- Теглайн: настройка по умолчанию + поле на сообщение.
+- Tearline: переключатель в настройках, строка
+  `fm-android v<version> <address>`, показ под теглайном.
+- `MarkdownRenderer` понимает `attachment:N` и
+  `attachment:<message_id>:N` (вложения показываются как `📎 имя`, а не
+  битой ссылкой).
+
+Проверка: `QuoteTest`, `ComposeValidationTest`, `MarkdownRendererTest`,
+`NetworkSessionTest` (payload с reply/tagline/tearline/attachments), ручной
+прогон на эмуляторе в `ru`.
