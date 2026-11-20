@@ -148,14 +148,9 @@ object MessageShare {
             headerPaint,
         )
         if (message.subject.isNotBlank()) addText(message.subject, subjectPaint)
-        if (message.body.isNotBlank()) addText(stripMarkdown(message.body), bodyPaint)
-        if (message.tagline.isNotBlank()) addText(message.tagline, smallPaint)
-        if (message.tearline.isNotBlank()) addText("--- ${message.tearline}", smallPaint)
 
-        for (attachment in message.attachments) {
-            val image = if (attachment.type.startsWith("image/") ||
-                attachment.dataUrl.startsWith("data:image/")
-            ) {
+        fun addImage(attachment: AttachmentUi) {
+            val image = if (isImage(attachment)) {
                 decodeDataUrl(attachment.dataUrl)?.asAndroidBitmap()
             } else {
                 null
@@ -173,6 +168,35 @@ object MessageShare {
             } else {
                 addText("📎 ${attachment.name}", smallPaint)
             }
+        }
+
+        // Render attachment references at their position in the body; only
+        // unreferenced attachments go into the gallery at the end.
+        val referenced = mutableSetOf<Int>()
+        for (block in messageBodyBlocks(message.body, message.messageId, message.attachments)) {
+            if (block.text != null) {
+                addText(stripMarkdown(block.text), bodyPaint)
+                continue
+            }
+            val attachment = block.attachment
+            if (attachment != null) {
+                val index = message.attachments.indexOfFirst { it == attachment }
+                if (index >= 0) referenced += index
+                if (isImage(attachment)) {
+                    addImage(attachment)
+                } else {
+                    addText("📎 ${attachment.name}", smallPaint)
+                }
+            } else {
+                addText("📎 ${block.label ?: "attachment"}", smallPaint)
+            }
+        }
+        if (message.tagline.isNotBlank()) addText(message.tagline, smallPaint)
+        if (message.tearline.isNotBlank()) addText("--- ${message.tearline}", smallPaint)
+
+        // Attachments without an inline reference still belong to the card.
+        message.attachments.forEachIndexed { index, attachment ->
+            if (index !in referenced) addImage(attachment)
         }
 
         val spacing = (18f * scale).toInt()

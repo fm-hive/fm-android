@@ -20,6 +20,49 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 /**
+ * One block of a message body: either Markdown text or an attachment reference.
+ * Used by the Compose message feed and by the share-image renderer so inline
+ * images stay at the same position in both.
+ */
+internal data class MessageBodyBlock(
+    val text: String? = null,
+    val attachment: AttachmentUi? = null,
+    /** Display name for an unresolved/scoped attachment reference. */
+    val label: String? = null,
+)
+
+/** Splits a body into text and `attachment:N` blocks, in source order. */
+internal fun messageBodyBlocks(
+    body: String,
+    messageId: String,
+    attachments: List<AttachmentUi>,
+    otherAttachments: (String) -> List<AttachmentUi>? = { null },
+): List<MessageBodyBlock> {
+    val matches = attachmentRefs(body)
+    if (matches.isEmpty()) return listOf(MessageBodyBlock(text = body))
+    val blocks = mutableListOf<MessageBodyBlock>()
+    var cursor = 0
+    for (match in matches) {
+        val before = body.substring(cursor, match.range.first)
+        if (before.isNotEmpty()) blocks += MessageBodyBlock(text = before)
+        val attachment = resolveAttachment(
+            match.groupValues[2],
+            messageId,
+            attachments,
+            otherAttachments,
+        )
+        blocks += MessageBodyBlock(
+            attachment = attachment,
+            label = attachment?.name ?: match.groupValues[1].ifBlank { "attachment" },
+        )
+        cursor = match.range.last + 1
+    }
+    val tail = body.substring(cursor)
+    if (tail.isNotEmpty()) blocks += MessageBodyBlock(text = tail)
+    return blocks
+}
+
+/**
  * Renders a message body with inline attachment images. Text segments keep the
  * usual Markdown formatting; `attachment:N` references become full-width
  * images (or a file label for non-images) at their position in the body.
@@ -34,27 +77,21 @@ fun MessageBody(
     otherAttachments: (String) -> List<AttachmentUi>? = { null },
     onOpenAttachment: (AttachmentUi) -> Unit = {},
 ) {
-    val matches = remember(body) { attachmentRefs(body) }
-    if (matches.isEmpty()) {
-        Text(MarkdownRenderer.render(body), style = MaterialTheme.typography.bodyMedium)
-        return
+    val blocks = remember(body, messageId, attachments) {
+        messageBodyBlocks(body, messageId, attachments, otherAttachments)
     }
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        var cursor = 0
-        for (match in matches) {
-            val text = body.substring(cursor, match.range.first)
-            if (text.isNotBlank()) {
-                Text(
-                    text = MarkdownRenderer.render(text),
-                    style = MaterialTheme.typography.bodyMedium,
-                )
+        for (block in blocks) {
+            val attachment = block.attachment
+            if (block.text != null) {
+                if (block.text.isNotBlank()) {
+                    Text(
+                        text = MarkdownRenderer.render(block.text),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+                continue
             }
-            val attachment = resolveAttachment(
-                match.groupValues[2],
-                messageId,
-                attachments,
-                otherAttachments,
-            )
             if (attachment != null && isImage(attachment)) {
                 val bitmap = remember(attachment.dataUrl) { decodeDataUrl(attachment.dataUrl) }
                 if (bitmap != null) {
@@ -72,16 +109,8 @@ fun MessageBody(
                     AttachmentLabel(attachment.name)
                 }
             } else {
-                AttachmentLabel(attachment?.name ?: match.groupValues[1].ifBlank { "attachment" })
+                AttachmentLabel(attachment?.name ?: block.label ?: "attachment")
             }
-            cursor = match.range.last + 1
-        }
-        val tail = body.substring(cursor)
-        if (tail.isNotBlank()) {
-            Text(
-                text = MarkdownRenderer.render(tail),
-                style = MaterialTheme.typography.bodyMedium,
-            )
         }
     }
 }
@@ -109,16 +138,16 @@ internal fun referencedAttachmentIndices(body: String, messageId: String): Set<I
     return out
 }
 
-private val ATTACHMENT_REF = Regex("""!?\[([^\]]*)]\((attachment:[^)]+)\)""")
+internal val ATTACHMENT_REF = Regex("""!?\[([^\]]*)]\((attachment:[^)]+)\)""")
 
 private fun attachmentRefs(body: String): List<MatchResult> =
     ATTACHMENT_REF.findAll(body).toList()
 
-private fun resolveAttachment(
+internal fun resolveAttachment(
     ref: String,
     messageId: String,
     attachments: List<AttachmentUi>,
-    otherAttachments: (String) -> List<AttachmentUi>?,
+    otherAttachments: (String) -> List<AttachmentUi>? = { null },
 ): AttachmentUi? {
     val parts = ref.removePrefix("attachment:").split(":")
     val index = parts.lastOrNull()?.toIntOrNull() ?: return null
@@ -127,5 +156,5 @@ private fun resolveAttachment(
     return list?.getOrNull(index)
 }
 
-private fun isImage(attachment: AttachmentUi): Boolean =
+internal fun isImage(attachment: AttachmentUi): Boolean =
     attachment.type.startsWith("image/") || attachment.dataUrl.startsWith("data:image/")
