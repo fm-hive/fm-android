@@ -828,7 +828,9 @@ class AppViewModel(
                 }
                 return@launch
             }
-            _state.update { it.copy(autoUnlocking = false, rememberPassword = true) }
+            // Keep the locked form with the spinner until the session is fully
+            // open: opening the profile database can take several seconds.
+            _state.update { it.copy(rememberPassword = true) }
             completeUnlock(saved)
         }
     }
@@ -883,18 +885,27 @@ class AppViewModel(
         val profile = manager.activeProfile() ?: manager.firstProfile()
         if (profile == null) {
             _state.update {
-                it.copy(unlocked = true, unlockError = null, screen = AppScreen.Networks, activeProfile = null)
+                it.copy(
+                    unlocked = true, unlockError = null, autoUnlocking = false,
+                    screen = AppScreen.Networks, activeProfile = null,
+                )
             }
             return
         }
         _state.update {
             it.copy(
-                unlocked = true, unlockError = null, autoUnlocking = false, activeId = profile.id,
+                unlocked = true, unlockError = null, activeId = profile.id,
                 activeProfile = profile,
                 networkName = networkNameFromPolicyJson(profile.policyJson),
             )
         }
-        openActiveSession()
+        try {
+            openActiveSession()
+        } finally {
+            // The session is open (or opening failed and moved to Networks):
+            // release the locked auto-unlock form.
+            _state.update { it.copy(autoUnlocking = false) }
+        }
     }
 
     fun lock() = lockVault()
