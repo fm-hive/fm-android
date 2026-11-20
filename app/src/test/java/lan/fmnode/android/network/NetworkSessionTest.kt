@@ -628,6 +628,22 @@ class NetworkSessionTest {
         CryptoService.x25519PublicKeyFromEd25519(userPublicKey),
     )
 
+    /** Entries of one batched `client_synchronize append` request. */
+    private fun appendEntries(control: JsonObject): List<JsonObject> =
+        ((control["data"] as? JsonObject)?.get("entries") as? JsonArray)
+            ?.mapNotNull { it as? JsonObject }
+            ?: emptyList()
+
+    /** Decrypts a client-sync entry payload with this user's key. */
+    private fun clientSyncPayload(entry: JsonObject): JsonObject = Json.parseToJsonElement(
+        String(
+            CryptoService.decryptJwe(
+                entry["payload"]!!.jsonPrimitive.content,
+                CryptoService.x25519PrivateKeyFromSeed(userSeed),
+            ),
+        ),
+    ).jsonObject
+
     @Test
     fun `client sync registers and forwards messages to other clients`() = runBlocking {
         // Another device of the same address is already registered.
@@ -648,25 +664,66 @@ class NetworkSessionTest {
         }
         session.sync()
 
-        val names = clientSyncRequests.mapNotNull { control ->
-            (control["data"] as? JsonObject)?.let { data ->
-                (data["action"] as? JsonPrimitive)?.content to (data["name"] as? JsonPrimitive)?.content
-            }
+        // Registration and the forwarded message share one batched append.
+        val appends = clientSyncRequests.filter { control ->
+            ((control["data"] as? JsonObject)?.get("action") as? JsonPrimitive)?.content == "append"
         }
-        // Registration in the client list.
-        assertTrue(names.contains("append" to "client_synchronize"))
-        // The received message is forwarded to the other device.
-        assertTrue(names.contains("append" to "outbound_client_other-1"))
+        assertEquals(1, appends.size)
+        val entries = appendEntries(appends.single())
+        val names = entries.mapNotNull { it["name"]?.jsonPrimitive?.content }
+        assertTrue(names.contains("client_synchronize"))
+        assertTrue(names.contains("outbound_client_other-1"))
 
-        val forward = clientSyncRequests.last { control ->
-            ((control["data"] as? JsonObject)?.get("name") as? JsonPrimitive)?.content == "outbound_client_other-1"
-        }
-        val payload = (forward["data"] as? JsonObject)!!["payload"]!!.jsonPrimitive.content
-        val op = Json.parseToJsonElement(
-            String(CryptoService.decryptJwe(payload, CryptoService.x25519PrivateKeyFromSeed(userSeed))),
-        ).jsonObject
+        val forward = entries.first { it["name"]?.jsonPrimitive?.content == "outbound_client_other-1" }
+        val op = clientSyncPayload(forward)
         assertEquals("message", op["op"]!!.jsonPrimitive.content)
         assertEquals("m1", op["message"]!!.jsonObject["message_id"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun `client sync batches all forwarded messages into one request`() = runBlocking {
+        db.metaDao().put(lan.fmnode.android.storage.MetaEntity("client_id", "client-1"))
+        val me = clientEncrypt(buildJsonObject { put("op", "add"); put("client", "client-1") })
+        val other1 = clientEncrypt(buildJsonObject { put("op", "add"); put("client", "other-1") })
+        val other2 = clientEncrypt(buildJsonObject { put("op", "add"); put("client", "other-2") })
+        sendReceiveResponse = buildJsonObject {
+            put("messages", buildJsonArray {
+                add(incomingEcho("m1", "General", data("subject" to "First")))
+                add(incomingEcho("m2", "General", data("subject" to "Second")))
+            })
+            put("local_packet_ids", buildJsonArray {})
+            put("client_synchronize", true)
+            put("client_container_entries", buildJsonArray {
+                add(buildJsonObject {
+                    put("name", "client_synchronize")
+                    put("entries", buildJsonArray {
+                        add(buildJsonObject { put("id", 1); put("payload", me) })
+                        add(buildJsonObject { put("id", 2); put("payload", other1) })
+                        add(buildJsonObject { put("id", 3); put("payload", other2) })
+                    })
+                })
+            })
+        }
+        session.sync()
+
+        val appends = clientSyncRequests.filter { control ->
+            ((control["data"] as? JsonObject)?.get("action") as? JsonPrimitive)?.content == "append"
+        }
+        assertEquals(1, appends.size)
+        val entries = appendEntries(appends.single())
+        assertEquals(4, entries.size)
+        assertEquals(
+            listOf(
+                "outbound_client_other-1",
+                "outbound_client_other-2",
+                "outbound_client_other-1",
+                "outbound_client_other-2",
+            ),
+            entries.map { it["name"]!!.jsonPrimitive.content },
+        )
+        val first = clientSyncPayload(entries.first())
+        assertEquals("message", first["op"]!!.jsonPrimitive.content)
+        assertEquals("m1", first["message"]!!.jsonObject["message_id"]!!.jsonPrimitive.content)
     }
 
     @Test
@@ -697,12 +754,16 @@ class NetworkSessionTest {
             db.messageDao().getById("n1")!!.dataJson,
         ).jsonObject["subject"]!!.jsonPrimitive.content)
 
-        val delete = clientSyncRequests.last { control ->
+        // The ACK is not a separate delete request: it goes to the next poll.
+        assertTrue(clientSyncRequests.none { control ->
             ((control["data"] as? JsonObject)?.get("action") as? JsonPrimitive)?.content == "delete"
-        }
-        val data = delete["data"]!!.jsonObject
-        assertEquals("outbound_client_client-1", data["name"]!!.jsonPrimitive.content)
-        assertEquals(42, data["ids"]!!.jsonArray[0].jsonPrimitive.int)
+        })
+        sendReceiveResponse = emptySendReceive()
+        session.sync()
+        val ackData = lastSendReceiveControl!!["data"] as JsonObject
+        val ack = (ackData["client_container_ack"] as JsonArray).single() as JsonObject
+        assertEquals("outbound_client_client-1", ack["name"]!!.jsonPrimitive.content)
+        assertEquals(42, ack["ids"]!!.jsonArray[0].jsonPrimitive.int)
     }
 
     @Test
@@ -1209,16 +1270,11 @@ class NetworkSessionTest {
         assertTrue(stored.versionsJson?.contains("Old body") == true)
         assertNull(db.messageDao().getByEchoAndId("General", "upd-1"))
 
-        val append = clientSyncRequests.lastOrNull { control ->
-            val data = control["data"] as? JsonObject
-            data != null &&
-                data["action"]?.jsonPrimitive?.content == "append" &&
-                data["name"]?.jsonPrimitive?.content == "outbound_client_other-1"
-        } ?: error("edit was not forwarded to the other client")
-        val payload = (append["data"] as JsonObject)["payload"]!!.jsonPrimitive.content
-        val op = Json.parseToJsonElement(
-            String(CryptoService.decryptJwe(payload, CryptoService.x25519PrivateKeyFromSeed(userSeed))),
-        ).jsonObject
+        val forward = clientSyncRequests.asSequence()
+            .flatMap { appendEntries(it).asSequence() }
+            .firstOrNull { it["name"]?.jsonPrimitive?.content == "outbound_client_other-1" }
+            ?: error("edit was not forwarded to the other client")
+        val op = clientSyncPayload(forward)
         assertEquals("message", op["op"]!!.jsonPrimitive.content)
         assertEquals("upd-1", op["message"]!!.jsonObject["message_id"]!!.jsonPrimitive.content)
     }
@@ -1282,12 +1338,12 @@ class NetworkSessionTest {
         }
         session.sync()
 
-        val delete = clientSyncRequests.last { control ->
-            ((control["data"] as? JsonObject)?.get("action") as? JsonPrimitive)?.content == "delete"
-        }
-        val data = delete["data"]!!.jsonObject
-        assertEquals("outbound_client_client-1", data["name"]!!.jsonPrimitive.content)
-        assertEquals(77, data["ids"]!!.jsonArray[0].jsonPrimitive.int)
+        sendReceiveResponse = emptySendReceive()
+        session.sync()
+        val ackData = lastSendReceiveControl!!["data"] as JsonObject
+        val ack = (ackData["client_container_ack"] as JsonArray).single() as JsonObject
+        assertEquals("outbound_client_client-1", ack["name"]!!.jsonPrimitive.content)
+        assertEquals(77, ack["ids"]!!.jsonArray[0].jsonPrimitive.int)
     }
 
     @Test
@@ -1408,16 +1464,11 @@ class NetworkSessionTest {
         }
         session.sync()
 
-        val append = clientSyncRequests.lastOrNull { control ->
-            val data = control["data"] as? JsonObject
-            data != null &&
-                data["action"]?.jsonPrimitive?.content == "append" &&
-                data["name"]?.jsonPrimitive?.content == "outbound_client_other-1"
-        } ?: error("no history append for outbound_client_other-1")
-        val payload = ((append["data"] as JsonObject)["payload"]!!).jsonPrimitive.content
-        val op = Json.parseToJsonElement(
-            String(CryptoService.decryptJwe(payload, CryptoService.x25519PrivateKeyFromSeed(userSeed))),
-        ).jsonObject
+        val historyEntry = clientSyncRequests.asSequence()
+            .flatMap { appendEntries(it).asSequence() }
+            .firstOrNull { it["name"]?.jsonPrimitive?.content == "outbound_client_other-1" }
+            ?: error("no history append for outbound_client_other-1")
+        val op = clientSyncPayload(historyEntry)
         assertEquals("sent", op["op"]!!.jsonPrimitive.content)
         assertEquals(
             "Old letter",
@@ -1431,9 +1482,9 @@ class NetworkSessionTest {
         assertTrue(
             "history must not be repeated on every poll",
             clientSyncRequests.none { control ->
-                val data = control["data"] as? JsonObject
-                data?.get("action")?.jsonPrimitive?.content == "append" &&
-                    data["name"]?.jsonPrimitive?.content == "outbound_client_other-1"
+                appendEntries(control).any {
+                    it["name"]?.jsonPrimitive?.content == "outbound_client_other-1"
+                }
             },
         )
     }
@@ -1483,16 +1534,11 @@ class NetworkSessionTest {
         assertEquals(":0:2", stored.recipientAddress)
         assertTrue(Json.parseToJsonElement(stored.dataJson).jsonObject["subject"]!!.jsonPrimitive.content == "Hello")
 
-        val append = clientSyncRequests.lastOrNull { control ->
-            val data = control["data"] as? JsonObject
-            data != null &&
-                data["action"]?.jsonPrimitive?.content == "append" &&
-                data["name"]?.jsonPrimitive?.content == "outbound_client_other-1"
-        } ?: error("no history append for outbound_client_other-1")
-        val payload = ((append["data"] as JsonObject)["payload"]!!).jsonPrimitive.content
-        val op = Json.parseToJsonElement(
-            String(CryptoService.decryptJwe(payload, CryptoService.x25519PrivateKeyFromSeed(userSeed))),
-        ).jsonObject
+        val sentEntry = clientSyncRequests.asSequence()
+            .flatMap { appendEntries(it).asSequence() }
+            .firstOrNull { it["name"]?.jsonPrimitive?.content == "outbound_client_other-1" }
+            ?: error("no history append for outbound_client_other-1")
+        val op = clientSyncPayload(sentEntry)
         assertEquals("sent", op["op"]!!.jsonPrimitive.content)
         assertEquals(":0:2", op["message"]!!.jsonObject["recipient_address"]!!.jsonPrimitive.content)
     }

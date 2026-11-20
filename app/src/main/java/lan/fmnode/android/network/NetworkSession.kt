@@ -47,6 +47,8 @@ class NetworkSession(
     private var registeredThisSession = false
     private var clientSyncEnabled = false
     private var knownClients: Set<String> = emptySet()
+    /** Encrypted client-sync append entries waiting for the next flush. */
+    private val pendingClientAppends = mutableListOf<Pair<String, String>>()
 
     /** Daily rate-limit usage of this address, returned by the node. */
     var rateLimitUsage: Map<String, RateLimitUsage> = emptyMap()
@@ -311,10 +313,17 @@ class NetworkSession(
         // the node accepted the request; otherwise the same ids are sent on
         // every poll and the node logs the same "send_receive ACK" forever.
         val pendingAcks = pendingDeliveredIds()
+        // ACKs of client-container entries processed on the previous poll: the
+        // node deletes them in this send_receive, so no separate delete request
+        // is needed (#client-sync batch).
+        val clientAcks = takeClientAcks()
         val request = buildJsonObject {
             put("messages", buildJsonArray {})
             if (pendingAcks.isNotEmpty()) {
                 put("delivered_local_ids", buildJsonArray { pendingAcks.forEach { add(JsonPrimitive(it)) } })
+            }
+            if (clientAcks.isNotEmpty()) {
+                put("client_container_ack", clientAcks)
             }
             put(
                 "client_sync_read",
@@ -324,9 +333,18 @@ class NetworkSession(
                 },
             )
         }
-        val response = api.post("send_receive", request.toString(), auth)
+        val response = try {
+            api.post("send_receive", request.toString(), auth)
+        } catch (e: Exception) {
+            // Keep the ACKs for the next successful poll.
+            restoreClientAcks(clientAcks)
+            throw e
+        }
         clearDeliveredIds(pendingAcks)
-        val obj = response as? JsonObject ?: return SyncOutcome(0, 0, emptyList())
+        val obj = response as? JsonObject ?: run {
+            restoreClientAcks(clientAcks)
+            return SyncOutcome(0, 0, emptyList())
+        }
         rateLimitUsage = parseRateLimits(obj["rate_limit"])
 
         var received = 0
@@ -1074,28 +1092,65 @@ class NetworkSession(
         return runCatching { json.parseToJsonElement(clientLayer).jsonObject }.getOrNull()
     }
 
+    /**
+     * Appends one operation to one container. Used for immediate operations
+     * (logout, a user action); poll-time sharing goes through
+     * [appendOpsToClients] and one batched request.
+     */
     private suspend fun appendContainer(name: String, op: JsonObject) {
-        val data = buildJsonObject {
-            put("action", "append")
-            put("name", name)
-            put("payload", encryptClientPayload(op))
-        }
-        api.post("client_synchronize", data.toString(), auth)
+        appendContainers(listOf(name to encryptClientPayload(op)))
     }
 
-    private suspend fun deleteContainerEntries(name: String, ids: List<JsonElement>) {
-        if (ids.isEmpty()) return
-        val data = buildJsonObject {
-            put("action", "delete")
-            put("name", name)
-            put("ids", buildJsonArray { ids.forEach { add(it) } })
+    /** Queues already encrypted payloads for the next batched append. */
+    private suspend fun appendContainers(entries: List<Pair<String, String>>) {
+        if (entries.isEmpty()) return
+        synchronized(pendingClientAppends) { pendingClientAppends += entries }
+    }
+
+    /**
+     * Sends all queued client-sync entries in one `client_synchronize` request
+     * (several if a huge history exceeds the node's per-request limit).
+     * On failure the queue is kept for the next poll.
+     */
+    private suspend fun flushClientAppends() {
+        val entries = synchronized(pendingClientAppends) {
+            if (pendingClientAppends.isEmpty()) return
+            pendingClientAppends.toList().also { pendingClientAppends.clear() }
         }
-        api.post("client_synchronize", data.toString(), auth)
+        var sent = 0
+        try {
+            for (chunk in clientAppendChunks(entries)) {
+                val data = buildJsonObject {
+                    put("action", "append")
+                    put(
+                        "entries",
+                        buildJsonArray {
+                            chunk.forEach { (name, payload) ->
+                                add(buildJsonObject {
+                                    put("name", name)
+                                    put("payload", payload)
+                                })
+                            }
+                        },
+                    )
+                }
+                api.post("client_synchronize", data.toString(), auth)
+                sent += chunk.size
+            }
+        } catch (e: Exception) {
+            // Keep only the unsent part; already stored chunks must not be
+            // duplicated on the next poll.
+            synchronized(pendingClientAppends) {
+                pendingClientAppends.addAll(0, entries.drop(sent))
+            }
+            android.util.Log.w("NetworkSession", "client sync append failed: ${e.message}")
+        }
     }
 
     /** Shares a local blog operation with the other devices of this identity. */
     suspend fun broadcastBlogOp(op: JsonObject) {
         appendToClients(knownClients, op)
+        flushClientAppends()
     }
 
     /** Removes this client from the list on logout (best effort). */
@@ -1109,6 +1164,7 @@ class NetworkSession(
                     put("client", clientId())
                 },
             )
+            flushClientAppends()
         }
     }
 
@@ -1117,7 +1173,12 @@ class NetworkSession(
      * with the other clients of this address. A failed copy must never requeue
      * the already delivered message.
      */
-    private suspend fun recordSentNetmail(recipient: String, dataJson: String, jws: String?) {
+    private suspend fun recordSentNetmail(
+        recipient: String,
+        dataJson: String,
+        jws: String?,
+        flush: Boolean = true,
+    ) {
         runCatching {
             val timestamp = runCatching {
                 val data = json.parseToJsonElement(dataJson).jsonObject
@@ -1145,6 +1206,7 @@ class NetworkSession(
                     put("message", clientMessage(sent, sent = true))
                 },
             )
+            if (flush) flushClientAppends()
         }
     }
 
@@ -1257,30 +1319,46 @@ class NetworkSession(
             }
             (entry["id"] as? JsonPrimitive)?.let(ackIds::add)
         }
-        if (ackIds.isNotEmpty()) deleteContainerEntries(ownContainer, ackIds)
+        if (ackIds.isNotEmpty()) bufferClientAcks(ownContainer, ackIds)
 
         if (incoming.isNotEmpty()) {
             val others = clients - me
-            for (message in incoming) {
-                appendToClients(
-                    others,
+            appendOpsToClients(
+                others,
+                incoming.map { message ->
                     buildJsonObject {
                         put("op", "message")
                         put("message", message)
-                    },
-                )
-            }
+                    }
+                },
+            )
         }
+        // One batched append for registration, history and fresh messages.
+        flushClientAppends()
     }
 
     /** Sends one op to every client in [targets], best effort. */
     private suspend fun appendToClients(targets: Set<String>, op: JsonObject) {
-        if (!clientSyncEnabled || targets.isEmpty()) return
+        appendOpsToClients(targets, listOf(op))
+    }
+
+    /**
+     * Shares [ops] with every target device in one batched append request.
+     * Each op is encrypted once and reused for all containers of this address.
+     */
+    private suspend fun appendOpsToClients(targets: Set<String>, ops: List<JsonObject>) {
+        if (!clientSyncEnabled || targets.isEmpty() || ops.isEmpty()) return
         val me = clientId()
-        for (target in targets) {
-            if (target.isBlank() || target == me) continue
-            runCatching { appendContainer(CLIENT_CONTAINER_PREFIX + target, op) }
+        val validTargets = targets.filter { it.isNotBlank() && it != me }
+        if (validTargets.isEmpty()) return
+        val entries = mutableListOf<Pair<String, String>>()
+        for (op in ops) {
+            val payload = encryptClientPayload(op)
+            for (target in validTargets) {
+                entries += CLIENT_CONTAINER_PREFIX + target to payload
+            }
         }
+        runCatching { appendContainers(entries) }
     }
 
     /**
@@ -1290,56 +1368,49 @@ class NetworkSession(
      */
     private suspend fun uploadLocalHistory(targets: Set<String>) {
         if (!clientSyncEnabled || targets.isEmpty()) return
+        val ops = mutableListOf<JsonObject>()
         val netmail = database.messageDao().getRecent(NETMAIL_ECHO, 100).reversed()
         for (message in netmail) {
             val sent = message.senderAddress == profile.address && !message.recipientAddress.isNullOrBlank()
-            appendToClients(
-                targets,
-                buildJsonObject {
-                    put("op", if (sent) "sent" else "message")
-                    put("message", clientMessage(message, sent))
-                },
-            )
+            ops += buildJsonObject {
+                put("op", if (sent) "sent" else "message")
+                put("message", clientMessage(message, sent))
+            }
         }
         for (blog in database.blogDao().getAll()) {
-            appendToClients(
-                targets,
-                buildJsonObject {
-                    put("op", "blog")
-                    put(
-                        "blog",
-                        buildJsonObject {
-                            put("id", blog.id)
-                            put("name", blog.name)
-                            put("description", blog.description)
-                            put("createdAt", blog.createdAt)
-                            put("updatedAt", blog.updatedAt)
-                        },
-                    )
-                },
-            )
+            ops += buildJsonObject {
+                put("op", "blog")
+                put(
+                    "blog",
+                    buildJsonObject {
+                        put("id", blog.id)
+                        put("name", blog.name)
+                        put("description", blog.description)
+                        put("createdAt", blog.createdAt)
+                        put("updatedAt", blog.updatedAt)
+                    },
+                )
+            }
         }
         for (post in database.blogPostDao().getAll().takeLast(100)) {
             val attachments = runCatching { json.parseToJsonElement(post.attachmentsJson) }
                 .getOrElse { buildJsonArray {} }
-            appendToClients(
-                targets,
-                buildJsonObject {
-                    put("op", "blogPost")
-                    put(
-                        "post",
-                        buildJsonObject {
-                            put("id", post.id)
-                            put("blogId", post.blogId)
-                            put("title", post.title)
-                            put("body", post.body)
-                            put("attachments", attachments)
-                            put("timestamp", post.timestamp)
-                        },
-                    )
-                },
-            )
+            ops += buildJsonObject {
+                put("op", "blogPost")
+                put(
+                    "post",
+                    buildJsonObject {
+                        put("id", post.id)
+                        put("blogId", post.blogId)
+                        put("title", post.title)
+                        put("body", post.body)
+                        put("attachments", attachments)
+                        put("timestamp", post.timestamp)
+                    },
+                )
+            }
         }
+        appendOpsToClients(targets, ops)
     }
 
     /** Wire shape of one locally stored message for the client-sync queue. */
@@ -1610,7 +1681,7 @@ class NetworkSession(
                 sendMessages(listOf(message))
                 if (entry.type == "netmail") {
                     entry.recipientAddress?.let { recipient ->
-                        recordSentNetmail(recipient, dataJson, message.string("jws"))
+                        recordSentNetmail(recipient, dataJson, message.string("jws"), flush = false)
                     }
                 }
                 database.outboxDao().delete(entry.id)
@@ -1619,6 +1690,8 @@ class NetworkSession(
                 database.outboxDao().updateAttempt(entry.id, entry.attempts + 1, e.message)
             }
         }
+        // One batched append for all netmail copies produced by this flush.
+        flushClientAppends()
     }
 
     /** Rate-limit kind of a queued entry, matching fm-app's classification. */
@@ -1715,6 +1788,88 @@ class NetworkSession(
         }
     }
 
+    private fun parseClientAcks(raw: String?): LinkedHashMap<String, LinkedHashSet<Long>> {
+        val map = linkedMapOf<String, LinkedHashSet<Long>>()
+        val array = raw?.let {
+            runCatching { json.parseToJsonElement(it) as JsonArray }.getOrNull()
+        } ?: return map
+        for (element in array) {
+            val obj = element as? JsonObject ?: continue
+            val name = obj.string("name") ?: continue
+            val set = map.getOrPut(name) { linkedSetOf() }
+            (obj["ids"] as? JsonArray)?.forEach { id ->
+                (id as? JsonPrimitive)?.longOrNull?.let(set::add)
+            }
+        }
+        return map
+    }
+
+    private fun clientAcksJson(map: Map<String, Collection<Long>>): JsonArray = buildJsonArray {
+        map.forEach { (name, ids) ->
+            if (ids.isEmpty()) return@forEach
+            add(buildJsonObject {
+                put("name", name)
+                put("ids", buildJsonArray { ids.forEach { add(JsonPrimitive(it)) } })
+            })
+        }
+    }
+
+    /** Queues entries of this client's own container for the next send_receive. */
+    private suspend fun bufferClientAcks(name: String, ids: List<JsonElement>) {
+        if (ids.isEmpty()) return
+        val map = parseClientAcks(database.metaDao().get(META_CLIENT_ACKS))
+        val set = map.getOrPut(name) { linkedSetOf() }
+        ids.forEach { id -> (id as? JsonPrimitive)?.longOrNull?.let(set::add) }
+        if (set.isEmpty()) return
+        database.metaDao().put(MetaEntity(META_CLIENT_ACKS, clientAcksJson(map).toString()))
+    }
+
+    /** Takes the ACKs for the next request; they are restored on failure. */
+    private suspend fun takeClientAcks(): JsonArray {
+        val map = parseClientAcks(database.metaDao().get(META_CLIENT_ACKS))
+        if (map.isEmpty()) return JsonArray(emptyList())
+        database.metaDao().delete(META_CLIENT_ACKS)
+        return clientAcksJson(map)
+    }
+
+    private suspend fun restoreClientAcks(acks: JsonArray) {
+        if (acks.isEmpty()) return
+        val map = parseClientAcks(database.metaDao().get(META_CLIENT_ACKS))
+        for (element in acks) {
+            val obj = element as? JsonObject ?: continue
+            val name = obj.string("name") ?: continue
+            val set = map.getOrPut(name) { linkedSetOf() }
+            (obj["ids"] as? JsonArray)?.forEach { id ->
+                (id as? JsonPrimitive)?.longOrNull?.let(set::add)
+            }
+        }
+        database.metaDao().put(MetaEntity(META_CLIENT_ACKS, clientAcksJson(map).toString()))
+    }
+
+    /** Splits entries by count and by an approximate body-size budget. */
+    private fun clientAppendChunks(
+        entries: List<Pair<String, String>>,
+    ): List<List<Pair<String, String>>> {
+        val chunks = mutableListOf<List<Pair<String, String>>>()
+        var current = mutableListOf<Pair<String, String>>()
+        var bytes = 0L
+        for (entry in entries) {
+            val size = entry.second.length.toLong()
+            if (current.isNotEmpty() &&
+                (current.size >= MAX_CLIENT_SYNC_APPEND_ENTRIES ||
+                    bytes + size > MAX_CLIENT_SYNC_APPEND_BYTES)
+            ) {
+                chunks += current
+                current = mutableListOf()
+                bytes = 0
+            }
+            current += entry
+            bytes += size
+        }
+        if (current.isNotEmpty()) chunks += current
+        return chunks
+    }
+
     private suspend fun settingsFlag(key: String, default: Boolean): Boolean {
         val value = database.metaDao().get(key) ?: return default
         return value == "1"
@@ -1738,6 +1893,9 @@ class NetworkSession(
     companion object {
         const val NETMAIL_ECHO = "__netmail__"
         private const val META_DELIVERED_IDS = "pending_delivered_ids"
+        private const val META_CLIENT_ACKS = "pending_client_acks"
+        private const val MAX_CLIENT_SYNC_APPEND_ENTRIES = 200
+        private const val MAX_CLIENT_SYNC_APPEND_BYTES = 4 * 1024 * 1024
         private const val META_CLIENT_ID = "client_id"
         private const val META_KNOWN_CLIENTS = "client_sync_known"
         const val CLIENT_LIST_CONTAINER = "client_synchronize"
