@@ -51,6 +51,7 @@ class NetworkSession(
     private var knownClients: Set<String> = emptySet()
     /** Encrypted client-sync append entries waiting for the next request. */
     private val pendingClientAppends = mutableListOf<Pair<String, String>>()
+    private var clientAppendsLoaded = false
 
     /** Daily rate-limit usage of this address, returned by the node. */
     var rateLimitUsage: Map<String, RateLimitUsage> = emptyMap()
@@ -1121,7 +1122,9 @@ class NetworkSession(
     /** Queues already encrypted payloads for the next batched append. */
     private suspend fun appendContainers(entries: List<Pair<String, String>>) {
         if (entries.isEmpty()) return
+        ensureClientAppendsLoaded()
         synchronized(pendingClientAppends) { pendingClientAppends += entries }
+        saveClientAppends()
     }
 
     /**
@@ -1130,10 +1133,12 @@ class NetworkSession(
      * On failure the queue is kept for the next poll.
      */
     private suspend fun flushClientAppends() {
+        ensureClientAppendsLoaded()
         val entries = synchronized(pendingClientAppends) {
             if (pendingClientAppends.isEmpty()) return
             pendingClientAppends.toList().also { pendingClientAppends.clear() }
         }
+        saveClientAppends()
         var sent = 0
         try {
             for (chunk in clientAppendChunks(entries)) {
@@ -1160,6 +1165,7 @@ class NetworkSession(
             synchronized(pendingClientAppends) {
                 pendingClientAppends.addAll(0, entries.drop(sent))
             }
+            saveClientAppends()
             android.util.Log.w("NetworkSession", "client sync append failed: ${e.message}")
         }
     }
@@ -1869,7 +1875,8 @@ class NetworkSession(
      * Takes a prefix of the append queue for the next send_receive. The rest
      * stays queued so one request stays within the node's count/body limits.
      */
-    private fun takeClientAppends(): JsonArray {
+    private suspend fun takeClientAppends(): JsonArray {
+        ensureClientAppendsLoaded()
         val taken = mutableListOf<Pair<String, String>>()
         var bytes = 0L
         synchronized(pendingClientAppends) {
@@ -1884,6 +1891,7 @@ class NetworkSession(
                 bytes += size
             }
         }
+        if (taken.isNotEmpty()) saveClientAppends()
         return buildJsonArray {
             taken.forEach { (name, payload) ->
                 add(buildJsonObject {
@@ -1895,8 +1903,9 @@ class NetworkSession(
     }
 
     /** Puts appends back when the send_receive request failed. */
-    private fun restoreClientAppends(appends: JsonArray) {
+    private suspend fun restoreClientAppends(appends: JsonArray) {
         if (appends.isEmpty()) return
+        ensureClientAppendsLoaded()
         val entries = appends.mapNotNull { element ->
             val obj = element as? JsonObject ?: return@mapNotNull null
             val name = obj.string("name") ?: return@mapNotNull null
@@ -1905,6 +1914,42 @@ class NetworkSession(
         }
         if (entries.isEmpty()) return
         synchronized(pendingClientAppends) { pendingClientAppends.addAll(0, entries) }
+        saveClientAppends()
+    }
+
+    /** Loads the persisted append queue once per session. */
+    private suspend fun ensureClientAppendsLoaded() {
+        if (clientAppendsLoaded) return
+        val raw = database.metaDao().get(META_PENDING_CLIENT_APPENDS)
+        val array = raw?.let {
+            runCatching { json.parseToJsonElement(it) as JsonArray }.getOrNull()
+        }
+        if (array != null) {
+            synchronized(pendingClientAppends) {
+                pendingClientAppends.clear()
+                for (element in array) {
+                    val obj = element as? JsonObject ?: continue
+                    val name = obj.string("name") ?: continue
+                    val payload = obj.string("payload") ?: continue
+                    pendingClientAppends += name to payload
+                }
+            }
+        }
+        clientAppendsLoaded = true
+    }
+
+    /** Persists the append queue so a process restart does not lose sync ops. */
+    private suspend fun saveClientAppends() {
+        val snapshot = synchronized(pendingClientAppends) { pendingClientAppends.toList() }
+        val array = buildJsonArray {
+            snapshot.forEach { (name, payload) ->
+                add(buildJsonObject {
+                    put("name", name)
+                    put("payload", payload)
+                })
+            }
+        }
+        database.metaDao().put(MetaEntity(META_PENDING_CLIENT_APPENDS, array.toString()))
     }
 
     /** Splits entries by count and by an approximate body-size budget. */
@@ -1955,6 +2000,7 @@ class NetworkSession(
         const val NETMAIL_ECHO = "__netmail__"
         private const val META_DELIVERED_IDS = "pending_delivered_ids"
         private const val META_CLIENT_ACKS = "pending_client_acks"
+        private const val META_PENDING_CLIENT_APPENDS = "pending_client_appends"
         private const val MAX_CLIENT_SYNC_APPEND_ENTRIES = 200
         private const val MAX_CLIENT_SYNC_APPEND_BYTES = 4 * 1024 * 1024
         private const val META_CLIENT_ID = "client_id"
