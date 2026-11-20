@@ -52,6 +52,8 @@ import lan.fmnode.android.storage.PasswordStore
 import lan.fmnode.android.storage.ProfileEntity
 import lan.fmnode.android.crypto.CryptoService
 import lan.fmnode.android.crypto.Encoding
+import lan.fmnode.android.log.AppLog
+import lan.fmnode.android.log.LogCategory
 
 enum class AppScreen {
     Unlock, Networks, AddNetwork,
@@ -63,6 +65,7 @@ enum class AppScreen {
     Admin,
     EchoBrowser,
     Outbox,
+    Logs,
     Settings,
 }
 
@@ -1414,9 +1417,17 @@ class AppViewModel(
     }
 
     private suspend fun syncOnce(opened: NetworkSession) {
+        val startedAt = System.currentTimeMillis()
+        AppLog.debug(LogCategory.APP, "refresh start", opened.profile.address)
         _state.update { it.copy(syncing = true) }
         try {
             val outcome = opened.sync()
+            AppLog.info(
+                LogCategory.APP,
+                "refresh ok",
+                "received=${outcome.received} acked=${outcome.acknowledged} " +
+                    "elapsed=${System.currentTimeMillis() - startedAt}ms",
+            )
             // The node delivers server-side rejections and takes no other
             // notice of them, so they become a visible indicator (#14).
             collectSendErrors(outcome.errors + opened.drainErrors())
@@ -1432,6 +1443,11 @@ class AppViewModel(
             revalidateCompose()
             revalidateNetmailCompose()
         } catch (e: Exception) {
+            AppLog.error(
+                LogCategory.APP,
+                "refresh failed after ${System.currentTimeMillis() - startedAt}ms",
+                "${e.javaClass.simpleName}: ${e.message}",
+            )
             if (e is FmApiException && e.next == "policy") {
                 _state.update { it.copy(syncing = false, syncError = null) }
                 startPolicyResign(opened)
@@ -4063,6 +4079,10 @@ class AppViewModel(
     }
 
     // ---------------------------------------------------------------- settings
+
+    fun openLogs() {
+        _state.update { it.copy(screen = AppScreen.Logs) }
+    }
 
     fun openSettings() {
         _state.update { it.copy(screen = AppScreen.Settings) }

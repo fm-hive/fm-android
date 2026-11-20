@@ -96,6 +96,8 @@ import lan.fmnode.android.ui.theme.FmTheme
 data class FeedSettingsCallbacks(
     val onShowTearline: (Boolean) -> Unit = {},
     val onShowServiceMessages: (Boolean) -> Unit = {},
+    /** Opens the diagnostics/log screen from Settings. */
+    val onOpenLogs: () -> Unit = {},
 )
 
 @Composable
@@ -352,6 +354,7 @@ fun FmRoot(
             AppScreen.Admin -> onCloseAdmin()
             AppScreen.EchoBrowser -> onCloseEchoBrowser()
             AppScreen.Outbox -> onCloseOutbox()
+            AppScreen.Logs -> onOpenSettings()
             AppScreen.Settings -> onSelectEchoTab()
         }
     }
@@ -782,6 +785,7 @@ fun FmRoot(
             onTagline = onNetmailTagline,
             onClearReply = onClearNetmailReply,
         )
+        AppScreen.Logs -> LogsScreen(onBack = onOpenSettings)
         AppScreen.Outbox -> OutboxScreen(
             entries = state.outbox,
             onBack = onCloseOutbox,
@@ -842,6 +846,7 @@ fun FmRoot(
             onDismissVoucher = onDismissVoucher,
             onOpenOutbox = onOpenOutbox,
             onOpenPolicyViewer = onOpenPolicyViewer,
+            onOpenLogs = feedSettings.onOpenLogs,
             onOpenDisplayName = onOpenDisplayName,
             tagline = state.tagline,
             showTearline = state.showTearline,

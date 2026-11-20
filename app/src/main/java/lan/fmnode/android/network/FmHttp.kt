@@ -2,6 +2,7 @@ package lan.fmnode.android.network
 
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
+import java.util.concurrent.TimeUnit
 import javax.net.ssl.SSLContext
 import javax.net.ssl.X509TrustManager
 import okhttp3.OkHttpClient
@@ -30,5 +31,12 @@ object FmHttp {
     val client: OkHttpClient = OkHttpClient.Builder()
         .sslSocketFactory(sslContext.socketFactory, trustAllManager)
         .hostnameVerifier { _, _ -> true }
+        // The default 10 s call timeout is too short for a busy node (large
+        // outbound queues, polling/merge). Explicit values also make timeout
+        // failures visible in the log (#50).
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
+        .writeTimeout(60, TimeUnit.SECONDS)
+        .callTimeout(90, TimeUnit.SECONDS)
         .build()
 }

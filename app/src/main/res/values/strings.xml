@@ -101,6 +101,16 @@
     <string name="policy_changed_title">The network policy has changed</string>
     <string name="policy_accept">Accept the policy</string>
     <string name="outbox_title">Outbox</string>
+    <string name="logs_title">Logs</string>
+    <string name="logs_all">All</string>
+    <string name="logs_network">Network</string>
+    <string name="logs_app">App</string>
+    <string name="logs_errors">Errors</string>
+    <string name="logs_clear">Clear logs</string>
+    <string name="logs_clear_confirm">Delete all log entries and the log file?</string>
+    <string name="logs_empty">No log entries yet</string>
+    <string name="logs_share">Share logs</string>
+    <string name="logs_privacy">Logs may contain addresses, echo names and message subjects. Do not share them publicly.</string>
     <string name="outbox_empty">No queued messages</string>
     <string name="retry">Retry</string>
     <string name="refill_title">Refill history</string>

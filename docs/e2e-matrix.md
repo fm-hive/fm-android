@@ -443,3 +443,18 @@ adb shell am get-config | head -1   # ...-ru-rRU-...
 - Проверка: `NetworkSessionTest` (локальная копия запроса), `ServiceMessageTest`,
   `RefillRequestTest`; ручной прогон на стенде с `fmclient refill request` и
   ответом из приложения.
+
+## Сетевой и прикладной лог (#50)
+
+- Settings → Logs открывает экран с фильтрами All/Network/App/Errors.
+- Сетевые записи: control-запрос, URL, размер запроса, HTTP-статус, размер и
+  время ответа, ошибки (`FmApiClient`).
+- Прикладные записи: старт/финиш `sync` с received/ack/errors, protocol-типы,
+  client-sync события, ошибки refresh; uncaught exception пишет stack trace.
+- Записи хранятся в `filesDir/logs/fm.log` с ротацией 1 MB и переживают
+  перезапуск; тела сообщений и JWE не логируются.
+- Кнопки Clear и Share (текстовый файл через `FileProvider`); предупреждение о
+  приватности.
+- Явные OkHttp timeout: connect 30 s, read/write 60 s, call 90 s.
+- Проверка: `AppLogTest`, `FmApiClientLoggingTest`, ручной прогон на эмуляторе
+  (экран Logs показывает ошибку refresh и HTTP 400).

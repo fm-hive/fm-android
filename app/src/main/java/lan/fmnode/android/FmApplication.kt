@@ -1,6 +1,7 @@
 package lan.fmnode.android
 
 import android.app.Application
+import lan.fmnode.android.log.AppLog
 import lan.fmnode.android.network.NetworkManager
 import lan.fmnode.android.session.Session
 import lan.fmnode.android.storage.KeystorePasswordStore
@@ -32,6 +33,8 @@ class FmApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // Logs are available before the vault is unlocked (policy/network).
+        AppLog.init(this)
         container = AppContainer(this)
     }
 }

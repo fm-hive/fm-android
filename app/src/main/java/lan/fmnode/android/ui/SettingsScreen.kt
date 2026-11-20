@@ -92,6 +92,7 @@ fun SettingsScreen(
     onAutoSendPubkey: (Boolean) -> Unit = {},
     onOpenOutbox: () -> Unit,
     onOpenPolicyViewer: () -> Unit,
+    onOpenLogs: () -> Unit = {},
     onLock: () -> Unit,
     onLogout: () -> Unit,
 ) {
@@ -426,6 +427,9 @@ fun SettingsScreen(
             }
             OutlinedButton(onClick = onOpenPolicyViewer, modifier = Modifier.fillMaxWidth()) {
                 Text(stringResource(R.string.view_policy))
+            }
+            OutlinedButton(onClick = onOpenLogs, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.logs_title))
             }
             OutlinedButton(onClick = onOpenRecovery, modifier = Modifier.fillMaxWidth()) {
                 Text(stringResource(R.string.recovery_title))

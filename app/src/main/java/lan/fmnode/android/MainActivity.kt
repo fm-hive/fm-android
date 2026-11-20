@@ -176,6 +176,7 @@ class MainActivity : ComponentActivity() {
                     feedSettings = FeedSettingsCallbacks(
                         onShowTearline = viewModel::setShowTearline,
                         onShowServiceMessages = viewModel::setShowServiceMessages,
+                        onOpenLogs = viewModel::openLogs,
                     ),
                     onAllowSendingWithoutRateLimit = viewModel::setAllowSendingWithoutRateLimit,
                     onImageMaxDimension = viewModel::setImageMaxDimension,
