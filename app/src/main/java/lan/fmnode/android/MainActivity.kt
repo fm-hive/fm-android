@@ -14,6 +14,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import lan.fmnode.android.ui.AppViewModel
+import lan.fmnode.android.ui.EchoActionsCallbacks
 import lan.fmnode.android.ui.FeedSettingsCallbacks
 import lan.fmnode.android.ui.FmRoot
 import lan.fmnode.android.ui.ScanPurpose
@@ -178,6 +179,10 @@ class MainActivity : ComponentActivity() {
                         onShowServiceMessages = viewModel::setShowServiceMessages,
                         onOpenLogs = viewModel::openLogs,
                     ),
+                    echoActions = EchoActionsCallbacks(
+                        onDeleteEchoGroup = viewModel::deleteEchoGroup,
+                        onDeleteEchoLocalCopy = viewModel::deleteEchoLocalCopy,
+                    ),
                     onAllowSendingWithoutRateLimit = viewModel::setAllowSendingWithoutRateLimit,
                     onImageMaxDimension = viewModel::setImageMaxDimension,
                     onRememberImageDimension = viewModel::setRememberImageDimension,
@@ -301,7 +306,6 @@ class MainActivity : ComponentActivity() {
                     onCloseEchoGroups = viewModel::closeEchoGroupsDialog,
                     onEchoGroupDraftName = viewModel::setEchoGroupDraftName,
                     onCreateEchoGroup = viewModel::createEchoGroup,
-                    onDeleteEchoGroup = viewModel::deleteEchoGroup,
                     onToggleEchoGroupSelection = viewModel::toggleEchoGroupSelection,
                     onAssignEchoGroup = viewModel::assignSelectionToGroup,
                     onOpenDisplayName = viewModel::openDisplayNameDialog,

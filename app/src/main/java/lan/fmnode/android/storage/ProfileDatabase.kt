@@ -313,6 +313,10 @@ interface MessageDao {
     @Query("DELETE FROM messages WHERE echoName = :echo AND messageId = :messageId")
     suspend fun delete(echo: String, messageId: String)
 
+    /** Removes the whole local copy of an echo; the subscription is kept (#388). */
+    @Query("DELETE FROM messages WHERE echoName = :echo")
+    suspend fun deleteByEcho(echo: String)
+
     /** Moves locally stored messages when the node renames a conference. */
     @Query("UPDATE messages SET echoName = :newName WHERE echoName = :oldName")
     suspend fun renameEcho(oldName: String, newName: String)

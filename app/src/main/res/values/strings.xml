@@ -162,6 +162,9 @@
     <string name="create_folder">New folder</string>
     <string name="folder_name">Folder name</string>
     <string name="move_to_folder">Move to folder</string>
+    <string name="netmail_folder_actions">Folder actions</string>
+    <string name="netmail_delete_folder">Delete folder</string>
+    <string name="netmail_delete_folder_confirm">Delete this folder and all its messages?</string>
     <string name="recovery_title">Recovery mode</string>
     <string name="recovery_hint">Connect this identity to a recovery node while your own node is unavailable. Paste its invite link.</string>
     <string name="recovery_url">Recovery node invite link</string>
@@ -194,6 +197,13 @@
     <string name="echo_groups_hint">Select conferences, then tap a group to move them into it.</string>
     <string name="echo_groups_move_selected">Move selected here</string>
     <string name="echo_groups_empty_members">No conferences in this group yet</string>
+    <string name="echo_unsubscribe">Unsubscribe</string>
+    <string name="echo_unsubscribe_confirm">Unsubscribe from %1$s? Locally stored messages will stay.</string>
+    <string name="echo_delete_local">Delete local copy</string>
+    <string name="echo_delete_local_confirm">Delete all locally stored messages of %1$s? The subscription is kept and new messages will keep arriving.</string>
+    <string name="echo_groups_actions">Group actions</string>
+    <string name="echo_groups_delete">Delete group</string>
+    <string name="echo_groups_delete_confirm">Delete group %1$s? Its conferences will move to Ungrouped.</string>
     <string name="display_name_change">Change display name</string>
     <string name="voucher_type">Voucher type</string>
     <string name="voucher_type_invite">Single-use invite</string>
