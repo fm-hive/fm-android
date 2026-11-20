@@ -16,6 +16,8 @@ import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import lan.fmnode.android.crypto.CryptoService
 import lan.fmnode.android.crypto.Encoding
+import lan.fmnode.android.log.AppLog
+import lan.fmnode.android.log.LogCategory
 import lan.fmnode.android.storage.BlogEntity
 import lan.fmnode.android.storage.BlogPostEntity
 import lan.fmnode.android.storage.EchoEntity
@@ -309,6 +311,8 @@ class NetworkSession(
 
     /** Pulls new messages, sends queued outbox entries, confirms delivered packets. */
     suspend fun sync(): SyncOutcome {
+        val startedAt = System.currentTimeMillis()
+        AppLog.debug(LogCategory.APP, "sync start", profile.address)
         flushOutbox()
 
         val ownContainer = CLIENT_CONTAINER_PREFIX + clientId()
@@ -399,6 +403,12 @@ class NetworkSession(
         // A key delivered in this very response may unblock queued netmail, so
         // the outbox is flushed again after the incoming messages are stored.
         flushOutbox()
+        AppLog.info(
+            LogCategory.APP,
+            "sync done",
+            "received=$received acked=$acknowledged errors=${errors.size} " +
+                "clientSync=$clientSyncEnabled elapsed=${System.currentTimeMillis() - startedAt}ms",
+        )
         return SyncOutcome(received, acknowledged, errors)
     }
 
@@ -1261,9 +1271,10 @@ class NetworkSession(
             val client = op.string("client") ?: continue
             if (op.string("op") == "remove") clients.remove(client) else clients.add(client)
         }
-        android.util.Log.d(
-            "NetworkSession",
-            "client sync: me=$me clients=$clients ownEntries=${ownEntries.size}",
+        AppLog.debug(
+            LogCategory.APP,
+            "client sync",
+            "me=$me clients=${clients.size} ownEntries=${ownEntries.size}",
         )
 
         // Register before sharing history so the other side can address us.
@@ -1568,6 +1579,9 @@ class NetworkSession(
         // A message moved to a custom netmail folder must stay there when the
         // node delivers the same id again (for example after a re-sync). ids are
         // only unique inside an echo, so the row is looked up by both.
+        if (type != "echomail" && type != "netmail") {
+            AppLog.info(LogCategory.APP, "received $type", "$messageId @ $echoName")
+        }
         val existing = database.messageDao().getByEchoAndId(echoName, messageId)
         database.messageDao().upsert(
             MessageEntity(
@@ -1614,6 +1628,8 @@ class NetworkSession(
     }
 
     private suspend fun sendMessages(messages: List<JsonObject>): JsonElement {
+        val types = messages.mapNotNull { it.string("type") }
+        AppLog.debug(LogCategory.NETWORK, "send ${messages.size} message(s)", types.joinToString(","))
         val body = buildJsonObject {
             put("messages", buildJsonArray { messages.forEach { add(it) } })
         }

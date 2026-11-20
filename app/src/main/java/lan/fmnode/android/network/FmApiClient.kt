@@ -10,6 +10,8 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import lan.fmnode.android.crypto.CryptoService
+import lan.fmnode.android.log.AppLog
+import lan.fmnode.android.log.LogCategory
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -116,15 +118,44 @@ class FmApiClient(
             .post(body.toRequestBody(requestMediaType))
             .build()
 
-        http.newCall(httpRequest).execute().use { response ->
-            val text = response.body?.string().orEmpty()
-            if (!response.isSuccessful) {
-                val parsed = runCatching { json.parseToJsonElement(text).jsonObject }.getOrNull()
-                val error = parsed?.get("error")?.asText() ?: response.message
-                val next = parsed?.get("next")?.asText()
-                throw FmApiException(response.code, error, next)
+        val started = System.currentTimeMillis()
+        AppLog.debug(
+            LogCategory.NETWORK,
+            "→ $request $baseUrl",
+            "request=${body.length}B",
+        )
+        try {
+            http.newCall(httpRequest).execute().use { response ->
+                val text = response.body?.string().orEmpty()
+                val elapsed = System.currentTimeMillis() - started
+                AppLog.debug(
+                    LogCategory.NETWORK,
+                    "← $request HTTP ${response.code} ${elapsed}ms",
+                    "response=${text.length}B",
+                )
+                if (!response.isSuccessful) {
+                    val parsed = runCatching { json.parseToJsonElement(text).jsonObject }.getOrNull()
+                    val error = parsed?.get("error")?.asText() ?: response.message
+                    val next = parsed?.get("next")?.asText()
+                    AppLog.warn(
+                        LogCategory.NETWORK,
+                        "✕ $request HTTP ${response.code}",
+                        error,
+                    )
+                    throw FmApiException(response.code, error, next)
+                }
+                unwrapResponse(text)
             }
-            unwrapResponse(text)
+        } catch (e: FmApiException) {
+            throw e
+        } catch (e: Exception) {
+            val elapsed = System.currentTimeMillis() - started
+            AppLog.error(
+                LogCategory.NETWORK,
+                "✕ $request ${elapsed}ms ${e.javaClass.simpleName}",
+                e.message.orEmpty(),
+            )
+            throw e
         }
     }
 
@@ -135,7 +166,16 @@ class FmApiClient(
         if (jwe != null) {
             val key = responseDecryptionKey
                 ?: throw FmApiException(0, "response is encrypted and no user key is available")
-            val plaintext = CryptoService.decryptJwe(jwe, key)
+            val plaintext = try {
+                CryptoService.decryptJwe(jwe, key)
+            } catch (e: Exception) {
+                AppLog.error(
+                    LogCategory.NETWORK,
+                    "response decrypt failed",
+                    "${e.javaClass.simpleName}: ${e.message}",
+                )
+                throw e
+            }
             return unwrapControl(String(plaintext, Charsets.UTF_8))
         }
         val data = envelope["data"] ?: return envelope

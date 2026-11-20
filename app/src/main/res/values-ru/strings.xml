@@ -101,6 +101,16 @@
     <string name="policy_changed_title">Политика сети изменилась</string>
     <string name="policy_accept">Принять политику</string>
     <string name="outbox_title">Исходящие</string>
+    <string name="logs_title">Логи</string>
+    <string name="logs_all">Все</string>
+    <string name="logs_network">Сеть</string>
+    <string name="logs_app">Приложение</string>
+    <string name="logs_errors">Ошибки</string>
+    <string name="logs_clear">Очистить логи</string>
+    <string name="logs_clear_confirm">Удалить все записи и файл лога?</string>
+    <string name="logs_empty">Записей пока нет</string>
+    <string name="logs_share">Поделиться логами</string>
+    <string name="logs_privacy">В логах могут быть адреса, названия эх и темы сообщений. Не публикуйте их.</string>
     <string name="outbox_empty">Нет отложенных сообщений</string>
     <string name="retry">Повторить</string>
     <string name="refill_title">Запрос истории</string>
