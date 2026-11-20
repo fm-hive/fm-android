@@ -91,6 +91,52 @@ internal fun refillRequestOf(dataJson: String): Pair<String, String>? {
     return from to before
 }
 
+/** Message types treated as protocol/service traffic in the echo feed. */
+internal val PROTOCOL_MESSAGE_TYPES = setOf(
+    "vote", "election", "excommunicate", "change_policy", "change_rules",
+    "remove_echo", "refill", "merge", "conflict", "recover", "appeal",
+    "remote_subscribe",
+)
+
+internal fun isProtocolMessageType(type: String): Boolean = type in PROTOCOL_MESSAGE_TYPES
+
+/** Human-readable parts of a protocol message shown as a feed card. */
+internal data class ServiceMessageInfo(
+    /** Text from the payload (`message`), falling back to the protocol type. */
+    val title: String,
+    /** Refill cutoff date, valid only for a refill request. */
+    val refillBefore: String? = null,
+)
+
+/**
+ * Feed representation of a protocol message, or null for ordinary echomail.
+ * Votes/results keep their dedicated ballot card; the title is enough for the
+ * remaining service messages (election, refill, change_policy, ...).
+ */
+internal fun serviceMessageOf(type: String, dataJson: String): ServiceMessageInfo? {
+    if (!isProtocolMessageType(type)) return null
+    val data = runCatching { Json.parseToJsonElement(dataJson).jsonObject }.getOrNull()
+        ?: return ServiceMessageInfo(title = type)
+    val innerType = (data["type"] as? JsonPrimitive)?.contentOrNull.orEmpty()
+    val title = (data["message"] as? JsonPrimitive)?.contentOrNull.orEmpty()
+        .trim()
+        .ifBlank { type }
+    val before = if (type == "refill" && innerType == "request") {
+        ((data["refill"] as? JsonObject)?.get("before") as? JsonPrimitive)?.contentOrNull
+    } else {
+        null
+    }
+    return ServiceMessageInfo(title = title, refillBefore = before)
+}
+
+/** A refill request may be answered only by somebody other than its author. */
+internal fun canRespondToRefill(
+    type: String,
+    innerType: String,
+    senderAddress: String,
+    me: String,
+): Boolean = type == "refill" && innerType == "request" && senderAddress != me
+
 /**
  * Moderation fields of a warning/punishment echomail, if it is one.
  *

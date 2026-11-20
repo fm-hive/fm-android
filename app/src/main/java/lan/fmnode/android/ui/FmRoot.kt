@@ -89,6 +89,15 @@ import lan.fmnode.android.network.EchoPermissions
 import lan.fmnode.android.storage.ProfileEntity
 import lan.fmnode.android.ui.theme.FmTheme
 
+/**
+ * Display preferences of the echo feed. Grouped into one parameter to keep the
+ * already very large [FmRoot] composable under the JVM method-size limit.
+ */
+data class FeedSettingsCallbacks(
+    val onShowTearline: (Boolean) -> Unit = {},
+    val onShowServiceMessages: (Boolean) -> Unit = {},
+)
+
 @Composable
 fun FmRoot(
     state: UiState,
@@ -221,7 +230,8 @@ fun FmRoot(
     onComposeTagline: (String) -> Unit = {},
     onNetmailTagline: (String) -> Unit = {},
     onTagline: (String) -> Unit = {},
-    onShowTearline: (Boolean) -> Unit = {},
+    /** Display preferences of the echo feed (tearline, service messages). */
+    feedSettings: FeedSettingsCallbacks = FeedSettingsCallbacks(),
     onAllowSendingWithoutRateLimit: (Boolean) -> Unit = {},
     onImageMaxDimension: (Int) -> Unit = {},
     onRememberImageDimension: (Boolean) -> Unit = {},
@@ -635,6 +645,8 @@ fun FmRoot(
                 onReply = onReplyEchoMessage,
                 onShare = { shareMessage = it },
                 showTearline = state.showTearline,
+                showServiceMessages = state.showServiceMessages,
+                onShowServiceMessages = feedSettings.onShowServiceMessages,
                 messageView = state.messageView,
                 onChangeMessageView = onChangeMessageView,
                 onOpenMessage = onOpenMessage,
@@ -834,7 +846,7 @@ fun FmRoot(
             tagline = state.tagline,
             showTearline = state.showTearline,
             onTagline = onTagline,
-            onShowTearline = onShowTearline,
+            onShowTearline = feedSettings.onShowTearline,
             allowSendingWithoutRateLimit = state.allowSendingWithoutRateLimit,
             onAllowSendingWithoutRateLimit = onAllowSendingWithoutRateLimit,
             voucherEnabled = state.voucherEnabled,
@@ -1631,6 +1643,9 @@ fun EchoConversationScreen(
     onReply: (MessageUi) -> Unit = {},
     onShare: (MessageUi) -> Unit = {},
     showTearline: Boolean = false,
+    /** List protocol/service messages in the feed (#46). */
+    showServiceMessages: Boolean = false,
+    onShowServiceMessages: (Boolean) -> Unit = {},
     messageView: EchoMessageView = EchoMessageView.All,
     onChangeMessageView: (EchoMessageView) -> Unit = {},
     onOpenMessage: (MessageUi) -> Unit = {},
@@ -1710,6 +1725,18 @@ fun EchoConversationScreen(
                                     menuExpanded = false
                                     onOpenRules()
                                 },
+                            )
+                            // Protocol/service messages stay out of the feed
+                            // unless this checkbox is on (#46).
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.show_service_messages)) },
+                                leadingIcon = {
+                                    Checkbox(
+                                        checked = showServiceMessages,
+                                        onCheckedChange = null,
+                                    )
+                                },
+                                onClick = { onShowServiceMessages(!showServiceMessages) },
                             )
                         }
                     }
@@ -2019,6 +2046,22 @@ private fun MessageCard(
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            // A service message is marked with its protocol type and, for a
+            // refill request, the cutoff date (#46).
+            message.protocolType?.let { protocolType ->
+                Spacer(Modifier.height(4.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    AssistChip(onClick = {}, label = { Text(protocolType) })
+                    message.refillBefore?.let { before ->
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = stringResource(R.string.refill_until, formatRefillDate(before)),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
             val vote = message.vote
             if (vote != null) {
                 // A vote poster is shown as a ballot: question, options with
@@ -2426,6 +2469,22 @@ internal fun errorText(error: UiError): String = when (error) {
 internal fun formatTimestamp(seconds: Long): String {
     val millis = if (seconds < 10_000_000_000L) seconds * 1000 else seconds
     return SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()).format(Date(millis))
+}
+
+/**
+ * Refill cutoff (`YYYY-MM-DD` or a full ISO timestamp) as a local date.
+ * Unparseable values are shown as is.
+ */
+internal fun formatRefillDate(raw: String): String {
+    val text = raw.trim()
+    if (text.isEmpty()) return raw
+    val date = runCatching { java.time.LocalDate.parse(text) }.getOrNull()
+        ?: runCatching {
+            java.time.Instant.parse(text).atZone(java.time.ZoneId.systemDefault()).toLocalDate()
+        }.getOrNull()
+        ?: runCatching { java.time.OffsetDateTime.parse(text).toLocalDate() }.getOrNull()
+        ?: return text
+    return date.format(java.time.format.DateTimeFormatter.ofPattern("dd.MM.yyyy"))
 }
 
 @Composable

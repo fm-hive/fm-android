@@ -14,6 +14,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import lan.fmnode.android.ui.AppViewModel
+import lan.fmnode.android.ui.FeedSettingsCallbacks
 import lan.fmnode.android.ui.FmRoot
 import lan.fmnode.android.ui.ScanPurpose
 import lan.fmnode.android.ui.theme.FmTheme
@@ -172,7 +173,10 @@ class MainActivity : ComponentActivity() {
                     onComposeTagline = viewModel::setComposeTagline,
                     onNetmailTagline = viewModel::setNetmailTagline,
                     onTagline = viewModel::setTagline,
-                    onShowTearline = viewModel::setShowTearline,
+                    feedSettings = FeedSettingsCallbacks(
+                        onShowTearline = viewModel::setShowTearline,
+                        onShowServiceMessages = viewModel::setShowServiceMessages,
+                    ),
                     onAllowSendingWithoutRateLimit = viewModel::setAllowSendingWithoutRateLimit,
                     onImageMaxDimension = viewModel::setImageMaxDimension,
                     onRememberImageDimension = viewModel::setRememberImageDimension,

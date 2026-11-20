@@ -106,6 +106,8 @@
     <string name="refill_title">Запрос истории</string>
     <string name="refill_hint">Запросить у сети более старые сообщения этой конференции</string>
     <string name="refill_before">До даты (ГГГГ-ММ-ДД)</string>
+    <string name="refill_until">До: %1$s</string>
+    <string name="show_service_messages">Показывать служебные сообщения</string>
     <string name="refill_send">Запросить</string>
     <string name="create_echo">Создать локальную конференцию</string>
     <string name="create_echo_name">Название</string>

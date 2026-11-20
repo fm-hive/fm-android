@@ -667,7 +667,33 @@ class NetworkSession(
                 },
             )
         }.toString()
-        return postProtocol(echoName, "refill", data)
+        val message = signMessage("refill", data, echoName = echoName)
+        val result = try {
+            sendMessages(listOf(message))
+            SendResult(queued = false)
+        } catch (e: Exception) {
+            queueOutbox("refill", echoName, null, data, e)
+            SendResult(queued = true)
+        }
+        // The node does not deliver a refill request back to its author
+        // (distributeRefillRequest skips the requester), so keep a local copy:
+        // otherwise neither Protocols nor the feed can show that a refill was
+        // requested (#46). Other subscribers still get the node's own copy.
+        database.messageDao().upsert(
+            MessageEntity(
+                messageId = messageId,
+                echoName = echoName,
+                type = "refill",
+                senderAddress = profile.address,
+                recipientAddress = null,
+                timestamp = message.long("timestamp") ?: nowSeconds(),
+                dataJson = data,
+                jws = message.string("jws"),
+                jwe = null,
+                receivedAt = System.currentTimeMillis(),
+            ),
+        )
+        return result
     }
 
     /**
@@ -988,6 +1014,17 @@ class NetworkSession(
 
     suspend fun setShowTearline(value: Boolean) {
         database.metaDao().put(MetaEntity(META_SHOW_TEARLINE, if (value) "1" else "0"))
+    }
+
+    /**
+     * Whether protocol/service messages (refill, elections, change_policy, ...)
+     * are listed in the echo feed. Off by default, like fm-app.
+     */
+    suspend fun showServiceMessages(): Boolean =
+        settingsFlag(META_SHOW_SERVICE_MESSAGES, default = false)
+
+    suspend fun setShowServiceMessages(value: Boolean) {
+        database.metaDao().put(MetaEntity(META_SHOW_SERVICE_MESSAGES, if (value) "1" else "0"))
     }
 
     /** Max width/height used when resizing picked images (0 = original). */
@@ -1714,6 +1751,7 @@ class NetworkSession(
         private const val META_AUTO_SEND_PUBKEY = "auto_send_pubkey"
         private const val META_TAGLINE = "tagline"
         private const val META_SHOW_TEARLINE = "show_tearline"
+        private const val META_SHOW_SERVICE_MESSAGES = "show_service_messages"
         private const val META_ALLOW_WITHOUT_RATE_LIMIT = "allow_sending_without_rate_limit"
         private const val META_IMAGE_MAX_DIMENSION = "image_max_dimension"
         private const val META_AUTO_REQUEST_PUBKEYS = "auto_request_pubkeys"

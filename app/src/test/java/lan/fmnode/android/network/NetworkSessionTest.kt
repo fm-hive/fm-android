@@ -499,6 +499,16 @@ class NetworkSessionTest {
             assertEquals("General", refill["echo"]!!.jsonPrimitive.content)
             assertEquals("2026-01-01T00:00:00.000Z", refill["before"]!!.jsonPrimitive.content)
             assertEquals(":0:1", refill["from"]!!.jsonPrimitive.content)
+
+            // The node does not deliver a request back to its author, so the
+            // client keeps a copy for Protocols and the feed (#46).
+            val messageId = refill["messageId"]!!.jsonPrimitive.content
+            val stored = db.messageDao().getByEchoAndId("General", messageId)
+            assertNotNull(stored)
+            assertEquals("refill", stored!!.type)
+            assertEquals(":0:1", stored.senderAddress)
+            assertEquals(message["jws"]!!.jsonPrimitive.content, stored.jws)
+            assertTrue(stored.dataJson.contains("\"proto\":\"refill\""))
         }
     }
 
