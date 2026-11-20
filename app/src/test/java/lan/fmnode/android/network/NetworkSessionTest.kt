@@ -727,6 +727,60 @@ class NetworkSessionTest {
     }
 
     @Test
+    fun `client sync embeds queued appends in the next send_receive`() = runBlocking {
+        db.metaDao().put(lan.fmnode.android.storage.MetaEntity("client_id", "client-1"))
+        val me = clientEncrypt(buildJsonObject { put("op", "add"); put("client", "client-1") })
+        val other = clientEncrypt(buildJsonObject { put("op", "add"); put("client", "other-1") })
+        sendReceiveResponse = buildJsonObject {
+            put("messages", buildJsonArray {
+                add(incomingEcho("m1", "General", data("subject" to "First")))
+                add(incomingEcho("m2", "General", data("subject" to "Second")))
+            })
+            put("local_packet_ids", buildJsonArray {})
+            put("client_synchronize", true)
+            put("client_sync_append_supported", true)
+            put("client_container_entries", buildJsonArray {
+                add(buildJsonObject {
+                    put("name", "client_synchronize")
+                    put("entries", buildJsonArray {
+                        add(buildJsonObject { put("id", 1); put("payload", me) })
+                        add(buildJsonObject { put("id", 2); put("payload", other) })
+                    })
+                })
+            })
+        }
+        session.sync()
+
+        // The first poll has not seen the capability flag yet, and the freshly
+        // queued ops must stay for the next request, not go out separately.
+        val unexpectedAppends = clientSyncRequests.filter { control ->
+            ((control["data"] as? JsonObject)?.get("action") as? JsonPrimitive)?.content == "append"
+        }
+        assertTrue("unexpected appends: $unexpectedAppends", unexpectedAppends.isEmpty())
+
+        sendReceiveResponse = buildJsonObject {
+            put("messages", buildJsonArray {})
+            put("local_packet_ids", buildJsonArray {})
+            put("client_synchronize", true)
+            put("client_sync_append_supported", true)
+            put("client_container_entries", buildJsonArray {})
+        }
+        session.sync()
+
+        val request = (lastSendReceiveControl!!["data"] as JsonObject)
+        val appends = request["client_sync_append"] as JsonArray
+        assertEquals(2, appends.size)
+        val first = appends[0] as JsonObject
+        assertEquals("outbound_client_other-1", first["name"]!!.jsonPrimitive.content)
+        val op = clientSyncPayload(first)
+        assertEquals("message", op["op"]!!.jsonPrimitive.content)
+        assertEquals("m1", op["message"]!!.jsonObject["message_id"]!!.jsonPrimitive.content)
+        assertTrue(clientSyncRequests.none { control ->
+            ((control["data"] as? JsonObject)?.get("action") as? JsonPrimitive)?.content == "append"
+        })
+    }
+
+    @Test
     fun `own client container messages are stored and acknowledged`() = runBlocking {
         db.metaDao().put(lan.fmnode.android.storage.MetaEntity("client_id", "client-1"))
         val netmail = incomingNetmail("n1", data("subject" to "From phone", "body" to "Hi"))
