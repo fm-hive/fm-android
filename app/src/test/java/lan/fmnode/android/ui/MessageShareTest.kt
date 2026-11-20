@@ -1,5 +1,8 @@
 package lan.fmnode.android.ui
 
+import android.graphics.Bitmap
+import android.util.Base64
+import java.io.ByteArrayOutputStream
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -50,9 +53,48 @@ class MessageShareTest {
         assertTrue(text.contains("**Эха:** Личные"))
     }
 
+    private fun imageAttachment(): AttachmentUi {
+        val bitmap = Bitmap.createBitmap(20, 10, Bitmap.Config.ARGB_8888)
+        bitmap.eraseColor(android.graphics.Color.RED)
+        val out = ByteArrayOutputStream()
+        bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+        bitmap.recycle()
+        val bytes = out.toByteArray()
+        return AttachmentUi(
+            name = "photo.png",
+            type = "image/png",
+            size = bytes.size,
+            dataUrl = "data:image/png;base64," + Base64.encodeToString(bytes, Base64.NO_WRAP),
+        )
+    }
+
+    @Test
+    fun `inline image references keep their position between text blocks`() {
+        val attachment = imageAttachment()
+        val blocks = messageBodyBlocks(
+            "before ![photo](attachment:0) after",
+            "m1",
+            listOf(attachment),
+        )
+        assertEquals(3, blocks.size)
+        assertEquals("before ", blocks[0].text)
+        assertEquals("photo.png", blocks[1].attachment?.name)
+        assertEquals(" after", blocks[2].text)
+    }
+
     @Test
     fun `image renderer produces a bitmap with the requested width`() {
         val bitmap = MessageShare.renderImage(message(), 720)
+        assertEquals(720, bitmap.width)
+        assertTrue(bitmap.height > 0)
+        bitmap.recycle()
+    }
+
+    @Test
+    fun `image renderer handles inline images`() {
+        val message = message(body = "before ![photo](attachment:0) after")
+            .copy(attachments = listOf(imageAttachment()))
+        val bitmap = MessageShare.renderImage(message, 720)
         assertEquals(720, bitmap.width)
         assertTrue(bitmap.height > 0)
         bitmap.recycle()

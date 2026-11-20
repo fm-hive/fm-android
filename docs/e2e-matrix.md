@@ -406,8 +406,10 @@ adb shell am get-config | head -1   # ...-ru-rRU-...
 
 - `MessageShare.text` собирает Markdown с шапкой «Эха/От/Дата», subject и
   телом.
-- `MessageShare.renderImage` рисует карточку на Canvas, включая вложения на
-  ширину контента.
+- `MessageShare.renderImage` рисует карточку на Canvas. Инлайн-вложения
+  (`attachment:N`) вставляются в текст на своём месте через общий
+  `messageBodyBlocks`; вложения без ссылки остаются в конце карточки. Все
+  изображения — на ширину контента.
 - Share-диалог: текст или картинка; ширина картинки 720/1080/1440 px;
   `FileProvider` + системный chooser.
 
