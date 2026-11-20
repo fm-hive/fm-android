@@ -802,17 +802,30 @@ class AppViewModel(
         // showing the unlock form (#22).
         viewModelScope.launch {
             if (session.isUnlocked || !manager.vaultExists()) {
-                _state.update { it.copy(autoUnlocking = false) }
+                _state.update { it.copy(autoUnlocking = false, rememberPassword = false) }
                 return@launch
             }
-            val saved = passwordStore.load()
+            // Decrypting the saved password with the Android Keystore can take
+            // a moment; the unlock screen shows a disabled field with dots and
+            // a spinner while this runs (#45).
+            val saved = withContext(Dispatchers.IO) { passwordStore.load() }
             if (saved == null) {
                 _state.update { it.copy(autoUnlocking = false) }
                 return@launch
             }
+            // Show the checkbox as checked while the saved password is tried.
+            _state.update { it.copy(rememberPassword = true) }
             if (!manager.openVault(saved)) {
+                // The stored password no longer opens the vault: forget it and
+                // give the form back in a clean state (#45).
                 passwordStore.clear()
-                _state.update { it.copy(autoUnlocking = false, unlockError = UiError.WrongPassword) }
+                _state.update {
+                    it.copy(
+                        autoUnlocking = false,
+                        rememberPassword = false,
+                        unlockError = UiError.WrongPassword,
+                    )
+                }
                 return@launch
             }
             _state.update { it.copy(autoUnlocking = false, rememberPassword = true) }
@@ -854,7 +867,7 @@ class AppViewModel(
 
     fun unlock(password: String) {
         viewModelScope.launch {
-            _state.update { it.copy(autoUnlocking = false) }
+            _state.update { it.copy(autoUnlocking = false, unlockError = null) }
             if (!manager.openVault(password)) {
                 _state.update { it.copy(unlockError = UiError.WrongPassword) }
                 return@launch

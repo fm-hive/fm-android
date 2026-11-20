@@ -935,44 +935,70 @@ fun UnlockScreen(
         ) {
             Text(stringResource(R.string.unlock_title), style = MaterialTheme.typography.headlineSmall)
             Spacer(Modifier.height(16.dp))
+            // With a saved password the field is prefilled with dots and locked
+            // while the Keystore password is loaded and tried (#45).
+            OutlinedTextField(
+                value = if (unlocking) SAVED_PASSWORD_MASK else password,
+                onValueChange = { password = it },
+                label = { Text(stringResource(R.string.password)) },
+                singleLine = true,
+                enabled = !unlocking,
+                visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                trailingIcon = if (unlocking) {
+                    {
+                        CircularProgressIndicator(
+                            modifier = Modifier.width(20.dp).height(20.dp),
+                            strokeWidth = 2.dp,
+                        )
+                    }
+                } else {
+                    null
+                },
+                modifier = Modifier.fillMaxWidth(),
+            )
             if (unlocking) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(modifier = Modifier.width(24.dp).height(24.dp))
-                    Spacer(Modifier.width(12.dp))
-                    Text(stringResource(R.string.unlocking_saved_password))
-                }
-            } else {
-                OutlinedTextField(
-                    value = password,
-                    onValueChange = { password = it },
-                    label = { Text(stringResource(R.string.password)) },
-                    singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                    modifier = Modifier.fillMaxWidth(),
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = stringResource(R.string.unlocking_saved_password),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Row(
-                    modifier = Modifier.fillMaxWidth().clickable { onRemember(!remember) },
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Checkbox(checked = remember, onCheckedChange = onRemember)
-                    Text(
-                        text = stringResource(R.string.remember_password),
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                }
-                if (error != null) {
-                    Spacer(Modifier.height(8.dp))
-                    Text(errorText(error), color = MaterialTheme.colorScheme.error)
-                }
-                Spacer(Modifier.height(16.dp))
-                Button(onClick = { onUnlock(password) }, modifier = Modifier.fillMaxWidth()) {
-                    Text(stringResource(R.string.unlock))
-                }
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(enabled = !unlocking) { onRemember(!remember) },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Checkbox(
+                    checked = remember,
+                    onCheckedChange = onRemember,
+                    enabled = !unlocking,
+                )
+                Text(
+                    text = stringResource(R.string.remember_password),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+            if (error != null) {
+                Spacer(Modifier.height(8.dp))
+                Text(errorText(error), color = MaterialTheme.colorScheme.error)
+            }
+            Spacer(Modifier.height(16.dp))
+            Button(
+                onClick = { onUnlock(password) },
+                enabled = !unlocking,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(stringResource(R.string.unlock))
             }
         }
     }
 }
+
+/** Mask shown in the locked password field while the saved password is tried. */
+private const val SAVED_PASSWORD_MASK = "••••••••"
 
 // -------------------------------------------------------------------- networks
 
