@@ -267,6 +267,17 @@ class NetworkSession(
         database.echoDao().setLastRead(echoName, timestamp)
     }
 
+    /**
+     * Deletes the local copy of one echo: stored messages and the read mark.
+     * The subscription stays, so new messages keep arriving (#388).
+     */
+    suspend fun deleteEchoMessages(echoName: String) {
+        database.withTransaction {
+            database.messageDao().deleteByEcho(echoName)
+            database.echoDao().setLastRead(echoName, 0)
+        }
+    }
+
     /** Identity of this profile as the node knows it right now. */
     suspend fun identity(): Identity {
         val response = api.post("identity", null, auth) as? JsonObject

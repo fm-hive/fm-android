@@ -19,6 +19,7 @@ import kotlinx.serialization.json.put
 import lan.fmnode.android.crypto.CryptoService
 import lan.fmnode.android.crypto.Encoding
 import lan.fmnode.android.storage.DraftEntity
+import lan.fmnode.android.storage.EchoEntity
 import lan.fmnode.android.storage.MessageEntity
 import lan.fmnode.android.storage.OutboxEntity
 import lan.fmnode.android.storage.ProfileDatabase
@@ -566,6 +567,38 @@ class NetworkSessionTest {
         val data = lastControl!!["data"]!!.jsonObject
         assertEquals("General", data["echo_name"]!!.jsonPrimitive.content)
         assertEquals(":0:1", data["user_address"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun `deleteEchoMessages removes only that echo and resets its read mark`() = runBlocking {
+        db.echoDao().upsertAll(
+            listOf(
+                EchoEntity("General", 1, "", "", subscribed = true, isLocal = false, lastReadTimestamp = 777),
+                EchoEntity("Tech", 2, "", "", subscribed = true, isLocal = false, lastReadTimestamp = 42),
+            ),
+        )
+        fun message(id: String, echo: String) = MessageEntity(
+            messageId = id,
+            echoName = echo,
+            type = "echomail",
+            senderAddress = ":0:2",
+            recipientAddress = null,
+            timestamp = 100,
+            dataJson = """{"subject":"$id"}""",
+            jws = null,
+            jwe = null,
+            receivedAt = 0,
+        )
+        db.messageDao().upsert(message("m1", "General"))
+        db.messageDao().upsert(message("m2", "Tech"))
+
+        session.deleteEchoMessages("General")
+
+        assertTrue(db.messageDao().getEcho("General").isEmpty())
+        assertEquals("m2", db.messageDao().getEcho("Tech").single().messageId)
+        assertEquals(0, db.echoDao().getByName("General")!!.lastReadTimestamp)
+        assertEquals(42, db.echoDao().getByName("Tech")!!.lastReadTimestamp)
+        assertTrue(db.echoDao().getByName("General")!!.subscribed)
     }
 
     @Test

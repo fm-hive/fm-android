@@ -23,7 +23,6 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AttachFile
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.EmojiEmotions
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Forum
@@ -31,12 +30,15 @@ import androidx.compose.material.icons.filled.Forward
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Mail
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
@@ -131,6 +133,28 @@ fun NetmailScreen(
             else -> it.folderSlug == folder
         }
     }.sortedByDescending { it.timestamp }
+    var folderMenuSlug by remember { mutableStateOf<String?>(null) }
+    var folderToDelete by remember { mutableStateOf<String?>(null) }
+    folderToDelete?.let { slug ->
+        AlertDialog(
+            onDismissRequest = { folderToDelete = null },
+            title = { Text(stringResource(R.string.netmail_delete_folder)) },
+            text = { Text(stringResource(R.string.netmail_delete_folder_confirm)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        folderToDelete = null
+                        onDeleteFolder(slug)
+                    },
+                ) { Text(stringResource(R.string.delete)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { folderToDelete = null }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            },
+        )
+    }
     if (folderDialog) {
         NetmailFolderDialog(
             name = folderName,
@@ -175,8 +199,25 @@ fun NetmailScreen(
                         },
                     )
                     if (item.custom) {
-                        IconButton(onClick = { onDeleteFolder(item.slug) }) {
-                            Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.delete))
+                        Box {
+                            IconButton(onClick = { folderMenuSlug = item.slug }) {
+                                Icon(
+                                    Icons.Default.MoreVert,
+                                    contentDescription = stringResource(R.string.netmail_folder_actions),
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = folderMenuSlug == item.slug,
+                                onDismissRequest = { folderMenuSlug = null },
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.netmail_delete_folder)) },
+                                    onClick = {
+                                        folderMenuSlug = null
+                                        folderToDelete = item.slug
+                                    },
+                                )
+                            }
                         }
                     }
                 }

@@ -2923,6 +2923,26 @@ class AppViewModel(
 
     fun deleteEchoGroup(id: String) = persistEchoGroups(_state.value.echoGroups.filterNot { it.id == id })
 
+    /**
+     * Deletes the local message copy of one conference and its read mark. The
+     * subscription is kept, so the echo stays in the list (#388).
+     */
+    fun deleteEchoLocalCopy(echoName: String) {
+        val opened = networkSession ?: return
+        viewModelScope.launch {
+            runCatching { opened.deleteEchoMessages(echoName) }
+                .onFailure { e ->
+                    _state.update {
+                        it.copy(
+                            syncError = UiError.Failed(
+                                "$echoName: ${e.message ?: "delete failed"}",
+                            ),
+                        )
+                    }
+                }
+        }
+    }
+
     fun toggleEchoGroupSelection(echoName: String) {
         _state.update {
             val selection = it.echoGroupSelection.toMutableSet()

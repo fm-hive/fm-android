@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
@@ -100,6 +101,16 @@ data class FeedSettingsCallbacks(
     val onOpenLogs: () -> Unit = {},
 )
 
+/**
+ * Conference actions shared by the echo list and the conversation screen
+ * (#388). Grouped to keep the flat [FmRoot] parameter list below the JVM
+ * method-parameter limit.
+ */
+data class EchoActionsCallbacks(
+    val onDeleteEchoGroup: (String) -> Unit = {},
+    val onDeleteEchoLocalCopy: (String) -> Unit = {},
+)
+
 @Composable
 fun FmRoot(
     state: UiState,
@@ -181,7 +192,6 @@ fun FmRoot(
     onCloseEchoGroups: () -> Unit = {},
     onEchoGroupDraftName: (String) -> Unit = {},
     onCreateEchoGroup: () -> Unit = {},
-    onDeleteEchoGroup: (String) -> Unit = {},
     onToggleEchoGroupSelection: (String) -> Unit = {},
     onAssignEchoGroup: (String?) -> Unit = {},
     onOpenDisplayName: () -> Unit = {},
@@ -234,6 +244,8 @@ fun FmRoot(
     onTagline: (String) -> Unit = {},
     /** Display preferences of the echo feed (tearline, service messages). */
     feedSettings: FeedSettingsCallbacks = FeedSettingsCallbacks(),
+    /** Conference actions of the echo list and conversation screen. */
+    echoActions: EchoActionsCallbacks = EchoActionsCallbacks(),
     onAllowSendingWithoutRateLimit: (Boolean) -> Unit = {},
     onImageMaxDimension: (Int) -> Unit = {},
     onRememberImageDimension: (Boolean) -> Unit = {},
@@ -484,7 +496,7 @@ fun FmRoot(
             error = state.echoGroupError,
             onDraftName = onEchoGroupDraftName,
             onCreate = onCreateEchoGroup,
-            onDelete = onDeleteEchoGroup,
+            onDelete = echoActions.onDeleteEchoGroup,
             onToggle = onToggleEchoGroupSelection,
             onAssign = onAssignEchoGroup,
             onDismiss = onCloseEchoGroups,
@@ -615,6 +627,7 @@ fun FmRoot(
             onDismissAddressNotice = onDismissAddressNotice,
             echoGroups = state.echoGroups,
             onOpenEchoGroups = onOpenEchoGroups,
+            onDeleteEchoGroup = echoActions.onDeleteEchoGroup,
         )
         AppScreen.Echo -> {
             val echo = state.selectedEcho
@@ -659,6 +672,12 @@ fun FmRoot(
                 onOpenVote = onOpenVoteCompose,
                 onOpenElection = onStartElection,
                 onVote = onFeedVote,
+                canUnsubscribe = echo != null && echo.subscribed && !networkNews,
+                onUnsubscribe = {
+                    if (echo != null) onToggleSubscription(echo.name, false)
+                    onBackFromEcho()
+                },
+                onDeleteLocalCopy = { echo?.let { echoActions.onDeleteEchoLocalCopy(it.name) } },
             )
         }
         AppScreen.MessageDetail -> MessageDetailScreen(
@@ -1329,7 +1348,30 @@ fun EchoesListScreen(
     /** User-defined groups of the active network (#366 of fm-app). */
     echoGroups: List<EchoGroupUi> = emptyList(),
     onOpenEchoGroups: () -> Unit = {},
+    /** Deletes a user-defined group; its conferences fall into "Ungrouped" (#388). */
+    onDeleteEchoGroup: (String) -> Unit = {},
 ) {
+    var groupToDelete by remember { mutableStateOf<EchoGroupUi?>(null) }
+    groupToDelete?.let { group ->
+        AlertDialog(
+            onDismissRequest = { groupToDelete = null },
+            title = { Text(stringResource(R.string.echo_groups_delete)) },
+            text = { Text(stringResource(R.string.echo_groups_delete_confirm, group.name)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        groupToDelete = null
+                        onDeleteEchoGroup(group.id)
+                    },
+                ) { Text(stringResource(R.string.delete)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { groupToDelete = null }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            },
+        )
+    }
     Scaffold(
         bottomBar = {
             MainBottomBar(AppScreen.Echoes, onEchoes = {}, onNetmail = onNetmail, onSettings = onSettings)
@@ -1422,6 +1464,7 @@ fun EchoesListScreen(
                         echoGroups = echoGroups,
                         keyPrefix = activeId ?: "echo",
                         onSelect = { onSelectEcho(it.name) },
+                        onDeleteGroup = { groupToDelete = it },
                     )
                 } else {
                     groups.forEach { group ->
@@ -1435,6 +1478,7 @@ fun EchoesListScreen(
                             echoGroups = if (group.profileId == activeId) echoGroups else emptyList(),
                             keyPrefix = group.profileId,
                             onSelect = { onSelectEchoInNetwork(group.profileId, it.name) },
+                            onDeleteGroup = { groupToDelete = it },
                         )
                     }
                 }
@@ -1449,6 +1493,7 @@ private fun LazyListScope.EchoItems(
     echoGroups: List<EchoGroupUi>,
     keyPrefix: String,
     onSelect: (EchoUi) -> Unit,
+    onDeleteGroup: (EchoGroupUi) -> Unit,
 ) {
     if (echoGroups.isEmpty()) {
         items(echoes, key = { "$keyPrefix:${it.name}" }) { echo ->
@@ -1462,11 +1507,9 @@ private fun LazyListScope.EchoItems(
     echoGroups.forEach { group ->
         val members = echoes.filter { it.name in group.echoes }
         item(key = "$keyPrefix:ug:${group.id}") {
-            Text(
-                text = group.name,
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(top = 4.dp),
+            EchoGroupHeader(
+                name = group.name,
+                onDelete = { onDeleteGroup(group) },
             )
         }
         if (members.isEmpty()) {
@@ -1496,6 +1539,44 @@ private fun LazyListScope.EchoItems(
         }
         items(rest, key = { "$keyPrefix:${it.name}" }) { echo ->
             EchoCard(echo = echo, onClick = { onSelect(echo) })
+        }
+    }
+}
+
+/** Header of a user-defined conference group with its actions menu (#388). */
+@Composable
+private fun EchoGroupHeader(name: String, onDelete: () -> Unit) {
+    var menuExpanded by remember { mutableStateOf(false) }
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = name,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.weight(1f),
+        )
+        Box {
+            IconButton(
+                onClick = { menuExpanded = true },
+                modifier = Modifier.size(32.dp),
+            ) {
+                Icon(
+                    Icons.Default.MoreVert,
+                    contentDescription = stringResource(R.string.echo_groups_actions),
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+            DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.echo_groups_delete)) },
+                    onClick = {
+                        menuExpanded = false
+                        onDelete()
+                    },
+                )
+            }
         }
     }
 }
@@ -1660,9 +1741,54 @@ fun EchoConversationScreen(
     onOpenVote: () -> Unit = {},
     onOpenElection: () -> Unit = {},
     onVote: (VoteCardUi, String) -> Unit = { _, _ -> },
+    canUnsubscribe: Boolean = false,
+    onUnsubscribe: () -> Unit = {},
+    onDeleteLocalCopy: () -> Unit = {},
 ) {
     var versionsMessage by remember { mutableStateOf<MessageUi?>(null) }
     var menuExpanded by remember { mutableStateOf(false) }
+    var confirmUnsubscribe by remember { mutableStateOf(false) }
+    var confirmDeleteLocal by remember { mutableStateOf(false) }
+    if (confirmUnsubscribe) {
+        AlertDialog(
+            onDismissRequest = { confirmUnsubscribe = false },
+            title = { Text(stringResource(R.string.echo_unsubscribe)) },
+            text = { Text(stringResource(R.string.echo_unsubscribe_confirm, echoName)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmUnsubscribe = false
+                        onUnsubscribe()
+                    },
+                ) { Text(stringResource(R.string.echo_unsubscribe)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmUnsubscribe = false }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            },
+        )
+    }
+    if (confirmDeleteLocal) {
+        AlertDialog(
+            onDismissRequest = { confirmDeleteLocal = false },
+            title = { Text(stringResource(R.string.echo_delete_local)) },
+            text = { Text(stringResource(R.string.echo_delete_local_confirm, echoName)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmDeleteLocal = false
+                        onDeleteLocalCopy()
+                    },
+                ) { Text(stringResource(R.string.delete)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmDeleteLocal = false }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            },
+        )
+    }
     // Attachment-only uploads are listed separately as one entry per file bundle (#9).
     val visibleMessages = remember(messages, messageView) {
         if (messageView == EchoMessageView.Attachments) {
@@ -1742,6 +1868,22 @@ fun EchoConversationScreen(
                                     )
                                 },
                                 onClick = { onShowServiceMessages(!showServiceMessages) },
+                            )
+                            if (canUnsubscribe) {
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.echo_unsubscribe)) },
+                                    onClick = {
+                                        menuExpanded = false
+                                        confirmUnsubscribe = true
+                                    },
+                                )
+                            }
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.echo_delete_local)) },
+                                onClick = {
+                                    menuExpanded = false
+                                    confirmDeleteLocal = true
+                                },
                             )
                         }
                     }

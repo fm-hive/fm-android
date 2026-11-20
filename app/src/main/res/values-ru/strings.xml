@@ -162,6 +162,9 @@
     <string name="create_folder">Новая папка</string>
     <string name="folder_name">Название папки</string>
     <string name="move_to_folder">Переместить в папку</string>
+    <string name="netmail_folder_actions">Действия с папкой</string>
+    <string name="netmail_delete_folder">Удалить папку</string>
+    <string name="netmail_delete_folder_confirm">Удалить эту папку со всеми сообщениями?</string>
     <string name="recovery_title">Режим восстановления</string>
     <string name="recovery_hint">Подключите этот ключ к recovery-узлу, пока ваш узел недоступен. Вставьте ссылку-приглашение.</string>
     <string name="recovery_url">Ссылка recovery-узла</string>
@@ -194,6 +197,13 @@
     <string name="echo_groups_hint">Выберите конференции, затем нажмите группу, чтобы переместить их в неё.</string>
     <string name="echo_groups_move_selected">Переместить выбранные сюда</string>
     <string name="echo_groups_empty_members">В этой группе пока нет конференций</string>
+    <string name="echo_unsubscribe">Отписаться</string>
+    <string name="echo_unsubscribe_confirm">Отписаться от эха %1$s? Локально сохранённые сообщения останутся.</string>
+    <string name="echo_delete_local">Удалить локальную копию</string>
+    <string name="echo_delete_local_confirm">Удалить все локально сохранённые сообщения эха %1$s? Подписка сохранится, новые сообщения продолжат приходить.</string>
+    <string name="echo_groups_actions">Действия с группой</string>
+    <string name="echo_groups_delete">Удалить группу</string>
+    <string name="echo_groups_delete_confirm">Удалить группу %1$s? Её конференции перейдут в «Без группы».</string>
     <string name="display_name_change">Изменить имя</string>
     <string name="voucher_type">Тип ваучера</string>
     <string name="voucher_type_invite">Одноразовое приглашение</string>
