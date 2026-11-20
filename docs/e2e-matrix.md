@@ -25,7 +25,7 @@
 | `voucher.md` | create/list/revoke, QR invite | `NetworkSessionTest` | auto |
 | `merge.md` | start; further phases run on the node | `NetworkSessionTest` | node |
 | `recover.md` | `NetworkManager.recover` | `NetworkManagerTest` | auto |
-| `refill.md` | request + reaction response | `NetworkSessionTest`, `ActiveProtocolsList` | auto/manual |
+| `refill.md` | request + real response with messages; own request kept locally | `NetworkSessionTest`, `ServiceMessageTest` | auto/manual |
 | `client_synchronize.md` | append/read/delete, blog ops | `NetworkSessionTest` | auto |
 
 ## Протоколы (`docs/proto`)
@@ -41,7 +41,7 @@
 | `merge.md` | QR invite + start; phases on the node | `NetworkSessionTest` | node |
 | `conflict.md` | passive protocol list | `ProtocolsScreen` | manual |
 | `recover.md` | recovery screen + signed request | `NetworkManagerTest` | auto/manual |
-| `refill.md` | request dialog + respond with 👍 | `NetworkSessionTest` | auto/manual |
+| `refill.md` | request dialog + respond with messages; service feed card | `NetworkSessionTest`, `ServiceMessageTest` | auto/manual |
 | `appeal.md` | admin appeal dialog with punishment bundle | `NetworkSessionTest`, `ModerationMappingTest` | auto/manual |
 | `remote_subscribe.md` | request from the echo browser | `NetworkSessionTest` | auto/manual |
 | `announcements.md` | `announcement` compose toggle when rules allow | `NetworkSessionTest`, `EchoPermissionsTest` | auto |
@@ -415,3 +415,31 @@ adb shell am get-config | head -1   # ...-ru-rRU-...
 
 Проверка: `MessageLimitsTest`, `ImageProcessorTest`, `MessageShareTest`,
 ручной прогон share и диалога ресайза на эмуляторе.
+
+## Авторазблокировка и служебные сообщения (#45, #46)
+
+### Авторазблокировка (#45)
+
+- При сохранённом пароле экран разблокировки не прячется: поле заполнено
+  точками, заблокировано, в нём крутится индикатор; чекбокс «Сохранить пароль»
+  отмечен, кнопка недоступна.
+- Если сохранённый пароль не подошёл, он удаляется из Keystore-хранилища, поле
+  очищается и снова активно, чекбокс снимается, показывается ошибка пароля.
+- Проверка: `AppViewModelAutoUnlockTest`.
+
+### Служебные сообщения и refill (#46)
+
+- Нода не возвращает refill-запрос его автору (`distributeRefillRequest`
+  пропускает requester), поэтому клиент сохраняет собственную копию запроса:
+  она видна в Protocols и — при включённой галочке — в ленте.
+- Галочка «Показывать служебные сообщения» в overflow-меню ленты (meta профиля
+  `show_service_messages`, по умолчанию выключена, как в fm-app) показывает
+  `refill`, `election`, `excommunicate`, `change_policy`, `change_rules`,
+  `remove_echo`, `merge`, `conflict`, `recover`, `appeal`,
+  `remote_subscribe`.
+- Служебная карточка ленты получает chip с типом сообщения, заголовок из
+  `message` и для refill-запроса — дату «До». У своего refill-запроса кнопки
+  «Ответить» нет.
+- Проверка: `NetworkSessionTest` (локальная копия запроса), `ServiceMessageTest`,
+  `RefillRequestTest`; ручной прогон на стенде с `fmclient refill request` и
+  ответом из приложения.

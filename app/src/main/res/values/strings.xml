@@ -106,6 +106,8 @@
     <string name="refill_title">Refill history</string>
     <string name="refill_hint">Request older messages of this conference from the network</string>
     <string name="refill_before">Before date (YYYY-MM-DD)</string>
+    <string name="refill_until">Until: %1$s</string>
+    <string name="show_service_messages">Show service messages</string>
     <string name="refill_send">Request</string>
     <string name="create_echo">Create local conference</string>
     <string name="create_echo_name">Name</string>
