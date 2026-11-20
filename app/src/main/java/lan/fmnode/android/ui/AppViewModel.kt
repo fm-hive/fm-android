@@ -238,6 +238,10 @@ data class MessageUi(
     val vote: VoteCardUi? = null,
     /** Set for warnings/punishments that a node admin can appeal. */
     val moderation: ModerationUi? = null,
+    /** Set when this is a protocol/service message listed in the feed (#46). */
+    val protocolType: String? = null,
+    /** Refill cutoff date for a refill request card. */
+    val refillBefore: String? = null,
 )
 
 data class ContactUi(
@@ -406,6 +410,8 @@ data class ProtocolUi(
     val variants: List<String>,
     val isPoster: Boolean,
     val canRespondRefill: Boolean = false,
+    /** Refill cutoff date (ISO or YYYY-MM-DD) for a refill request card. */
+    val refillBefore: String? = null,
     val electionCandidate: String? = null,
     /** Variant to votes, collected from the echo votes of a vote poster. */
     val variantCounts: Map<String, Int> = emptyMap(),
@@ -571,6 +577,8 @@ data class UiState(
     /** Default tagline and tearline switch, stored in the profile meta. */
     val tagline: String = "",
     val showTearline: Boolean = false,
+    /** List protocol/service messages in the echo feed (#46). */
+    val showServiceMessages: Boolean = false,
     /** Daily rate-limit usage reported by the node (address-wide). */
     val rateLimits: Map<String, RateLimitUsage> = emptyMap(),
     /** fm-app parity: allow sending over the daily rate limit. */
@@ -1021,6 +1029,9 @@ class AppViewModel(
             networkSession = opened
             val tagline = runCatching { opened.tagline() }.getOrDefault("")
             val showTearline = runCatching { opened.showTearline() }.getOrDefault(false)
+            val showServiceMessages = runCatching {
+                opened.showServiceMessages()
+            }.getOrDefault(false)
             val allowRateOverride = runCatching {
                 opened.allowSendingWithoutRateLimit()
             }.getOrDefault(false)
@@ -1028,6 +1039,7 @@ class AppViewModel(
                 it.copy(
                     tagline = tagline,
                     showTearline = showTearline,
+                    showServiceMessages = showServiceMessages,
                     allowSendingWithoutRateLimit = allowRateOverride,
                 )
             }
@@ -1304,9 +1316,15 @@ class AppViewModel(
                             _state.update { it.copy(messages = emptyList()) }
                             return@collectLatest
                         }
-                        opened.database.messageDao().observeEchoRows(echoName).catch { }.collect { rows ->
-                            _state.update { it.copy(messages = mapMessages(rows, opened)) }
-                        }
+                        combine(
+                            opened.database.messageDao().observeEchoRows(echoName).catch { },
+                            _state.map { it.showServiceMessages }.distinctUntilChanged(),
+                        ) { rows, showService -> rows to showService }
+                            .collect { (rows, showService) ->
+                                _state.update {
+                                    it.copy(messages = mapMessages(rows, opened, showService))
+                                }
+                            }
                     }
             }
         }
@@ -4029,6 +4047,9 @@ class AppViewModel(
         viewModelScope.launch {
             val tagline = runCatching { opened.tagline() }.getOrDefault("")
             val showTearline = runCatching { opened.showTearline() }.getOrDefault(false)
+            val showServiceMessages = runCatching {
+                opened.showServiceMessages()
+            }.getOrDefault(false)
             val allowRateOverride = runCatching {
                 opened.allowSendingWithoutRateLimit()
             }.getOrDefault(false)
@@ -4036,6 +4057,7 @@ class AppViewModel(
                 it.copy(
                     tagline = tagline,
                     showTearline = showTearline,
+                    showServiceMessages = showServiceMessages,
                     allowSendingWithoutRateLimit = allowRateOverride,
                 )
             }
@@ -4052,6 +4074,13 @@ class AppViewModel(
         _state.update { it.copy(showTearline = value) }
         val opened = networkSession ?: return
         viewModelScope.launch { runCatching { opened.setShowTearline(value) } }
+    }
+
+    /** Shows or hides protocol/service messages in the echo feed (#46). */
+    fun setShowServiceMessages(value: Boolean) {
+        _state.update { it.copy(showServiceMessages = value) }
+        val opened = networkSession ?: return
+        viewModelScope.launch { runCatching { opened.setShowServiceMessages(value) } }
     }
 
     fun setAllowSendingWithoutRateLimit(value: Boolean) {
@@ -4412,7 +4441,11 @@ class AppViewModel(
 
     // ------------------------------------------------------------------ helpers
 
-    private fun mapMessages(rows: List<MessageRow>, opened: NetworkSession): List<MessageUi> {
+    private fun mapMessages(
+        rows: List<MessageRow>,
+        opened: NetworkSession,
+        showServiceMessages: Boolean = false,
+    ): List<MessageUi> {
         val me = opened.profile.address
         val myName = opened.profile.displayName
         // target message -> sender -> (emoji, timestamp); last reaction wins.
@@ -4461,7 +4494,7 @@ class AppViewModel(
             "remote_subscribe",
         )
         return messageRows
-            .filter { it.type !in protocolTypes }
+            .filter { showServiceMessages || it.type !in protocolTypes }
             .map { row ->
             val bySender = reactions[row.messageId]
             val counts = mutableMapOf<String, Int>()
@@ -4529,7 +4562,12 @@ class AppViewModel(
             detail = detail,
             variants = variants,
             isPoster = innerType == "poster" && variants.isNotEmpty(),
-            canRespondRefill = type == "refill" && innerType == "request",
+            canRespondRefill = canRespondToRefill(type, innerType, senderAddress, me),
+            refillBefore = if (type == "refill" && innerType == "request") {
+                ((data["refill"] as? JsonObject)?.get("before") as? JsonPrimitive)?.contentOrNull
+            } else {
+                null
+            },
             electionCandidate = if (type == "election" && innerType == "poster") {
                 (data["from"] as? JsonPrimitive)?.contentOrNull ?: senderAddress
             } else {
@@ -4556,7 +4594,10 @@ class AppViewModel(
         val data = runCatching {
             messageJson.parseToJsonElement(dataJson).jsonObject
         }.getOrNull()
+        // Service messages carry their human-readable text in `message` (#46).
+        val service = serviceMessageOf(type, dataJson)
         val subject = (data?.get("subject") as? JsonPrimitive)?.contentOrNull.orEmpty()
+            .ifBlank { service?.title.orEmpty() }
         val own = senderAddress == me
         val name = when {
             own && myName.isNotBlank() -> myName
@@ -4608,6 +4649,8 @@ class AppViewModel(
             echoName = echoName,
             tagline = tagline,
             tearline = tearline,
+            protocolType = service?.let { type },
+            refillBefore = service?.refillBefore,
         )
     }
 

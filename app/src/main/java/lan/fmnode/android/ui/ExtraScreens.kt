@@ -265,6 +265,13 @@ private fun ProtocolCard(
                 Spacer(Modifier.height(4.dp))
                 Text(protocol.detail, style = MaterialTheme.typography.bodySmall)
             }
+            protocol.refillBefore?.let { before ->
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = stringResource(R.string.refill_until, formatRefillDate(before)),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
             protocol.electionCandidate?.let { candidate ->
                 Spacer(Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
