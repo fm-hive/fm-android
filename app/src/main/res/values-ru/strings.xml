@@ -111,6 +111,10 @@
     <string name="logs_empty">Записей пока нет</string>
     <string name="logs_share">Поделиться логами</string>
     <string name="logs_privacy">В логах могут быть адреса, названия эх и темы сообщений. Не публикуйте их.</string>
+    <string name="network_state_unknown">Состояние сети: ожидание Android</string>
+    <string name="network_vpn_active">VPN: активен</string>
+    <string name="network_vpn_inactive">VPN: не активен</string>
+    <string name="network_transport">Транспорт: %1$s</string>
     <string name="network_proxy_title">Сеть</string>
     <string name="network_proxy_hint">VPN в режиме TUN работает без настройки. Если прокси-приложение даёт локальный HTTP/SOCKS-порт, включите прокси вручную.</string>
     <string name="network_proxy_system">Системный</string>

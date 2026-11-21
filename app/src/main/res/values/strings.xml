@@ -111,6 +111,10 @@
     <string name="logs_empty">No log entries yet</string>
     <string name="logs_share">Share logs</string>
     <string name="logs_privacy">Logs may contain addresses, echo names and message subjects. Do not share them publicly.</string>
+    <string name="network_state_unknown">Network state: waiting for Android</string>
+    <string name="network_vpn_active">VPN: active</string>
+    <string name="network_vpn_inactive">VPN: not active</string>
+    <string name="network_transport">Transport: %1$s</string>
     <string name="network_proxy_title">Network</string>
     <string name="network_proxy_hint">A VPN in TUN mode works without setup. If your proxy app exposes a local HTTP/SOCKS port, enable it manually.</string>
     <string name="network_proxy_system">System</string>

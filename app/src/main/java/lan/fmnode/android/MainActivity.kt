@@ -183,6 +183,7 @@ class MainActivity : ComponentActivity() {
                         onOpenLogs = viewModel::openLogs,
                         networkSettings = NetworkSettingsCallbacks(
                             proxy = state.proxy,
+                            network = state.network,
                             onMode = viewModel::setProxyMode,
                             onKind = viewModel::setProxyKind,
                             onHost = viewModel::setProxyHost,

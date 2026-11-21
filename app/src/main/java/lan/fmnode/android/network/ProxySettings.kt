@@ -2,6 +2,7 @@ package lan.fmnode.android.network
 
 import android.content.Context
 import android.net.ConnectivityManager
+import android.net.ProxyInfo
 import java.net.InetSocketAddress
 import java.net.Proxy
 import java.net.ProxySelector
@@ -62,23 +63,30 @@ fun interface ProxyResolver {
 
 /** Reads the HTTP proxy of the active network from ConnectivityManager. */
 class SystemProxy(private val context: Context) : ProxyResolver {
-    override fun resolve(): Proxy? {
+    private fun proxyInfo(): ProxyInfo? {
         val manager = context.getSystemService(ConnectivityManager::class.java) ?: return null
-        val info = runCatching {
+        return runCatching {
             manager.activeNetwork?.let { manager.getLinkProperties(it)?.httpProxy }
                 ?: manager.defaultProxy
-        }.getOrNull() ?: return null
-        if (!info.isValid || info.host.isNullOrBlank() || info.port !in 1..65535) return null
+        }.getOrNull()?.takeIf { it.isValid && !it.host.isNullOrBlank() && it.port in 1..65535 }
+    }
+
+    override fun resolve(): Proxy? {
+        val info = proxyInfo() ?: return null
         // Android's system proxy is an HTTP proxy; SOCKS is only exposed by
         // the manual setting above.
         return Proxy(Proxy.Type.HTTP, InetSocketAddress(info.host, info.port))
     }
 
-    /** Text for the settings screen, e.g. "127.0.0.1:8080" or "not detected". */
+    /**
+     * Text for the settings screen, e.g. "127.0.0.1:8080" or "not detected".
+     * Reads ProxyInfo directly: constructing InetSocketAddress here would
+     * resolve the proxy host and can throw NetworkOnMainThreadException while
+     * Settings is being composed (#50).
+     */
     fun describe(): String {
-        val proxy = resolve() ?: return ""
-        val address = proxy.address() as? InetSocketAddress ?: return ""
-        return "${address.hostString}:${address.port}"
+        val info = proxyInfo() ?: return ""
+        return "${info.host}:${info.port}"
     }
 }
 

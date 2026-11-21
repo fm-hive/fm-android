@@ -11,6 +11,15 @@ import kotlinx.coroutines.flow.asSharedFlow
 import lan.fmnode.android.log.AppLog
 import lan.fmnode.android.log.LogCategory
 
+/**
+ * Last network snapshot, available to the request log without threading the
+ * monitor instance through every session (#50).
+ */
+object NetworkState {
+    @Volatile
+    var snapshot: NetworkSnapshot? = null
+}
+
 /** State of the active Android network, used to detect VPN/proxy switches. */
 data class NetworkSnapshot(
     val available: Boolean,
@@ -110,6 +119,7 @@ class NetworkMonitor(context: Context) {
         )
         if (snapshot == lastSnapshot) return
         lastSnapshot = snapshot
+        NetworkState.snapshot = snapshot
         AppLog.info(LogCategory.NETWORK, "network $event", snapshot.describe())
         // Sockets bound to the previous network (or to a dead VPN tunnel) must
         // not be reused for the next send_receive.
