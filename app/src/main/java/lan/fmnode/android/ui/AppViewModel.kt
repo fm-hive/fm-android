@@ -1263,6 +1263,7 @@ class AppViewModel(
                             name = echo.name,
                             description = echo.description,
                             unread = counts[echo.name] ?: 0,
+                            subscribed = echo.subscribed,
                             serverId = echo.serverId,
                             rulesText = echo.rulesJson,
                         )

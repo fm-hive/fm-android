@@ -64,6 +64,7 @@ class NetworkSessionTest {
     private var lastControl: JsonObject? = null
     private var echoList: JsonElement = buildJsonArray {}
     private var sendReceiveResponse: JsonObject = emptySendReceive()
+    private var unsubscribeNotFound = false
     private var sendReceiveGate: java.util.concurrent.CountDownLatch? = null
     private val sendReceiveActive = java.util.concurrent.atomic.AtomicInteger()
     private val sendReceiveMaxActive = java.util.concurrent.atomic.AtomicInteger()
@@ -81,6 +82,7 @@ class NetworkSessionTest {
         db = Room.inMemoryDatabaseBuilder(context, ProfileDatabase::class.java)
             .allowMainThreadQueries()
             .build()
+        unsubscribeNotFound = false
         sendReceiveGate = null
         sendReceiveActive.set(0)
         sendReceiveMaxActive.set(0)
@@ -150,7 +152,15 @@ class NetworkSessionTest {
                         put("is_admin", true)
                         put("is_moderator", false)
                     }
-                    "subscribe_echo", "unsubscribe_echo" -> JsonObject(emptyMap())
+                    "unsubscribe_echo" -> {
+                        if (unsubscribeNotFound) {
+                            return MockResponse()
+                                .setResponseCode(404)
+                                .setBody("""{"error":"Subscription not found"}""")
+                        }
+                        JsonObject(emptyMap())
+                    }
+                    "subscribe_echo" -> JsonObject(emptyMap())
                     "client_synchronize" -> {
                         lastControl?.let { clientSyncRequests += it }
                         JsonObject(emptyMap())
@@ -597,6 +607,20 @@ class NetworkSessionTest {
         val data = lastControl!!["data"]!!.jsonObject
         assertEquals("General", data["echo_name"]!!.jsonPrimitive.content)
         assertEquals(":0:1", data["user_address"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun `unsubscribing an already missing subscription clears the local flag`() = runBlocking {
+        db.echoDao().upsertAll(
+            listOf(
+                EchoEntity("General", 1, "", "", subscribed = true, isLocal = false, lastReadTimestamp = 0),
+            ),
+        )
+        unsubscribeNotFound = true
+
+        session.setSubscribed("General", false)
+
+        assertEquals(false, db.echoDao().getByName("General")!!.subscribed)
     }
 
     @Test
