@@ -3,6 +3,8 @@ package lan.fmnode.android.network
 import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
+import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -62,6 +64,10 @@ class NetworkSessionTest {
     private var lastControl: JsonObject? = null
     private var echoList: JsonElement = buildJsonArray {}
     private var sendReceiveResponse: JsonObject = emptySendReceive()
+    private var unsubscribeNotFound = false
+    private var sendReceiveGate: java.util.concurrent.CountDownLatch? = null
+    private val sendReceiveActive = java.util.concurrent.atomic.AtomicInteger()
+    private val sendReceiveMaxActive = java.util.concurrent.atomic.AtomicInteger()
     private var otherAddress = ":0:2"
     private var voucherResponse: JsonElement = JsonPrimitive("voucher-code-1")
 
@@ -76,6 +82,10 @@ class NetworkSessionTest {
         db = Room.inMemoryDatabaseBuilder(context, ProfileDatabase::class.java)
             .allowMainThreadQueries()
             .build()
+        unsubscribeNotFound = false
+        sendReceiveGate = null
+        sendReceiveActive.set(0)
+        sendReceiveMaxActive.set(0)
         server = MockWebServer()
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse {
@@ -87,16 +97,23 @@ class NetworkSessionTest {
                 val response: JsonElement = when (name) {
                     "echoes" -> echoList
                     "send_receive" -> {
-                        lastSendReceiveControl = control
-                        val outgoing = data?.get("messages") as? JsonArray
-                        outgoing?.forEach { element ->
-                            (element as? JsonObject)?.let { sentMessages += it }
+                        val active = sendReceiveActive.incrementAndGet()
+                        sendReceiveMaxActive.updateAndGet { max -> maxOf(max, active) }
+                        try {
+                            sendReceiveGate?.await(10, java.util.concurrent.TimeUnit.SECONDS)
+                            lastSendReceiveControl = control
+                            val outgoing = data?.get("messages") as? JsonArray
+                            outgoing?.forEach { element ->
+                                (element as? JsonObject)?.let { sentMessages += it }
+                            }
+                            // A real node does not re-deliver the same pending
+                            // message in the response to a send: answer sends with
+                            // an empty list (also prevents a feedback loop when the
+                            // auto pubkey response itself is sent).
+                            if ((outgoing?.size ?: 0) > 0) emptySendReceive() else sendReceiveResponse
+                        } finally {
+                            sendReceiveActive.decrementAndGet()
                         }
-                        // A real node does not re-deliver the same pending
-                        // message in the response to a send: answer sends with
-                        // an empty list (also prevents a feedback loop when the
-                        // auto pubkey response itself is sent).
-                        if ((outgoing?.size ?: 0) > 0) emptySendReceive() else sendReceiveResponse
                     }
                     "policy" -> {
                         val data = control["data"] as? JsonObject
@@ -135,7 +152,15 @@ class NetworkSessionTest {
                         put("is_admin", true)
                         put("is_moderator", false)
                     }
-                    "subscribe_echo", "unsubscribe_echo" -> JsonObject(emptyMap())
+                    "unsubscribe_echo" -> {
+                        if (unsubscribeNotFound) {
+                            return MockResponse()
+                                .setResponseCode(404)
+                                .setBody("""{"error":"Subscription not found"}""")
+                        }
+                        JsonObject(emptyMap())
+                    }
+                    "subscribe_echo" -> JsonObject(emptyMap())
                     "client_synchronize" -> {
                         lastControl?.let { clientSyncRequests += it }
                         JsonObject(emptyMap())
@@ -232,6 +257,21 @@ class NetworkSessionTest {
                 CryptoService.x25519PublicKeyFromEd25519(userPublicKey),
             ),
         )
+    }
+
+    @Test
+    fun `concurrent sync calls do not run two send_receive requests`() = runBlocking {
+        sendReceiveGate = java.util.concurrent.CountDownLatch(1)
+        val first = async { session.sync() }
+        while (sendReceiveActive.get() == 0) delay(10)
+        val second = async { session.sync() }
+        delay(300)
+
+        assertEquals(1, sendReceiveMaxActive.get())
+        sendReceiveGate!!.countDown()
+        first.await()
+        second.await()
+        assertEquals(1, sendReceiveMaxActive.get())
     }
 
     @Test
@@ -567,6 +607,20 @@ class NetworkSessionTest {
         val data = lastControl!!["data"]!!.jsonObject
         assertEquals("General", data["echo_name"]!!.jsonPrimitive.content)
         assertEquals(":0:1", data["user_address"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun `unsubscribing an already missing subscription clears the local flag`() = runBlocking {
+        db.echoDao().upsertAll(
+            listOf(
+                EchoEntity("General", 1, "", "", subscribed = true, isLocal = false, lastReadTimestamp = 0),
+            ),
+        )
+        unsubscribeNotFound = true
+
+        session.setSubscribed("General", false)
+
+        assertEquals(false, db.echoDao().getByName("General")!!.subscribed)
     }
 
     @Test

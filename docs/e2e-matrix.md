@@ -45,7 +45,7 @@
 | `appeal.md` | admin appeal dialog with punishment bundle | `NetworkSessionTest`, `ModerationMappingTest` | auto/manual |
 | `remote_subscribe.md` | request from the echo browser | `NetworkSessionTest` | auto/manual |
 | `announcements.md` | `announcement` compose toggle when rules allow | `NetworkSessionTest`, `EchoPermissionsTest` | auto |
-| `polling.md` | node-side; client uses the periodic `send_receive` loop | — | node |
+| `polling.md` | `FmApiClient.postSendReceive` follows `connect_id`; fallback to a long request | `FmApiClientPollingTest` | auto |
 | `echomail_router.md` | node-side backbone | — | node |
 | `routing.md`, `slowdown.md` | node-side | — | node |
 | `files_transport.md` | node transport | — | node |
@@ -458,3 +458,23 @@ adb shell am get-config | head -1   # ...-ru-rRU-...
 - Явные OkHttp timeout: connect 30 s, read/write 60 s, call 90 s.
 - Проверка: `AppLogTest`, `FmApiClientLoggingTest`, ручной прогон на эмуляторе
   (экран Logs показывает ошибку refresh и HTTP 400).
+
+## Сеть, VPN и прокси (#50)
+
+- Settings → «Сеть»: режим **Системный / Без прокси / Вручную**, для ручного —
+  HTTP или SOCKS, host и port. Настройка глобальная для приложения и
+  применяется сразу; пул соединений OkHttp сбрасывается.
+- **Системный** режим берёт HTTP-прокси активной сети через
+  `ConnectivityManager` (`LinkProperties.httpProxy` / `defaultProxy`). Обычный
+  VPN в режиме TUN прозрачен и настройки не требует.
+- `NetworkMonitor` логирует транспорт (Wi-Fi/mobile/VPN), прокси и очищает
+  пул соединений при смене сети; при появлении новой сети зависший sync
+  отменяется и запускается заново.
+- `send_receive` идёт через клиент с увеличенным таймаутом (read 180 с,
+  call 240 с) и поддерживает polling: ответ `{status:"in progress",
+  connect_id}` опрашивается короткими запросами (1,5 с, до 60 с).
+- Один sync на сессию: фоновый цикл и кнопка Refresh больше не запускают
+  параллельные `send_receive`. Идемпотентные запросы повторяются до двух раз
+  при обрыве/таймауте; отправка сообщений автоматически не повторяется.
+- Проверка: `ProxySettingsTest`, `FmApiClientPollingTest`,
+  `FmApiClientLoggingTest` (retry), `NetworkSessionTest` (сериализация sync).

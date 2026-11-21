@@ -3,6 +3,7 @@ package lan.fmnode.android.ui
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -32,11 +33,17 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import lan.fmnode.android.BuildConfig
 import lan.fmnode.android.network.FmApiException
+import lan.fmnode.android.network.FmHttp
 import lan.fmnode.android.network.Invite
 import lan.fmnode.android.network.InviteParser
 import lan.fmnode.android.network.NetworkManager
+import lan.fmnode.android.network.NetworkMonitor
+import lan.fmnode.android.network.NetworkPreferences
 import lan.fmnode.android.network.NetworkSession
 import lan.fmnode.android.network.PolicyInfo
+import lan.fmnode.android.network.ProxyKind
+import lan.fmnode.android.network.ProxyMode
+import lan.fmnode.android.network.ProxySettings
 import lan.fmnode.android.network.RateLimitUsage
 import lan.fmnode.android.network.RulesId
 import lan.fmnode.android.session.Session
@@ -582,6 +589,8 @@ data class UiState(
     val showTearline: Boolean = false,
     /** List protocol/service messages in the echo feed (#46). */
     val showServiceMessages: Boolean = false,
+    /** Global network/proxy settings (#50). */
+    val proxy: ProxySettingsUi = ProxySettingsUi(),
     /** Daily rate-limit usage reported by the node (address-wide). */
     val rateLimits: Map<String, RateLimitUsage> = emptyMap(),
     /** fm-app parity: allow sending over the daily rate limit. */
@@ -756,6 +765,10 @@ class AppViewModel(
     private val manager: NetworkManager,
     private val session: Session,
     private val passwordStore: PasswordStore = NoopPasswordStore,
+    /** Global proxy settings; null in unit tests that do not need them. */
+    private val networkPreferences: NetworkPreferences? = null,
+    /** Watches VPN/proxy switches; null in unit tests. */
+    private val networkMonitor: NetworkMonitor? = null,
 ) : ViewModel() {
     private val prettyJson = Json { prettyPrint = true }
     private val messageJson = Json { ignoreUnknownKeys = true }
@@ -772,6 +785,8 @@ class AppViewModel(
     private var networkSession: NetworkSession? = null
     private var flowsJob: Job? = null
     private var syncJob: Job? = null
+    /** The sync currently in flight for the active session (#50). */
+    private var activeSyncJob: Job? = null
 
     /** Every unlocked network (#15): echo groups are read from all of them. */
     private val sessions = linkedMapOf<String, NetworkSession>()
@@ -787,6 +802,25 @@ class AppViewModel(
                 screen = if (hasVault) AppScreen.Unlock else AppScreen.Networks,
                 autoUnlocking = hasVault,
             )
+        }
+        networkPreferences?.let { preferences ->
+            _state.update {
+                it.copy(proxy = preferences.current.toUi(preferences.systemProxyLabel()))
+            }
+        }
+        networkMonitor?.let { monitor ->
+            viewModelScope.launch {
+                monitor.snapshots.collect { snapshot ->
+                    val opened = networkSession ?: return@collect
+                    if (!snapshot.available) return@collect
+                    AppLog.info(
+                        LogCategory.APP,
+                        "network changed, resyncing",
+                        snapshot.describe(),
+                    )
+                    launchSync(opened, force = true)
+                }
+            }
         }
         viewModelScope.launch {
             manager.profiles.collect { profiles ->
@@ -1092,7 +1126,7 @@ class AppViewModel(
                     }.getOrDefault(false),
                 )
             }
-            syncOnce(opened)
+            launchSync(opened)
             startSyncLoop(opened)
             _state.update { it.copy(screen = AppScreen.Echoes) }
         } catch (e: Exception) {
@@ -1229,6 +1263,7 @@ class AppViewModel(
                             name = echo.name,
                             description = echo.description,
                             unread = counts[echo.name] ?: 0,
+                            subscribed = echo.subscribed,
                             serverId = echo.serverId,
                             rulesText = echo.rulesJson,
                         )
@@ -1360,6 +1395,8 @@ class AppViewModel(
     private fun closeSession() {
         syncJob?.cancel()
         syncJob = null
+        activeSyncJob?.cancel()
+        activeSyncJob = null
         flowsJob?.cancel()
         flowsJob = null
         groupJobs.values.forEach { it.cancel() }
@@ -1368,6 +1405,22 @@ class AppViewModel(
         groupEchoes.clear()
         networkSession = null
         _state.update { it.copy(networks = emptyList()) }
+    }
+
+    /**
+     * Starts a sync of the active network. Background ticks skip while one is
+     * already running; an explicit refresh or a network/VPN change cancels the
+     * stale request and starts a fresh one (#50).
+     */
+    private fun launchSync(opened: NetworkSession, force: Boolean = false) {
+        if (activeSyncJob?.isActive == true) {
+            if (!force) {
+                AppLog.debug(LogCategory.APP, "sync already running, skip")
+                return
+            }
+            activeSyncJob?.cancel()
+        }
+        activeSyncJob = viewModelScope.launch { syncOnce(opened) }
     }
 
     /**
@@ -1382,7 +1435,7 @@ class AppViewModel(
                 delay(30_000)
                 tick++
                 if (networkSession?.profile?.id == opened.profile.id || networkSession == opened) {
-                    syncOnce(opened)
+                    launchSync(opened)
                 }
                 if (tick % 2 == 0) syncOtherSessions()
             }
@@ -1442,6 +1495,14 @@ class AppViewModel(
             }
             revalidateCompose()
             revalidateNetmailCompose()
+        } catch (e: CancellationException) {
+            AppLog.debug(
+                LogCategory.APP,
+                "refresh cancelled after ${System.currentTimeMillis() - startedAt}ms",
+                "network or manual refresh replaced the request",
+            )
+            _state.update { it.copy(syncing = false) }
+            throw e
         } catch (e: Exception) {
             AppLog.error(
                 LogCategory.APP,
@@ -1569,9 +1630,71 @@ class AppViewModel(
         viewModelScope.launch {
             val opened = networkSession ?: return@launch
             runCatching { opened.refreshEchoes() }
-            syncOnce(opened)
+            launchSync(opened, force = true)
         }
     }
+
+    // ------------------------------------------------------- network settings
+
+    fun setProxyMode(mode: ProxyMode) = _state.update {
+        it.copy(proxy = it.proxy.copy(mode = mode, error = null))
+    }
+
+    fun setProxyKind(kind: ProxyKind) = _state.update {
+        it.copy(proxy = it.proxy.copy(kind = kind, error = null))
+    }
+
+    fun setProxyHost(value: String) = _state.update {
+        it.copy(proxy = it.proxy.copy(host = value, error = null))
+    }
+
+    fun setProxyPort(value: String) = _state.update {
+        // Keep the draft numeric; an empty field is allowed until Save (#50).
+        it.copy(proxy = it.proxy.copy(port = value.filter(Char::isDigit), error = null))
+    }
+
+    /** Validates and applies the global proxy settings immediately. */
+    fun saveProxySettings() {
+        val ui = _state.value.proxy
+        val port = ui.port.trim().toIntOrNull()
+        if (ui.mode == ProxyMode.MANUAL) {
+            when {
+                ui.host.isBlank() -> {
+                    _state.update { it.copy(proxy = it.proxy.copy(error = ProxyFormError.HOST)) }
+                    return
+                }
+                port == null || port !in 1..65535 -> {
+                    _state.update { it.copy(proxy = it.proxy.copy(error = ProxyFormError.PORT)) }
+                    return
+                }
+            }
+        }
+        val settings = ProxySettings(
+            mode = ui.mode,
+            kind = ui.kind,
+            host = ui.host.trim(),
+            port = port ?: 0,
+        )
+        if (networkPreferences != null && !networkPreferences.save(settings)) {
+            _state.update { it.copy(proxy = it.proxy.copy(error = ProxyFormError.HOST)) }
+            return
+        }
+        // A changed proxy invalidates every pooled connection.
+        FmHttp.evictConnections()
+        _state.update {
+            it.copy(
+                proxy = settings.toUi(networkPreferences?.systemProxyLabel().orEmpty()),
+            )
+        }
+    }
+
+    private fun ProxySettings.toUi(systemProxy: String) = ProxySettingsUi(
+        mode = mode,
+        kind = kind,
+        host = host,
+        port = if (port in 1..65535) port.toString() else "",
+        systemProxy = systemProxy,
+    )
 
     fun openNetworks() {
         closeSession()
@@ -4761,11 +4884,19 @@ class AppViewModel(
             manager: NetworkManager,
             session: Session,
             passwordStore: PasswordStore = NoopPasswordStore,
+            networkPreferences: NetworkPreferences? = null,
+            networkMonitor: NetworkMonitor? = null,
         ): ViewModelProvider.Factory =
             object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                    AppViewModel(manager, session, passwordStore) as T
+                    AppViewModel(
+                        manager,
+                        session,
+                        passwordStore,
+                        networkPreferences,
+                        networkMonitor,
+                    ) as T
             }
     }
 }

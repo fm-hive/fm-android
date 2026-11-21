@@ -99,6 +99,11 @@ data class FeedSettingsCallbacks(
     val onShowServiceMessages: (Boolean) -> Unit = {},
     /** Opens the diagnostics/log screen from Settings. */
     val onOpenLogs: () -> Unit = {},
+    /**
+     * Global network/proxy settings (#50). Nested here to keep the already
+     * large [FmRoot] signature below the JVM method-parameter limit.
+     */
+    val networkSettings: NetworkSettingsCallbacks = NetworkSettingsCallbacks(),
 )
 
 /**
@@ -866,6 +871,7 @@ fun FmRoot(
             onOpenOutbox = onOpenOutbox,
             onOpenPolicyViewer = onOpenPolicyViewer,
             onOpenLogs = feedSettings.onOpenLogs,
+            networkSettings = feedSettings.networkSettings,
             onOpenDisplayName = onOpenDisplayName,
             tagline = state.tagline,
             showTearline = state.showTearline,

@@ -29,7 +29,9 @@ import lan.fmnode.android.storage.Vault
 @OptIn(ExperimentalCoroutinesApi::class)
 class NetworkManager(
     private val vault: Vault,
-    private val apiFactory: (String) -> FmApiClient = { FmApiClient(it) },
+    private val apiFactory: (String) -> FmApiClient = {
+        FmApiClient(it, FmHttp.client, FmHttp.sendReceiveClient)
+    },
 ) {
     private val dbFlow = MutableStateFlow(vault.appDatabaseOrNull())
 

@@ -1,6 +1,8 @@
 package lan.fmnode.android.network
 
 import androidx.room.withTransaction
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -54,6 +56,12 @@ class NetworkSession(
     /** Encrypted client-sync append entries waiting for the next request. */
     private val pendingClientAppends = mutableListOf<Pair<String, String>>()
     private var clientAppendsLoaded = false
+    /**
+     * One sync at a time: the 30-second loop and the Refresh button used to
+     * start concurrent send_receive requests, which is especially bad on a
+     * slow VPN link (#50).
+     */
+    private val syncMutex = Mutex()
 
     /** Daily rate-limit usage of this address, returned by the node. */
     var rateLimitUsage: Map<String, RateLimitUsage> = emptyMap()
@@ -177,7 +185,16 @@ class NetworkSession(
             put("user_address", profile.address)
         }
         if (!subscribed) {
-            api.post("unsubscribe_echo", body.toString(), auth)
+            try {
+                api.post("unsubscribe_echo", body.toString(), auth)
+            } catch (e: FmApiException) {
+                // A node that already has no subscription is the same result
+                // for the user. Keep the local flag in sync instead of leaving
+                // the echo in the sidebar (#388).
+                val notFound = e.status == 404 ||
+                    e.message.orEmpty().contains("Subscription not found")
+                if (!notFound) throw e
+            }
             database.echoDao().setSubscribed(echoName, false)
             return
         }
@@ -321,7 +338,9 @@ class NetworkSession(
     // -------------------------------------------------------------------- sync
 
     /** Pulls new messages, sends queued outbox entries, confirms delivered packets. */
-    suspend fun sync(): SyncOutcome {
+    suspend fun sync(): SyncOutcome = syncMutex.withLock { syncLocked() }
+
+    private suspend fun syncLocked(): SyncOutcome {
         val startedAt = System.currentTimeMillis()
         AppLog.debug(LogCategory.APP, "sync start", profile.address)
         flushOutbox()
@@ -362,8 +381,13 @@ class NetworkSession(
                 },
             )
         }
+        // An idle sync only ACKs/reads and is safe to retry; appends are not.
         val response = try {
-            api.post("send_receive", request.toString(), auth)
+            api.postSendReceive(
+                request.toString(),
+                auth,
+                retryable = clientAppends.isEmpty(),
+            )
         } catch (e: Exception) {
             // Keep the ACKs and appends for the next successful poll.
             restoreClientAcks(clientAcks)
@@ -1644,7 +1668,9 @@ class NetworkSession(
         val body = buildJsonObject {
             put("messages", buildJsonArray { messages.forEach { add(it) } })
         }
-        val response = api.post("send_receive", body.toString(), auth)
+        // Sending messages must not be retried automatically: the request may
+        // have reached the node even when the response was lost (#50).
+        val response = api.postSendReceive(body.toString(), auth, retryable = false)
         if (response is JsonObject) {
             rateLimitUsage = parseRateLimits(response["rate_limit"])
             // Persist protocol/message data before acknowledging packet ids (#350):

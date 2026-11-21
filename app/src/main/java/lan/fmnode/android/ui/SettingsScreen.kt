@@ -14,9 +14,11 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -40,7 +42,33 @@ import androidx.compose.foundation.Image
 import lan.fmnode.android.R
 import lan.fmnode.android.crypto.Encoding
 import lan.fmnode.android.network.NetworkSession
+import lan.fmnode.android.network.ProxyKind
+import lan.fmnode.android.network.ProxyMode
 import lan.fmnode.android.storage.ProfileEntity
+
+/** Validation error of the manual proxy fields. */
+enum class ProxyFormError { HOST, PORT }
+
+/** Draft of the global proxy settings shown in Settings → Network (#50). */
+data class ProxySettingsUi(
+    val mode: ProxyMode = ProxyMode.SYSTEM,
+    val kind: ProxyKind = ProxyKind.HTTP,
+    val host: String = "",
+    val port: String = "",
+    /** Proxy currently configured in Android, "host:port" or empty. */
+    val systemProxy: String = "",
+    val error: ProxyFormError? = null,
+)
+
+/** Callbacks of the network settings card, grouped to keep FmRoot short. */
+data class NetworkSettingsCallbacks(
+    val proxy: ProxySettingsUi = ProxySettingsUi(),
+    val onMode: (ProxyMode) -> Unit = {},
+    val onKind: (ProxyKind) -> Unit = {},
+    val onHost: (String) -> Unit = {},
+    val onPort: (String) -> Unit = {},
+    val onSave: () -> Unit = {},
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -93,6 +121,7 @@ fun SettingsScreen(
     onOpenOutbox: () -> Unit,
     onOpenPolicyViewer: () -> Unit,
     onOpenLogs: () -> Unit = {},
+    networkSettings: NetworkSettingsCallbacks = NetworkSettingsCallbacks(),
     onLock: () -> Unit,
     onLogout: () -> Unit,
 ) {
@@ -243,6 +272,10 @@ fun SettingsScreen(
                     }
                 }
             }
+            NetworkSettingsCard(
+                state = networkSettings.proxy,
+                callbacks = networkSettings,
+            )
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.fillMaxWidth().padding(16.dp)) {
                     Text(
@@ -544,6 +577,113 @@ private fun ExportPasswordDialog(
             TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
         },
     )
+}
+
+@Composable
+private fun NetworkSettingsCard(
+    state: ProxySettingsUi,
+    callbacks: NetworkSettingsCallbacks,
+) {
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.fillMaxWidth().padding(16.dp)) {
+            Text(
+                text = stringResource(R.string.network_proxy_title),
+                style = MaterialTheme.typography.labelLarge,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = stringResource(R.string.network_proxy_hint),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(8.dp))
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+            ) {
+                FilterChip(
+                    selected = state.mode == ProxyMode.SYSTEM,
+                    onClick = { callbacks.onMode(ProxyMode.SYSTEM) },
+                    label = { Text(stringResource(R.string.network_proxy_system)) },
+                )
+                FilterChip(
+                    selected = state.mode == ProxyMode.DIRECT,
+                    onClick = { callbacks.onMode(ProxyMode.DIRECT) },
+                    label = { Text(stringResource(R.string.network_proxy_direct)) },
+                )
+                FilterChip(
+                    selected = state.mode == ProxyMode.MANUAL,
+                    onClick = { callbacks.onMode(ProxyMode.MANUAL) },
+                    label = { Text(stringResource(R.string.network_proxy_manual)) },
+                )
+            }
+            when (state.mode) {
+                ProxyMode.SYSTEM -> Text(
+                    text = stringResource(
+                        R.string.network_proxy_system_current,
+                        state.systemProxy.ifBlank {
+                            stringResource(R.string.network_proxy_system_none)
+                        },
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                ProxyMode.DIRECT -> Text(
+                    text = stringResource(R.string.network_proxy_direct_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                ProxyMode.MANUAL -> {
+                    Spacer(Modifier.height(8.dp))
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                    ) {
+                        FilterChip(
+                            selected = state.kind == ProxyKind.HTTP,
+                            onClick = { callbacks.onKind(ProxyKind.HTTP) },
+                            label = { Text(stringResource(R.string.network_proxy_http)) },
+                        )
+                        FilterChip(
+                            selected = state.kind == ProxyKind.SOCKS,
+                            onClick = { callbacks.onKind(ProxyKind.SOCKS) },
+                            label = { Text(stringResource(R.string.network_proxy_socks)) },
+                        )
+                    }
+                    OutlinedTextField(
+                        value = state.host,
+                        onValueChange = callbacks.onHost,
+                        label = { Text(stringResource(R.string.network_proxy_host)) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = state.port,
+                        onValueChange = callbacks.onPort,
+                        label = { Text(stringResource(R.string.network_proxy_port)) },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    state.error?.let {
+                        Text(
+                            text = stringResource(
+                                when (it) {
+                                    ProxyFormError.HOST -> R.string.network_proxy_error_host
+                                    ProxyFormError.PORT -> R.string.network_proxy_error_port
+                                },
+                            ),
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            Button(onClick = callbacks.onSave, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.network_proxy_save))
+            }
+        }
+    }
 }
 
 @Composable
