@@ -177,7 +177,16 @@ class NetworkSession(
             put("user_address", profile.address)
         }
         if (!subscribed) {
-            api.post("unsubscribe_echo", body.toString(), auth)
+            try {
+                api.post("unsubscribe_echo", body.toString(), auth)
+            } catch (e: FmApiException) {
+                // A node that already has no subscription is the same result
+                // for the user. Keep the local flag in sync instead of leaving
+                // the echo in the sidebar (#388).
+                val notFound = e.status == 404 ||
+                    e.message.orEmpty().contains("Subscription not found")
+                if (!notFound) throw e
+            }
             database.echoDao().setSubscribed(echoName, false)
             return
         }
