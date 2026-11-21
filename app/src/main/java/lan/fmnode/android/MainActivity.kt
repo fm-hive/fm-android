@@ -17,6 +17,7 @@ import lan.fmnode.android.ui.AppViewModel
 import lan.fmnode.android.ui.EchoActionsCallbacks
 import lan.fmnode.android.ui.FeedSettingsCallbacks
 import lan.fmnode.android.ui.FmRoot
+import lan.fmnode.android.ui.NetworkSettingsCallbacks
 import lan.fmnode.android.ui.ScanPurpose
 import lan.fmnode.android.ui.theme.FmTheme
 
@@ -40,6 +41,8 @@ class MainActivity : ComponentActivity() {
                         container.networkManager,
                         container.session,
                         container.passwordStore,
+                        container.networkPreferences,
+                        container.networkMonitor,
                     ),
                 )
                 val state by viewModel.state.collectAsStateWithLifecycle()
@@ -178,6 +181,14 @@ class MainActivity : ComponentActivity() {
                         onShowTearline = viewModel::setShowTearline,
                         onShowServiceMessages = viewModel::setShowServiceMessages,
                         onOpenLogs = viewModel::openLogs,
+                        networkSettings = NetworkSettingsCallbacks(
+                            proxy = state.proxy,
+                            onMode = viewModel::setProxyMode,
+                            onKind = viewModel::setProxyKind,
+                            onHost = viewModel::setProxyHost,
+                            onPort = viewModel::setProxyPort,
+                            onSave = viewModel::saveProxySettings,
+                        ),
                     ),
                     echoActions = EchoActionsCallbacks(
                         onDeleteEchoGroup = viewModel::deleteEchoGroup,

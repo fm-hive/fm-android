@@ -3,6 +3,8 @@ package lan.fmnode.android.network
 import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
+import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -62,6 +64,9 @@ class NetworkSessionTest {
     private var lastControl: JsonObject? = null
     private var echoList: JsonElement = buildJsonArray {}
     private var sendReceiveResponse: JsonObject = emptySendReceive()
+    private var sendReceiveGate: java.util.concurrent.CountDownLatch? = null
+    private val sendReceiveActive = java.util.concurrent.atomic.AtomicInteger()
+    private val sendReceiveMaxActive = java.util.concurrent.atomic.AtomicInteger()
     private var otherAddress = ":0:2"
     private var voucherResponse: JsonElement = JsonPrimitive("voucher-code-1")
 
@@ -76,6 +81,9 @@ class NetworkSessionTest {
         db = Room.inMemoryDatabaseBuilder(context, ProfileDatabase::class.java)
             .allowMainThreadQueries()
             .build()
+        sendReceiveGate = null
+        sendReceiveActive.set(0)
+        sendReceiveMaxActive.set(0)
         server = MockWebServer()
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse {
@@ -87,16 +95,23 @@ class NetworkSessionTest {
                 val response: JsonElement = when (name) {
                     "echoes" -> echoList
                     "send_receive" -> {
-                        lastSendReceiveControl = control
-                        val outgoing = data?.get("messages") as? JsonArray
-                        outgoing?.forEach { element ->
-                            (element as? JsonObject)?.let { sentMessages += it }
+                        val active = sendReceiveActive.incrementAndGet()
+                        sendReceiveMaxActive.updateAndGet { max -> maxOf(max, active) }
+                        try {
+                            sendReceiveGate?.await(10, java.util.concurrent.TimeUnit.SECONDS)
+                            lastSendReceiveControl = control
+                            val outgoing = data?.get("messages") as? JsonArray
+                            outgoing?.forEach { element ->
+                                (element as? JsonObject)?.let { sentMessages += it }
+                            }
+                            // A real node does not re-deliver the same pending
+                            // message in the response to a send: answer sends with
+                            // an empty list (also prevents a feedback loop when the
+                            // auto pubkey response itself is sent).
+                            if ((outgoing?.size ?: 0) > 0) emptySendReceive() else sendReceiveResponse
+                        } finally {
+                            sendReceiveActive.decrementAndGet()
                         }
-                        // A real node does not re-deliver the same pending
-                        // message in the response to a send: answer sends with
-                        // an empty list (also prevents a feedback loop when the
-                        // auto pubkey response itself is sent).
-                        if ((outgoing?.size ?: 0) > 0) emptySendReceive() else sendReceiveResponse
                     }
                     "policy" -> {
                         val data = control["data"] as? JsonObject
@@ -232,6 +247,21 @@ class NetworkSessionTest {
                 CryptoService.x25519PublicKeyFromEd25519(userPublicKey),
             ),
         )
+    }
+
+    @Test
+    fun `concurrent sync calls do not run two send_receive requests`() = runBlocking {
+        sendReceiveGate = java.util.concurrent.CountDownLatch(1)
+        val first = async { session.sync() }
+        while (sendReceiveActive.get() == 0) delay(10)
+        val second = async { session.sync() }
+        delay(300)
+
+        assertEquals(1, sendReceiveMaxActive.get())
+        sendReceiveGate!!.countDown()
+        first.await()
+        second.await()
+        assertEquals(1, sendReceiveMaxActive.get())
     }
 
     @Test

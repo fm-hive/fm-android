@@ -8,6 +8,7 @@ import lan.fmnode.android.log.LogCategory
 import lan.fmnode.android.log.LogLevel
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.SocketPolicy
 import org.junit.After
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -52,6 +53,26 @@ class FmApiClientLoggingTest {
         assertTrue(entries.any {
             it.category == LogCategory.NETWORK && it.message.contains("← identity HTTP 200")
         })
+    }
+
+    @Test
+    fun `transient network failure is retried for an idempotent request`() = runBlocking {
+        server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AT_START))
+        server.enqueue(
+            MockResponse().setBody(
+                """{"type":"control","data":{"request":"identity","data":{}}}""",
+            ),
+        )
+        val client = FmApiClient(server.url("/api").toString())
+
+        client.post("identity")
+
+        assertTrue(server.requestCount >= 2)
+        assertTrue(
+            AppLog.entries.value.any {
+                it.category == LogCategory.NETWORK && it.message == "retry identity"
+            },
+        )
     }
 
     @Test
