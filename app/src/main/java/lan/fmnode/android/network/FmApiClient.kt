@@ -1,5 +1,6 @@
 package lan.fmnode.android.network
 
+import android.os.NetworkOnMainThreadException
 import java.io.IOException
 import java.net.ConnectException
 import java.net.SocketException
@@ -9,8 +10,10 @@ import javax.net.ssl.SSLException
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -175,6 +178,16 @@ class FmApiClient(
         dataJson: String?,
         auth: ApiKeys?,
         retryable: Boolean,
+    ): JsonElement = withContext(Dispatchers.IO) {
+        postWithIo(client, request, dataJson, auth, retryable)
+    }
+
+    private suspend fun postWithIo(
+        client: OkHttpClient,
+        request: String,
+        dataJson: String?,
+        auth: ApiKeys?,
+        retryable: Boolean,
     ): JsonElement {
         val body = buildEnvelope(request, dataJson, auth)
         val httpRequest = Request.Builder()
@@ -188,7 +201,12 @@ class FmApiClient(
             AppLog.debug(
                 LogCategory.NETWORK,
                 "→ $request $baseUrl",
-                "request=${body.length}B" + if (attempt > 0) " retry=$attempt" else "",
+                buildString {
+                    append("request=${body.length}B")
+                    append(" thread=${Thread.currentThread().name}")
+                    if (attempt > 0) append(" retry=$attempt")
+                    NetworkState.snapshot?.let { append(" network=${it.describe()}") }
+                },
             )
             try {
                 val text = execute(client, httpRequest).use { response ->
@@ -197,7 +215,7 @@ class FmApiClient(
                     AppLog.debug(
                         LogCategory.NETWORK,
                         "← $request HTTP ${response.code} ${elapsed}ms",
-                        "response=${text.length}B",
+                        "response=${text.length}B thread=${Thread.currentThread().name}",
                     )
                     if (!response.isSuccessful) {
                         val parsed = runCatching { json.parseToJsonElement(text).jsonObject }.getOrNull()
@@ -222,7 +240,16 @@ class FmApiClient(
                 AppLog.error(
                     LogCategory.NETWORK,
                     "✕ $request ${elapsed}ms ${e.javaClass.simpleName}",
-                    e.message.orEmpty(),
+                    buildString {
+                        append(e.message.orEmpty())
+                        // Network timeouts are self-explanatory; unexpected
+                        // failures need the stack (for example a body read on
+                        // the main thread) (#50).
+                        if (e is NetworkOnMainThreadException || !e.isTransientNetworkError()) {
+                            if (isNotEmpty()) append('\n')
+                            append(e.stackTraceToString())
+                        }
+                    },
                 )
                 if (!retryable || attempt >= MAX_RETRIES || !e.isTransientNetworkError()) throw e
             }

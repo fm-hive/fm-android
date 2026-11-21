@@ -39,6 +39,8 @@ import lan.fmnode.android.network.InviteParser
 import lan.fmnode.android.network.NetworkManager
 import lan.fmnode.android.network.NetworkMonitor
 import lan.fmnode.android.network.NetworkPreferences
+import lan.fmnode.android.network.NetworkSnapshot
+import lan.fmnode.android.network.NetworkState
 import lan.fmnode.android.network.NetworkSession
 import lan.fmnode.android.network.PolicyInfo
 import lan.fmnode.android.network.ProxyKind
@@ -591,6 +593,8 @@ data class UiState(
     val showServiceMessages: Boolean = false,
     /** Global network/proxy settings (#50). */
     val proxy: ProxySettingsUi = ProxySettingsUi(),
+    /** Current Android network/VPN state (#50). */
+    val network: NetworkSnapshot? = null,
     /** Daily rate-limit usage reported by the node (address-wide). */
     val rateLimits: Map<String, RateLimitUsage> = emptyMap(),
     /** fm-app parity: allow sending over the daily rate limit. */
@@ -805,12 +809,16 @@ class AppViewModel(
         }
         networkPreferences?.let { preferences ->
             _state.update {
-                it.copy(proxy = preferences.current.toUi(preferences.systemProxyLabel()))
+                it.copy(
+                    proxy = preferences.current.toUi(preferences.systemProxyLabel()),
+                    network = NetworkState.snapshot,
+                )
             }
         }
         networkMonitor?.let { monitor ->
             viewModelScope.launch {
                 monitor.snapshots.collect { snapshot ->
+                    _state.update { it.copy(network = snapshot) }
                     val opened = networkSession ?: return@collect
                     if (!snapshot.available) return@collect
                     AppLog.info(

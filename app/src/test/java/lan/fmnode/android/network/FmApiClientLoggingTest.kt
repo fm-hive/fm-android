@@ -1,6 +1,7 @@
 package lan.fmnode.android.network
 
 import android.content.Context
+import android.os.StrictMode
 import androidx.test.core.app.ApplicationProvider
 import kotlinx.coroutines.runBlocking
 import lan.fmnode.android.log.AppLog
@@ -53,6 +54,27 @@ class FmApiClientLoggingTest {
         assertTrue(entries.any {
             it.category == LogCategory.NETWORK && it.message.contains("← identity HTTP 200")
         })
+    }
+
+    @Test
+    fun `response body is read off the main thread`() {
+        runBlocking {
+            val previous = StrictMode.getThreadPolicy()
+            StrictMode.setThreadPolicy(
+                StrictMode.ThreadPolicy.Builder().detectNetwork().penaltyDeath().build(),
+            )
+            try {
+                server.enqueue(
+                    MockResponse().setBody(
+                        """{"type":"control","data":{"request":"identity","data":{}}}""",
+                    ),
+                )
+                val client = FmApiClient(server.url("/api").toString())
+                client.post("identity")
+            } finally {
+                StrictMode.setThreadPolicy(previous)
+            }
+        }
     }
 
     @Test

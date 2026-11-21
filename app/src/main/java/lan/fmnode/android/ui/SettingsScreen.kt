@@ -42,6 +42,7 @@ import androidx.compose.foundation.Image
 import lan.fmnode.android.R
 import lan.fmnode.android.crypto.Encoding
 import lan.fmnode.android.network.NetworkSession
+import lan.fmnode.android.network.NetworkSnapshot
 import lan.fmnode.android.network.ProxyKind
 import lan.fmnode.android.network.ProxyMode
 import lan.fmnode.android.storage.ProfileEntity
@@ -63,6 +64,8 @@ data class ProxySettingsUi(
 /** Callbacks of the network settings card, grouped to keep FmRoot short. */
 data class NetworkSettingsCallbacks(
     val proxy: ProxySettingsUi = ProxySettingsUi(),
+    /** Current Android network/VPN state; null until the first callback. */
+    val network: NetworkSnapshot? = null,
     val onMode: (ProxyMode) -> Unit = {},
     val onKind: (ProxyKind) -> Unit = {},
     val onHost: (String) -> Unit = {},
@@ -596,6 +599,36 @@ private fun NetworkSettingsCard(
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            val network = callbacks.network
+            if (network == null) {
+                Text(
+                    text = stringResource(R.string.network_state_unknown),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                Text(
+                    text = stringResource(
+                        if (network.vpn) R.string.network_vpn_active else R.string.network_vpn_inactive,
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (network.vpn) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                )
+                if (network.transports.isNotEmpty()) {
+                    Text(
+                        text = stringResource(
+                            R.string.network_transport,
+                            network.transports.joinToString(", "),
+                        ),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
             Spacer(Modifier.height(8.dp))
             Row(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
